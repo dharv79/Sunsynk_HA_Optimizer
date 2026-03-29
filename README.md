@@ -203,11 +203,11 @@ lovelace:
 
 Replace `<entry_id>` with the generated file name shown in the notification if needed.
 
-## Step 5: Reload YAML / Lovelace and use the dashboard
+## Step 5: Restart HA after updating `configuration.yaml`
 
-After saving `configuration.yaml`, apply the change in Home Assistant.
+Restart HA again after saving `configuration.yaml`.
 
-Then open the dashboard from the sidebar.
+Once back up open the dashboard from the sidebar.
 
 ## Updating the dashboard
 
