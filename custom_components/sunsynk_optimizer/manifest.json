@@ -1,0 +1,15 @@
+{
+  "domain": "sunsynk_optimizer",
+  "name": "Sunsynk Optimizer",
+  "version": "1.0.0",
+  "documentation": "https://github.com/dharv79/HA_Sunsynk_Flux",
+  "issue_tracker": "https://github.com/dharv79/HA_Sunsynk_Flux/issues",
+  "dependencies": [],
+  "codeowners": [
+    "@dharv79"
+  ],
+  "config_flow": true,
+  "single_config_entry": true,
+  "iot_class": "cloud_polling",
+  "requirements": []
+}

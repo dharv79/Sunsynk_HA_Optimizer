@@ -1,0 +1,68 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Sunsynk Optimizer",
+        "description": "Configure the Sunsynk IDs and related entities/services.",
+        "data": {
+          "username": "Sunsynk username",
+          "password": "Sunsynk password",
+          "plant_id": "Plant ID (used for Sunsynk API writes)",
+          "inverter_serial": "Inverter serial (used for SolarSynkV3 sensor entity IDs)",
+          "weather_entity": "Weather entity",
+          "solar_forecast_sensor": "Forecast.Solar production sensor",
+          "notify_service": "Notify service",
+          "notify_target": "Notify target (optional)",
+          "operation_mode": "Operation mode",
+          "currency": "Currency",
+          "invest": "Invest",
+          "export_disable_threshold": "Evening export disable threshold (W)",
+          "default_full_charge_day": "Default full charge day"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not log in to Sunsynk.",
+      "battery_soc_not_found": "Battery SOC entity was not found.",
+      "grid_pac_not_found": "Grid PAC entity was not found.",
+      "entity_not_found": "Entity was not found.",
+      "invalid_service": "Service must be in domain.service format.",
+      "service_not_found": "Service was not found."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "General settings",
+        "description": "Update the Sunsynk IDs and related entities/services.",
+        "data": {
+          "username": "Sunsynk username",
+          "password": "Sunsynk password",
+          "plant_id": "Plant ID (used for Sunsynk API writes)",
+          "inverter_serial": "Inverter serial (used for SolarSynkV3 sensor entity IDs)",
+          "weather_entity": "Weather entity",
+          "solar_forecast_sensor": "Forecast.Solar production sensor",
+          "notify_service": "Notify service",
+          "notify_target": "Notify target (optional)",
+          "operation_mode": "Operation mode",
+          "currency": "Currency",
+          "invest": "Invest",
+          "export_disable_threshold": "Evening export disable threshold (W)",
+          "default_full_charge_day": "Default full charge day"
+        }
+      },
+      "charges_1": {
+        "title": "Import rows",
+        "description": "Configure the 4 import tariff rows."
+      },
+      "charges_2": {
+        "title": "Export rows",
+        "description": "Configure the 4 export tariff rows."
+      },
+      "flux": {
+        "title": "Flux windows",
+        "description": "Configure the baseline Flux import/export windows."
+      }
+    }
+  }
+}
