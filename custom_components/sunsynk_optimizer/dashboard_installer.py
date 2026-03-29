@@ -37,6 +37,14 @@ Suggestion: bias toward **higher overnight SOC targets**, longer import windows,
 Suggestion: use **mid SOC targets** and let forecast drive import end times more aggressively.
 {{% endif %}}"""
 
+    notes_content = f"""**Plant ID:** {api_plant_id}  
+**Inverter S/N:** {solar_entity_suffix}  
+**Weather entity:** {weather_entity}  
+**Forecast sensor:** {forecast_sensor}
+
+Manual controls call the Sunsynk Optimizer buttons directly.  
+Status cards show the latest calculated import window, Flux 2 action, and mode."""
+
     return {
         "title": "Sunsynk Optimizer Dashboard",
         "views": [
@@ -173,7 +181,7 @@ Suggestion: use **mid SOC targets** and let forecast drive import end times more
                                     {"entity": "sensor.last_updated"},
                                     {"entity": "sensor.last_error"},
                                 ],
-                            }
+                            },
                         ],
                     },
                     {
@@ -240,14 +248,7 @@ Suggestion: use **mid SOC targets** and let forecast drive import end times more
                             {
                                 "type": "markdown",
                                 "title": "Notes",
-                                "content": (
-                                    f"**Plant ID:** {api_plant_id}  \\n"
-                                    f"**Inverter S/N:** {solar_entity_suffix}  \\n"
-                                    f"**Weather entity:** {weather_entity}  \\n"
-                                    f"**Forecast sensor:** {forecast_sensor}\\n\\n"
-                                    "Manual controls call the Sunsynk Optimizer buttons directly.  \\n"
-                                    "Status cards show the latest calculated import window, Flux 2 action, and mode."
-                                ),
+                                "content": notes_content,
                             },
                         ],
                     },
@@ -375,7 +376,7 @@ async def async_install_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> No
     dst = config_dir / filename
     dst.write_text(json.dumps(dashboard, indent=2), encoding="utf-8")
 
-    snippet = f"""Add this to configuration.yaml and restart Home Assistant:
+    snippet = f"""Add this to configuration.yaml and reload Home Assistant YAML/Lovelace:
 
 lovelace:
   dashboards:
