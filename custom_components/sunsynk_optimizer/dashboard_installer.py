@@ -22,6 +22,21 @@ def _build_dashboard(config: dict) -> dict:
     def s(name: str) -> str:
         return f"sensor.solarsynkv3_{solar_entity_suffix}_{name}"
 
+    seasonal_guidance = f"""{{% set forecast = states('{forecast_sensor}') | float(0) %}}
+{{% if forecast >= 10 %}}
+**Season:** Summer-like  
+
+Suggestion: bias toward **lower overnight import**, shorter import windows, and more trust in solar recovery.
+{{% elif forecast <= 5 %}}
+**Season:** Winter-like  
+
+Suggestion: bias toward **higher overnight SOC targets**, longer import windows, and less reliance on daytime solar.
+{{% else %}}
+**Season:** Shoulder / mixed day  
+
+Suggestion: use **mid SOC targets** and let forecast drive import end times more aggressively.
+{{% endif %}}"""
+
     return {
         "title": "Sunsynk Optimizer Dashboard",
         "views": [
@@ -226,11 +241,11 @@ def _build_dashboard(config: dict) -> dict:
                                 "type": "markdown",
                                 "title": "Notes",
                                 "content": (
-                                    f"**Plant ID:** {api_plant_id}  \n"
-                                    f"**Inverter S/N:** {solar_entity_suffix}  \n"
-                                    f"**Weather entity:** {weather_entity}  \n"
-                                    f"**Forecast sensor:** {forecast_sensor}\n\n"
-                                    "Manual controls call the Sunsynk Optimizer buttons directly.  \n"
+                                    f"**Plant ID:** {api_plant_id}  \\n"
+                                    f"**Inverter S/N:** {solar_entity_suffix}  \\n"
+                                    f"**Weather entity:** {weather_entity}  \\n"
+                                    f"**Forecast sensor:** {forecast_sensor}\\n\\n"
+                                    "Manual controls call the Sunsynk Optimizer buttons directly.  \\n"
                                     "Status cards show the latest calculated import window, Flux 2 action, and mode."
                                 ),
                             },
@@ -279,19 +294,7 @@ def _build_dashboard(config: dict) -> dict:
                             {
                                 "type": "markdown",
                                 "title": "Seasonal guidance",
-                                "content": (
-                                    "{% set m = now().month %} "
-                                    "{% if m in [11, 12, 1, 2] %}"
-                                    "**Season:** Winter  \n"
-                                    "Suggestion: bias toward **higher overnight SOC targets**, longer import windows, and less reliance on daytime solar."
-                                    "{% elif m in [3, 4, 9, 10] %}"
-                                    "**Season:** Shoulder season  \n"
-                                    "Suggestion: use **mid SOC targets** and let forecast drive import end times more aggressively."
-                                    "{% else %}"
-                                    "**Season:** Summer  \n"
-                                    "Suggestion: bias toward **lower overnight import**, shorter import windows, and more trust in solar recovery."
-                                    "{% endif %}"
-                                ),
+                                "content": seasonal_guidance,
                             },
                             {
                                 "type": "entities",
