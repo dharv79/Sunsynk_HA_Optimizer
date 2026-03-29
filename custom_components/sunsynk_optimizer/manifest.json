@@ -2,8 +2,8 @@
   "domain": "sunsynk_optimizer",
   "name": "Sunsynk Optimizer",
   "version": "1.0.0",
-  "documentation": "https://github.com/dharv79/HA_Sunsynk_Flux",
-  "issue_tracker": "https://github.com/dharv79/HA_Sunsynk_Flux/issues",
+  "documentation": "https://github.com/dharv79/Sunsynk_HA_Optimizer",
+  "issue_tracker": "https://github.com/dharv79/Sunsynk_HA_Optimizer/issues",
   "dependencies": [],
   "codeowners": [
     "@dharv79"
