@@ -47,6 +47,12 @@ Example:
 
 - `weather.forecast_home`
 
+
+### 4. Sunsynk Power Flow Card (REQUIRED for dashboard)
+
+The Optimizer dashboard uses the custom power flow card:
+
+https://github.com/slipx06/sunsynk-power-flow-card
 ## Installation via HACS
 
 ### Step 1: Add the custom repository
