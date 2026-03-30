@@ -231,7 +231,7 @@ class SunsynkOptimizer:
         result = await self.coordinator.api.async_post_income(self.plant_id, payload)
         self.coordinator.update_state(
             last_api_result=result,
-            last_flux2_action={"action": "reset_baseline", "payload": payload},
+            last_flux2_action={"action": "reset_baseline", "payload": payload, "notified": True},
             evening_export_disabled=False,
         )
         await self.async_notify(
@@ -243,7 +243,7 @@ class SunsynkOptimizer:
         """Choose the best Monday-Friday full-charge day from weather forecast."""
         if self.operation_mode == "monitor":
             self.coordinator.update_state(
-                last_flux2_action={"action": "monitor_only"},
+                last_flux2_action={"action": "monitor_only", "notified": False},
                 operation_mode="monitor",
             )
             return
@@ -334,10 +334,6 @@ class SunsynkOptimizer:
                 operation_mode="monitor",
                 last_import_plan={"logic_branch": "monitor_only"},
             )
-            await self.async_notify(
-                "🔋 Sunsynk Import Plan",
-                "Monitor-only mode is enabled. Import plan was calculated but not pushed.",
-            )
             return
 
         soc = self._state_float(self.battery_soc_entity, 0)
@@ -348,14 +344,11 @@ class SunsynkOptimizer:
         solar_forecast_kwh = self._state_float(forecast_entity, 0)
         forecast_band = self._forecast_band(solar_forecast_kwh)
 
-        # Base target SOC from full-charge day + forecast-driven seasonal behaviour
         if is_full_day:
             target_soc = 100
             soc_reason = "weekly_full_charge_day"
         else:
             if solar_forecast_kwh < 7:
-                # User requested: below 7 kWh = full cheap window.
-                # Keep target high enough to support poor solar days.
                 if forecast_band == "winter_like":
                     target_soc = 100
                     soc_reason = "low_solar_override_winter_like"
@@ -372,13 +365,10 @@ class SunsynkOptimizer:
                 target_soc = 85
                 soc_reason = "shoulder"
 
-        # Import window logic
         if solar_forecast_kwh < 7:
-            # Hard override requested by user
             flux1_end = "05:00"
             logic_branch = "low_solar_full_window"
         else:
-            # Existing adaptive logic, now with seasonal weighting
             end = dt_util.now().replace(hour=4, minute=0, second=0, microsecond=0)
 
             if soc > 75:
@@ -390,8 +380,6 @@ class SunsynkOptimizer:
 
             if forecast_band == "summer_like":
                 end = end - timedelta(minutes=60)
-            elif forecast_band == "shoulder":
-                pass
             elif forecast_band == "winter_like":
                 end = end + timedelta(minutes=30)
 
@@ -413,8 +401,6 @@ class SunsynkOptimizer:
 
         next_import_window = f"02:00→{flux1_end}"
 
-        # Baseline Flux 2 on import-plan run:
-        # normal export slot 16:00-16:15 at 85%
         payload = {
             "flux_1": {
                 "startTime": "02:00",
@@ -468,11 +454,7 @@ class SunsynkOptimizer:
         if self.operation_mode == "monitor":
             self.coordinator.update_state(
                 operation_mode="monitor",
-                last_flux2_action={"action": "monitor_only"},
-            )
-            await self.async_notify(
-                "⚡ Flux 2 check",
-                "Monitor-only mode is enabled. Flux 2 check was not pushed.",
+                last_flux2_action={"action": "monitor_only", "notified": False},
             )
             return
 
@@ -482,11 +464,14 @@ class SunsynkOptimizer:
         is_full_day = today == self.selected_full_charge_day
         now_local = dt_util.now()
 
-        action: dict[str, Any] = {"action": "none", "soc": soc, "grid_pac": grid_pac}
+        action: dict[str, Any] = {
+            "action": "none",
+            "soc": soc,
+            "grid_pac": grid_pac,
+            "notified": False,
+        }
         evening_export_disabled = False
 
-        # Between 16:00 and 19:00, if house/grid load exceeds threshold,
-        # disable export by setting target SOC to 100.
         if (
             16 <= now_local.hour < 19
             and grid_pac > float(self.cfg[CONF_EXPORT_DISABLE_THRESHOLD])
@@ -498,19 +483,25 @@ class SunsynkOptimizer:
                     "targetSoc": 100,
                 }
             }
+
             await self.async_push_flux_override(payload)
+
             action = {
                 "action": "disable_evening_export",
                 "soc": soc,
                 "grid_pac": grid_pac,
                 "payload": payload,
+                "notified": True,
             }
+
             evening_export_disabled = True
+
             self.coordinator.update_state(
                 last_flux2_action=action,
                 evening_export_disabled=True,
                 operation_mode=self.operation_mode,
             )
+
             await self.async_notify(
                 "🏠 Flux 2 Export Disabled",
                 (
@@ -520,10 +511,11 @@ class SunsynkOptimizer:
             )
             return
 
-        # On non-full-charge days, if SOC > 85 and cooldown is OK, trim to 82
         if not is_full_day and soc > 85 and self._cooldown_ok():
             self._mark_trim()
+
             trim_end = (now_local + timedelta(minutes=45)).strftime("%H:%M")
+
             payload = {
                 "flux_2": {
                     "startTime": now_local.strftime("%H:%M"),
@@ -531,31 +523,34 @@ class SunsynkOptimizer:
                     "targetSoc": 82,
                 }
             }
+
             await self.async_push_flux_override(payload)
+
             action = {
                 "action": "trim_to_82",
                 "soc": soc,
                 "grid_pac": grid_pac,
                 "payload": payload,
+                "notified": True,
             }
+
             self.coordinator.update_state(
                 last_flux2_action=action,
                 evening_export_disabled=False,
                 operation_mode=self.operation_mode,
             )
+
             await self.async_notify(
                 "🔋 SOC Control",
                 f"SOC {round(soc, 1)}% is above 85%. Trimming to 82%.",
             )
             return
 
-        # Otherwise no action
         self.coordinator.update_state(
             last_flux2_action=action,
             evening_export_disabled=evening_export_disabled,
             operation_mode=self.operation_mode,
         )
-        await self.async_notify("⚡ Flux 2 check", "No action needed.")
 
     async def _async_initial_refresh(self, _now) -> None:
         """Populate initial state soon after startup."""
@@ -586,7 +581,6 @@ class SunsynkOptimizer:
         except (ValueError, TypeError):
             return
 
-        # Full-charge-day hold near 100 for an hour, then trim if still full
         if soc >= 99.5 and dt_util.now().strftime("%A") == self.selected_full_charge_day:
             if self.pending_full_trim_cancel:
                 return
@@ -611,6 +605,7 @@ class SunsynkOptimizer:
                         "soc": current_soc,
                         "grid_pac": self._state_float(self.grid_pac_entity, 0),
                         "payload": payload,
+                        "notified": True,
                     },
                     evening_export_disabled=False,
                     operation_mode=self.operation_mode,
@@ -626,10 +621,17 @@ class SunsynkOptimizer:
                 _delayed_full_trim,
             )
             self.coordinator.update_state(
-                last_flux2_action={"action": "schedule_full_trim", "soc": soc},
+                last_flux2_action={
+                    "action": "schedule_full_trim",
+                    "soc": soc,
+                    "notified": False,
+                },
                 operation_mode=self.operation_mode,
             )
 
-        # Non-full-day fast trim on SOC crossing above 85
         elif soc > 85 and dt_util.now().strftime("%A") != self.selected_full_charge_day:
             await self.async_run_flux2_check()
+
+
+        
+        
