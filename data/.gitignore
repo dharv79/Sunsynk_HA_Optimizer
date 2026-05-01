@@ -1,0 +1,3 @@
+# Ignore all data files — these contain personal energy/SOC data
+*
+!.gitignore

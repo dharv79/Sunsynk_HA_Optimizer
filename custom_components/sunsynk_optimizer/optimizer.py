@@ -38,6 +38,7 @@ from .const import (
     DEFAULT_OPERATION_MODE,
     FULL_CHARGE_DAY_OPTIONS,
 )
+from .data_logger import DataLogger
 from .flux_helpers import apply_flux_override, build_payload, merge_entry_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class SunsynkOptimizer:
         self.unsubs: list[Any] = []
         self.last_trim_ts: float | None = None
         self.pending_full_trim_cancel = None
+        self.data_logger = DataLogger(hass)
 
     @property
     def cfg(self) -> dict[str, Any]:
@@ -75,6 +77,18 @@ class SunsynkOptimizer:
     @property
     def grid_pac_entity(self) -> str:
         return f"sensor.solarsynkv3_{self.inverter_serial}_grid_pac"
+
+    @property
+    def day_pv_energy_entity(self) -> str:
+        return f"sensor.solarsynkv3_{self.inverter_serial}_pv_etoday"
+
+    @property
+    def pv_mppt0_entity(self) -> str:
+        return f"sensor.solarsynkv3_{self.inverter_serial}_pv_mppt0_power"
+
+    @property
+    def pv_mppt1_entity(self) -> str:
+        return f"sensor.solarsynkv3_{self.inverter_serial}_pv_mppt1_power"
 
     @property
     def selected_full_charge_day(self) -> str:
@@ -119,6 +133,24 @@ class SunsynkOptimizer:
                 self.hass,
                 [self.battery_soc_entity],
                 self._async_battery_soc_changed,
+            )
+        )
+        self.unsubs.append(
+            async_track_time_change(
+                self.hass,
+                self._async_capture_morning_state,
+                hour=6,
+                minute=0,
+                second=0,
+            )
+        )
+        self.unsubs.append(
+            async_track_time_change(
+                self.hass,
+                self._async_capture_day_actuals,
+                hour=22,
+                minute=0,
+                second=0,
             )
         )
 
@@ -315,6 +347,8 @@ class SunsynkOptimizer:
             last_full_charge_scores=scores,
         )
 
+        await self.data_logger.async_log_full_charge_scores(scores, best_day)
+
         await self.async_notify(
             "🔋 Sunsynk Full Charge Day Updated",
             (
@@ -341,7 +375,11 @@ class SunsynkOptimizer:
         full_day = self.selected_full_charge_day
         is_full_day = today == full_day
         forecast_entity = self.cfg[CONF_SOLAR_FORECAST_SENSOR]
-        solar_forecast_kwh = self._state_float(forecast_entity, 0)
+        raw_forecast_kwh = self._state_float(forecast_entity, 0)
+
+        paired_days = await self.data_logger.async_load_paired_days(days=30)
+        forecast_correction = self.data_logger.compute_forecast_correction(paired_days)
+        solar_forecast_kwh = round(raw_forecast_kwh * forecast_correction, 2)
         forecast_band = self._forecast_band(solar_forecast_kwh)
 
         if is_full_day:
@@ -364,6 +402,17 @@ class SunsynkOptimizer:
             else:
                 target_soc = 85
                 soc_reason = "shoulder"
+
+        overnight_drain_adjustment = 0
+        soc_adjustment = 0
+        if not is_full_day:
+            overnight_drain_adjustment = self.data_logger.compute_overnight_drain_adjustment(
+                paired_days
+            )
+            soc_adjustment = self.data_logger.compute_soc_target_adjustment(
+                paired_days, forecast_band
+            )
+            target_soc = max(50, min(100, target_soc + overnight_drain_adjustment + soc_adjustment))
 
         if solar_forecast_kwh < 7:
             flux1_end = "05:00"
@@ -417,19 +466,26 @@ class SunsynkOptimizer:
         await self.async_push_flux_override(payload)
 
         plan_state = {
+            "date": dt_util.now().date().isoformat(),
             "today": today,
             "selected_full_charge_day": full_day,
             "is_full_day": is_full_day,
             "soc": soc,
+            "raw_forecast_kwh": raw_forecast_kwh,
+            "forecast_correction_factor": forecast_correction,
             "solar_forecast_kwh": solar_forecast_kwh,
             "forecast_band": forecast_band,
             "logic_branch": logic_branch,
             "target_soc": target_soc,
             "target_soc_reason": soc_reason,
+            "overnight_drain_adjustment": overnight_drain_adjustment,
+            "soc_adjustment": soc_adjustment,
             "flux1_end": flux1_end,
             "next_import_window": next_import_window,
             "payload": payload,
         }
+
+        await self.data_logger.async_log_import_plan(plan_state)
 
         self.coordinator.update_state(
             current_soc_target=target_soc,
@@ -438,13 +494,24 @@ class SunsynkOptimizer:
             operation_mode=self.operation_mode,
         )
 
+        forecast_note = (
+            f" (raw {round(raw_forecast_kwh, 1)} kWh ×{forecast_correction})"
+            if forecast_correction != 1.0
+            else ""
+        )
+        adjustment_parts = []
+        if overnight_drain_adjustment:
+            adjustment_parts.append(f"drain +{overnight_drain_adjustment}%")
+        if soc_adjustment:
+            adjustment_parts.append(f"eve {soc_adjustment:+d}%")
+        adjustment_note = f" ({', '.join(adjustment_parts)})" if adjustment_parts else ""
         await self.async_notify(
             "🔋 Sunsynk Import Plan",
             (
                 f"Today: {today} (Full charge: {is_full_day}). "
                 f"SOC: {round(soc, 1)}%. "
-                f"Solar forecast today: {round(solar_forecast_kwh, 1)} kWh. "
-                f"Import: 02:00 → {flux1_end} target {target_soc}%. "
+                f"Solar forecast: {round(solar_forecast_kwh, 1)} kWh{forecast_note}. "
+                f"Import: 02:00 → {flux1_end} target {target_soc}%{adjustment_note}. "
                 f"Band: {forecast_band}. Logic: {logic_branch}."
             ),
         )
@@ -632,6 +699,28 @@ class SunsynkOptimizer:
         elif soc > 85 and dt_util.now().strftime("%A") != self.selected_full_charge_day:
             await self.async_run_flux2_check()
 
+    async def _async_capture_morning_state(self, _now) -> None:
+        """Capture SOC and PV power at 06:00 to measure overnight battery drain."""
+        soc = self._state_float(self.battery_soc_entity, 0)
+        pv_power = (
+            self._state_float(self.pv_mppt0_entity, 0)
+            + self._state_float(self.pv_mppt1_entity, 0)
+        )
+        await self.data_logger.async_log_morning_state(
+            date=dt_util.now().date().isoformat(),
+            morning_soc=soc,
+            morning_pv_power=pv_power,
+        )
 
-        
-        
+    async def _async_capture_day_actuals(self, _now) -> None:
+        """Capture end-of-day actuals at 22:00 and log them."""
+        soc = self._state_float(self.battery_soc_entity, 0)
+        actual_solar_kwh = self._state_float(self.day_pv_energy_entity, 0)
+        date = dt_util.now().date().isoformat()
+        evening_export_disabled = self.coordinator.state.evening_export_disabled
+        await self.data_logger.async_log_day_actuals(
+            date=date,
+            evening_soc=soc,
+            actual_solar_kwh=actual_solar_kwh,
+            evening_export_disabled=evening_export_disabled,
+        )

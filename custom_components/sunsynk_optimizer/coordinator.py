@@ -65,6 +65,7 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
                 setattr(self.state, key, value)
         merged = merge_entry_data(dict(self.entry.data), dict(self.entry.options))
         self.state.operation_mode = merged.get("operation_mode", "auto")
+        await self.optimizer.data_logger.async_prune_old_files()
         await self.optimizer.async_setup()
         self.async_set_updated_data(self.state)
 
