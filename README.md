@@ -2,18 +2,21 @@
 
 Smart Home Assistant integration to optimise Sunsynk inverter charging and export behaviour using solar forecast, battery SOC, time-of-use windows, and automated Flux control.
 
-Current version: **v1.0.8b3** (adaptive learning beta)
+Current stable release: **v1.0.7**
+Current beta release: **v1.0.8b3** (adaptive learning beta)
+
+> **Beta notice:** Features marked *(beta)* below are available in v1.0.8b3 only. The current stable release (v1.0.7) does not include them. Install the beta via HACS by selecting the pre-release version.
 
 ## Features
 
 - Smart overnight import planning driven by solar forecast and battery SOC
-- Adaptive learning — self-corrects forecast bias, overnight battery drain, and evening SOC outcomes over time
+- Adaptive learning — self-corrects forecast bias, overnight battery drain, and evening SOC outcomes over time *(beta)*
 - Dynamic Flux 2 export control with evening export disable when grid draw is high
 - SOC-based trim logic — trims to 82% when battery exceeds 85%, and trims after a 1-hour hold on full-charge days
 - Weekly best full-charge day selection scored from weather forecast
 - Monitor mode — observe decisions without writing to the Sunsynk API
 - Manual control buttons for all actions
-- Auto-generated Lovelace dashboard with adaptive learning, history graphs, and tuning assist sections
+- Auto-generated Lovelace dashboard with adaptive learning, history graphs, and tuning assist sections *(dashboard adaptive learning section and 48h graphs are beta)*
 - Optional push notifications via any HA notify service
 
 ## Requirements
@@ -277,7 +280,9 @@ Controls Flux 2 (export window) based on real-time conditions:
 
 Records end-of-day battery SOC and actual PV generation (`pv_etoday`) for adaptive learning.
 
-## Adaptive learning
+## Adaptive learning *(beta — v1.0.8b3 only)*
+
+> This feature is not present in the stable v1.0.7 release. On a fresh install from the stable channel the optimizer behaviour is unchanged from v1.0.7.
 
 History is written to JSONL files at:
 
