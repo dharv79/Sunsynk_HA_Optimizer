@@ -28,7 +28,8 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 `__init__.py` → `SunsynkOptimizerCoordinator` → `SunsynkOptimizer`
 
 - **`coordinator.py`** owns the `OptimizerState` dataclass (the single source of truth for all runtime state) and persists it via HA's `Store` helper at `.storage/sunsynk_optimizer_state_{entry_id}`. All state mutations go through `coordinator.update_state(**kwargs)`, which also triggers entity refreshes via `async_set_updated_data`.
-- **`optimizer.py`** contains all business logic: import plan calculation, Flux 2 export/trim control, full-charge day scoring. It registers four HA listeners on startup (time-change at 01:55 daily, time-change at 18:00 daily gated to Sunday inside the handler, 30-minute interval, battery SOC state change). It also schedules a one-shot `async_call_later` 15 seconds after setup to run an initial import plan — this fires on every integration reload, not just first boot.
+- **`optimizer.py`** contains all business logic: import plan calculation, Flux 2 export/trim control, full-charge day scoring. It registers six HA listeners on startup (time-change at 01:55, 06:00, 18:00, and 22:00 daily; 30-minute interval; battery SOC state change). The 18:00 listener is gated to Sundays inside the handler. It also schedules a one-shot `async_call_later` 60 seconds after setup to run an initial import plan — this fires on every integration reload, not just first boot. The 60-second delay exists so that notify services are registered before the plan runs.
+- **`data_logger.py`** records decisions and actuals to monthly JSONL files at `{config_dir}/sunsynk_optimizer_data/YYYY-MM.jsonl`. Four record types: `import_plan` (at 01:55), `morning_state` (at 06:00 — SOC and PV power before solar starts), `day_actuals` (at 22:00 — evening SOC and actual solar kWh), and `full_charge_day` (weekly scores). Provides three analysis methods used by `optimizer.py` to apply adaptive corrections: `compute_forecast_correction` (actual/forecast ratio over 30 days, capped 0.5–1.5, requires 7+ days), `compute_soc_target_adjustment` (±5% nudge based on evening SOC outcomes, requires 5+ matching days), `compute_overnight_drain_adjustment` (extra % to target SOC to compensate battery drain before 06:00, requires 5+ valid days). Files older than 13 months are pruned on startup via `coordinator.py`.
 - **`api.py`** handles Sunsynk cloud API calls: RSA-encrypted login (fetches public key → encrypts password with PKCS1v15), bearer token management with automatic re-login on 401, and posting to the `/api/v1/plant/{plant_id}/income` endpoint. Uses the `cryptography` library (not declared in `manifest.json` because it is bundled with Home Assistant itself).
 - **`flux_helpers.py`** builds and mutates the `fluxProducts` payload. The two Flux windows are always index 0 (Flux 1, import, `direction=1`) and index 1 (Flux 2, export, `direction=0`). `apply_flux_override()` deep-copies and patches these; `build_payload()` assembles the full income POST body. `merge_entry_data()` is the canonical way to read config — it merges `entry.data` + `entry.options` with options winning, and fills defaults for `charges` and `fluxProducts` if absent.
 
@@ -56,7 +57,7 @@ All entities extend `CoordinatorEntity` and read state from `coordinator.state` 
 
 ### Dashboard
 
-`dashboard_installer.py` generates a Lovelace YAML file by building a Python dict and serialising it with `json.dumps`. All SolarSynkV3 entity IDs are constructed from `inverter_serial` via the local `s()` helper. The file is written to `{hass.config.config_dir}/sunsynk_optimizer_{entry_id}.yaml`, and a persistent HA notification shows the `configuration.yaml` snippet to add.
+`dashboard_installer.py` generates a Lovelace YAML file by building a Python dict and serialising it with `json.dumps`. All SolarSynkV3 entity IDs are constructed from `inverter_serial` via the local `s()` helper. The file is written to `{hass.config.config_dir}/sunsynk_optimizer_{entry_id}.yaml` via `async_add_executor_job` (to avoid blocking the event loop), and a persistent HA notification shows the `configuration.yaml` snippet to add.
 
 ### Operation modes
 
@@ -69,4 +70,10 @@ Scores Monday–Friday from weather forecast: base score `100 - cloud_coverage -
 
 ### Import plan logic
 
-Runs nightly at 01:55. SOC target is 100% on the selected full-charge day, otherwise scaled by `forecast_band` (summer_like ≥10 kWh → 80%, winter_like ≤5 kWh → 95–100%, shoulder → 85%). Import window end time (Flux 1) starts at 04:00 and is trimmed earlier based on current SOC and forecast band, clamped to 02:15–05:00. If forecast < 7 kWh the window is always extended to 05:00.
+Runs nightly at 01:55. Before calculating targets, three adaptive corrections are fetched from `data_logger.py` (each returns a neutral value until enough history exists):
+
+1. **Forecast correction factor** — raw forecast kWh is multiplied by `actual/forecast` ratio from the last 30 days.
+2. **Overnight drain adjustment** — extra % added to `target_soc` to compensate for battery drain between charge end and 06:00.
+3. **Evening SOC adjustment** — ±5% nudge to `target_soc` based on whether the battery has been ending the day too full or too empty.
+
+SOC target is 100% on the selected full-charge day, otherwise scaled by `forecast_band` (summer_like ≥10 kWh → 80%, winter_like ≤5 kWh → 95–100%, shoulder → 85%). Import window end time (Flux 1) starts at 04:00 and is trimmed earlier based on current SOC and forecast band, clamped to 02:15–05:00. If forecast < 7 kWh the window is always extended to 05:00.
