@@ -46,7 +46,28 @@ Suggestion: bias toward **higher overnight SOC targets**, longer import windows,
 Suggestion: use **mid SOC targets** and let forecast drive import end times more aggressively.
 {{% endif %}}"""
 
-    notes_content = f"""**Plant ID:** {api_plant_id}  
+    adaptive_learning_content = f"""{{% set factor = state_attr('sensor.import_plan_end', 'forecast_correction_factor') | float(1.0) %}}
+{{% set drain = state_attr('sensor.import_plan_end', 'overnight_drain_adjustment') | int(0) %}}
+{{% set nudge = state_attr('sensor.import_plan_end', 'soc_adjustment') | int(0) %}}
+
+**Forecast correction:** {{{{ '%.3f' | format(factor) }}}} × raw forecast
+{{% if factor < 0.95 %}}→ Forecast.Solar over-predicts for your location — solar used is {{{{ '%.0f' | format((1 - factor) * 100) }}}}% lower than forecast.
+{{% elif factor > 1.05 %}}→ Forecast.Solar under-predicts — actual generation runs {{{{ '%.0f' | format((factor - 1) * 100) }}}}% higher than forecast.
+{{% else %}}→ Forecast accuracy looks good (within 5%).
+{{% endif %}}
+
+**Overnight drain:** +{{{{drain}}}}% added to target
+{{% if drain > 0 %}}→ Battery loses ~{{{{drain}}}}% SOC between charging end and 06:00.
+{{% else %}}→ Not enough morning readings yet — no drain adjustment applied.
+{{% endif %}}
+
+**Evening SOC nudge:** {{{{nudge | int | abs}}}}% {{{{'+' if nudge > 0 else ('-' if nudge < 0 else '')}}}}
+{{% if nudge < 0 %}}→ Battery ends the day too full — reducing overnight target.
+{{% elif nudge > 0 %}}→ Battery ends the day too empty — increasing overnight target.
+{{% else %}}→ Evening SOC is in the right range, no nudge needed.
+{{% endif %}}"""
+
+    notes_content = f"""**Plant ID:** {api_plant_id}
 **Inverter S/N:** {solar_entity_suffix}  
 **Weather entity:** {weather_entity}  
 **Forecast sensor:** {forecast_sensor}
@@ -227,6 +248,30 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                     {
                         "type": "grid",
                         "cards": [
+                            {"type": "heading", "heading": "Adaptive learning", "heading_style": "title"},
+                            {
+                                "type": "entities",
+                                "title": "Active corrections (last plan)",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "raw_forecast_kwh", "name": "Raw forecast (kWh)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "forecast_correction_factor", "name": "Forecast correction ×"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "solar_forecast_kwh", "name": "Adjusted forecast (kWh)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "forecast_band", "name": "Forecast band"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "overnight_drain_adjustment", "name": "Drain compensation (%)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "soc_adjustment", "name": "Evening SOC nudge (%)"},
+                                ],
+                            },
+                            {
+                                "type": "markdown",
+                                "title": "What the system has learned",
+                                "content": adaptive_learning_content,
+                            },
+                        ],
+                    },
+                    {
+                        "type": "grid",
+                        "cards": [
                             {"type": "heading", "heading": "Optimizer status", "heading_style": "title"},
                             {
                                 "type": "entities",
@@ -340,11 +385,20 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                             },
                             {
                                 "type": "history-graph",
-                                "title": "Battery SOC and grid",
-                                "hours_to_show": 24,
+                                "title": "Battery SOC and grid (48h)",
+                                "hours_to_show": 48,
                                 "entities": [
-                                    {"entity": s("battery_soc")},
-                                    {"entity": s("grid_pac")},
+                                    {"entity": s("battery_soc"), "name": "Battery SOC"},
+                                    {"entity": s("grid_pac"), "name": "Grid power"},
+                                ],
+                            },
+                            {
+                                "type": "history-graph",
+                                "title": "PV generation (48h)",
+                                "hours_to_show": 48,
+                                "entities": [
+                                    {"entity": s("pv_mppt0_power"), "name": "PV MPPT0"},
+                                    {"entity": s("pv_mppt1_power"), "name": "PV MPPT1"},
                                 ],
                             },
                         ],
@@ -401,9 +455,16 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "selected_full_charge_day", "name": "Chosen full-charge day"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "is_full_day", "name": "Is full-charge day"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "soc", "name": "SOC at planning time"},
-                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "solar_forecast_kwh", "name": "Solar forecast used"},
-                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "flux1_end", "name": "Planned import end"},
-                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "target_soc", "name": "Planned target SOC"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "raw_forecast_kwh", "name": "Raw solar forecast (kWh)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "forecast_correction_factor", "name": "Forecast correction ×"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "solar_forecast_kwh", "name": "Adjusted forecast (kWh)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "forecast_band", "name": "Forecast band"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "target_soc_reason", "name": "SOC target reason"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "overnight_drain_adjustment", "name": "Drain compensation (%)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "soc_adjustment", "name": "Evening SOC nudge (%)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "target_soc", "name": "Final target SOC"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "flux1_end", "name": "Import end time"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "logic_branch", "name": "Logic branch"},
                                 ],
                             },
                             {

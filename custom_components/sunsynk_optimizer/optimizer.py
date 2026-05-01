@@ -160,7 +160,7 @@ class SunsynkOptimizer:
             )
 
         self.coordinator.update_state(operation_mode=self.operation_mode)
-        self.unsubs.append(async_call_later(self.hass, 15, self._async_initial_refresh))
+        self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
 
     async def async_shutdown(self) -> None:
         for unsub in self.unsubs:
