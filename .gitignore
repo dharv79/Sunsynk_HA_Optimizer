@@ -1,0 +1,6 @@
+# Raw data exports - can get large, keep out of git
+data/forecasts/*.csv
+data/actuals/*.csv
+
+# Keep analysis outputs and any manually curated files
+!data/analysis/
