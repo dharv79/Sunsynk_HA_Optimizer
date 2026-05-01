@@ -496,7 +496,8 @@ async def async_install_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> No
     config_dir = Path(hass.config.config_dir)
     filename = f"sunsynk_optimizer_{entry.entry_id}.yaml"
     dst = config_dir / filename
-    dst.write_text(json.dumps(dashboard, indent=2), encoding="utf-8")
+    content = json.dumps(dashboard, indent=2)
+    await hass.async_add_executor_job(dst.write_text, content, "utf-8")
 
     snippet = f"""Add this to configuration.yaml and reload Home Assistant YAML/Lovelace:
 
