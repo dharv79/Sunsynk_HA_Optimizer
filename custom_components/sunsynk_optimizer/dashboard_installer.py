@@ -23,6 +23,13 @@ from .flux_helpers import merge_entry_data
 
 
 def _build_dashboard(config: dict) -> dict:
+    """Build the full Lovelace dashboard as a Python dict.
+
+    The dict is later serialised with json.dumps (not YAML) because the Lovelace
+    YAML-mode loader accepts JSON. All SolarSynkV3 entity IDs are constructed via
+    the local s() helper using inverter_serial so the dashboard is portable across
+    installs with different serials.
+    """
     solar_entity_suffix = str(config[CONF_INVERTER_SERIAL]).strip()
     api_plant_id = str(config[CONF_PLANT_ID]).strip()
     forecast_sensor = config.get("solar_forecast_sensor", "sensor.energy_production_today")

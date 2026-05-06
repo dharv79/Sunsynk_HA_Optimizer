@@ -26,6 +26,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
+    """Register all optimizer sensor entities for this config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
@@ -52,6 +53,11 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | int | None:
+        """Return the primary display value for this sensor.
+
+        Each sensor_key maps to a specific field or derived string from OptimizerState.
+        The import_plan_end and flux2_action sensors also expose rich extra_state_attributes.
+        """
         state = self.coordinator.state
 
         if self._sensor_key == "selected_full_charge_day":

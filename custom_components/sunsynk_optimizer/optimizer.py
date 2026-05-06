@@ -58,6 +58,7 @@ class SunsynkOptimizer:
 
     @property
     def cfg(self) -> dict[str, Any]:
+        """Return merged config (entry.data + entry.options, options win)."""
         return merge_entry_data(dict(self.entry.data), dict(self.entry.options))
 
     @property
@@ -92,6 +93,7 @@ class SunsynkOptimizer:
 
     @property
     def selected_full_charge_day(self) -> str:
+        """Return the active full-charge day, falling back to the config default if state is unset."""
         state_day = self.coordinator.state.selected_full_charge_day
         if state_day in FULL_CHARGE_DAY_OPTIONS:
             return state_day
@@ -99,6 +101,7 @@ class SunsynkOptimizer:
 
     @property
     def operation_mode(self) -> str:
+        """Return current operation mode ('auto' or 'monitor')."""
         return str(self.cfg.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE))
 
     async def async_setup(self) -> None:
@@ -171,6 +174,7 @@ class SunsynkOptimizer:
             self.pending_full_trim_cancel = None
 
     def _state_float(self, entity_id: str, default: float = 0.0) -> float:
+        """Return the numeric state of an entity, or `default` if unavailable/unparseable."""
         state = self.hass.states.get(entity_id)
         if state is None or state.state in ("unknown", "unavailable", "none", ""):
             return default
@@ -180,14 +184,17 @@ class SunsynkOptimizer:
             return default
 
     def _cooldown_ok(self, seconds: int = 1800) -> bool:
+        """Return True if at least `seconds` have elapsed since the last trim action."""
         if self.last_trim_ts is None:
             return True
         return (dt_util.utcnow().timestamp() - self.last_trim_ts) > seconds
 
     def _mark_trim(self) -> None:
+        """Record the current time as the last trim timestamp for cooldown tracking."""
         self.last_trim_ts = dt_util.utcnow().timestamp()
 
     def _forecast_band(self, forecast_kwh: float) -> str:
+        """Classify adjusted solar forecast into a seasonal band used for SOC target selection."""
         if forecast_kwh >= 10:
             return "summer_like"
         if forecast_kwh <= 5:
@@ -195,6 +202,7 @@ class SunsynkOptimizer:
         return "shoulder"
 
     async def async_notify(self, title: str, message: str) -> None:
+        """Send a notification via the configured HA notify service."""
         service_string = str(self.cfg.get(CONF_NOTIFY_SERVICE, "")).strip()
         if "." not in service_string:
             self.coordinator.update_state(
@@ -240,12 +248,14 @@ class SunsynkOptimizer:
             )
 
     async def async_push_current_config(self) -> None:
+        """Push the baseline Flux config from settings to the Sunsynk API without any overrides."""
         config = self.cfg
         payload = build_payload(config)
         result = await self.coordinator.api.async_post_income(self.plant_id, payload)
         self.coordinator.update_state(last_api_result=result)
 
     async def async_push_flux_override(self, payload: dict[str, Any]) -> None:
+        """Merge a Flux 1/2 override dict onto the config baseline and push to the API."""
         config = self.cfg
         flux_products = apply_flux_override(
             config.get(CONF_FLUX_PRODUCTS, []),
@@ -318,8 +328,11 @@ class SunsynkOptimizer:
             rain = float(item.get("precipitation_probability", 0) or 0)
             temp = float(item.get("temperature", 15) or 15)
 
+            # Base: start at 100 and subtract cloud and rain impact.
+            # Rain weighted at 0.7× because partial rain still allows some generation.
             score = 100 - cloud - (rain * 0.7)
 
+            # Condition string adjustments — weather entity values from HA weather domain.
             if condition in ["sunny", "clear"]:
                 score += 25
             elif condition in ["partlycloudy"]:
@@ -329,11 +342,14 @@ class SunsynkOptimizer:
             elif condition in ["rainy", "pouring", "lightning-rainy", "snowy", "snowy-rainy"]:
                 score -= 25
 
+            # Temperature nudge: warmer days tend to have longer usable solar hours.
             if temp >= 18:
                 score += 3
             elif temp <= 5:
                 score -= 3
 
+            # Later-in-week penalty: if we fill up on Thursday or Friday there's less
+            # week remaining to use the stored energy before the next weekend.
             if day_name == "Thursday":
                 score -= 5
             elif day_name == "Friday":
@@ -382,11 +398,13 @@ class SunsynkOptimizer:
         solar_forecast_kwh = round(raw_forecast_kwh * forecast_correction, 2)
         forecast_band = self._forecast_band(solar_forecast_kwh)
 
+        # SOC target tiers — chosen to balance overnight grid cost against solar recovery risk.
         if is_full_day:
             target_soc = 100
             soc_reason = "weekly_full_charge_day"
         else:
             if solar_forecast_kwh < 7:
+                # Very low solar — fill up regardless of band to ensure enough energy.
                 if forecast_band == "winter_like":
                     target_soc = 100
                     soc_reason = "low_solar_override_winter_like"
@@ -394,13 +412,13 @@ class SunsynkOptimizer:
                     target_soc = 95
                     soc_reason = "low_solar_override"
             elif forecast_band == "winter_like":
-                target_soc = 95
+                target_soc = 95   # limited solar → stay high to cover the day
                 soc_reason = "winter_like"
             elif forecast_band == "summer_like":
-                target_soc = 80
+                target_soc = 80   # plenty of solar → leave headroom for PV absorption
                 soc_reason = "summer_like"
             else:
-                target_soc = 85
+                target_soc = 85   # shoulder — mid point
                 soc_reason = "shoulder"
 
         overnight_drain_adjustment = 0
@@ -415,11 +433,14 @@ class SunsynkOptimizer:
             target_soc = max(50, min(100, target_soc + overnight_drain_adjustment + soc_adjustment))
 
         if solar_forecast_kwh < 7:
+            # Extend to maximum window when solar is scarce — we need all the cheap import we can get.
             flux1_end = "05:00"
             logic_branch = "low_solar_full_window"
         else:
+            # Start from 04:00 as the neutral end time, then adjust based on SOC and forecast band.
             end = dt_util.now().replace(hour=4, minute=0, second=0, microsecond=0)
 
+            # Higher current SOC means the battery needs less time to reach target → shorten window.
             if soc > 75:
                 end = end.replace(hour=2, minute=30)
             elif soc > 65:
@@ -427,16 +448,22 @@ class SunsynkOptimizer:
             elif soc > 50:
                 end = end.replace(hour=3, minute=30)
 
+            # Forecast band shifts: summer expects solar to compensate so import less;
+            # winter expects little solar so import longer.
             if forecast_band == "summer_like":
                 end = end - timedelta(minutes=60)
             elif forecast_band == "winter_like":
                 end = end + timedelta(minutes=30)
 
+            # Extra summer-month trim: April–September has the longest days,
+            # so solar recovery is more reliable and we can afford a shorter import.
             month = dt_util.now().month
             is_summer_month = month in [4, 5, 6, 7, 8, 9]
             if is_summer_month and forecast_band == "summer_like":
                 end = end - timedelta(minutes=30)
 
+            # Clamp to 02:15–05:00. The 02:15 floor ensures the window is never shorter
+            # than 15 minutes from the fixed 02:00 start, which isn't worth the API call.
             earliest = dt_util.now().replace(hour=2, minute=15, second=0, microsecond=0)
             latest = dt_util.now().replace(hour=5, minute=0, second=0, microsecond=0)
 
@@ -578,6 +605,8 @@ class SunsynkOptimizer:
             )
             return
 
+        # Trim if SOC exceeds 85% on a non-full-charge day. Target 82% leaves a 3% gap
+        # below the trigger so normal fluctuation doesn't immediately re-trigger a trim.
         if not is_full_day and soc > 85 and self._cooldown_ok():
             self._mark_trim()
 
@@ -628,13 +657,16 @@ class SunsynkOptimizer:
             self.coordinator.update_state(last_error=f"Initial refresh failed: {exc}")
 
     async def _async_choose_best_full_charge_day(self, _now) -> None:
+        """Time-change callback at 18:00 daily — only acts on Sundays."""
         if dt_util.now().strftime("%A") == "Sunday":
             await self.async_choose_best_full_charge_day()
 
     async def _async_run_import_plan(self, _now) -> None:
+        """Time-change callback at 01:55 daily."""
         await self.async_run_import_plan()
 
     async def _async_periodic_flux2_check(self, _now) -> None:
+        """30-minute interval callback."""
         await self.async_run_flux2_check()
 
     async def _async_battery_soc_changed(self, event: Event) -> None:
@@ -682,6 +714,7 @@ class SunsynkOptimizer:
                     "Held at 100% for 1 hour. Trimming to 82%.",
                 )
 
+            # Hold at 100% for 1 hour to fully condition the cells, then trim to 82%.
             self.pending_full_trim_cancel = async_call_later(
                 self.hass,
                 3600,

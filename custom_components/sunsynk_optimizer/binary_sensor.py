@@ -24,6 +24,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
+    """Register all optimizer binary sensor entities for this config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
@@ -44,6 +45,7 @@ class SunsynkOptimizerBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
+        """Return True when the flag this sensor represents is active."""
         state = self.coordinator.state
         if self._key == "evening_export_disabled":
             return bool(state.evening_export_disabled)

@@ -25,6 +25,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
+    """Register all optimizer button entities for this config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
@@ -48,6 +49,7 @@ class SunsynkOptimizerButton(CoordinatorEntity, ButtonEntity):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
 
     async def async_press(self) -> None:
+        """Dispatch button press to the matching optimizer method."""
         if self._key == "choose_best_day":
             await self.coordinator.optimizer.async_choose_best_full_charge_day()
         elif self._key == "run_import":

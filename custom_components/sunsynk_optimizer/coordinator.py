@@ -29,6 +29,12 @@ from .optimizer import SunsynkOptimizer
 
 @dataclass
 class OptimizerState:
+    """Single source of truth for all optimizer runtime state.
+
+    Every field is persisted to HA storage on each mutation via update_state(),
+    so state survives HA restarts. All entity property methods read from here.
+    """
+
     selected_full_charge_day: str | None = None
     last_full_charge_scores: dict[str, float] = field(default_factory=dict)
     last_import_plan: dict[str, Any] = field(default_factory=dict)
@@ -59,11 +65,13 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
         self.state = OptimizerState()
 
     async def async_initialize(self) -> None:
+        """Start up sequence: restore persisted state → prune old logs → register listeners → push initial data."""
         stored = await self.storage.async_load() or {}
         for key, value in stored.items():
             if hasattr(self.state, key):
                 setattr(self.state, key, value)
         merged = merge_entry_data(dict(self.entry.data), dict(self.entry.options))
+        # Always re-read operation_mode from config so a reconfiguration takes effect immediately.
         self.state.operation_mode = merged.get("operation_mode", "auto")
         await self.optimizer.data_logger.async_prune_old_files()
         await self.optimizer.async_setup()
@@ -73,6 +81,11 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
         await self.optimizer.async_shutdown()
 
     def update_state(self, touch: bool = True, **kwargs: Any) -> None:
+        """Update one or more state fields and persist to storage.
+
+        Pass touch=False to skip updating updated_at (used when setting operational
+        metadata that shouldn't be surfaced as a user-visible state change).
+        """
         for key, value in kwargs.items():
             if hasattr(self.state, key):
                 setattr(self.state, key, value)

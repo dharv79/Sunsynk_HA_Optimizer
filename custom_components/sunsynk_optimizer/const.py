@@ -32,14 +32,14 @@ CONF_INVEST = "invest"
 CONF_CHARGES = "charges"
 CONF_FLUX_PRODUCTS = "flux_products"
 
-DEFAULT_EXPORT_DISABLE_THRESHOLD = 1500
+DEFAULT_EXPORT_DISABLE_THRESHOLD = 1500  # watts; above this between 16–19h suggests heavy self-consumption, so export is counterproductive
 DEFAULT_SOLAR_FORECAST_SENSOR = "sensor.energy_production_today"
 DEFAULT_WEATHER_ENTITY = "weather.forecast_home"
 DEFAULT_NOTIFY_SERVICE = "notify.notify"
 DEFAULT_NOTIFY_TARGET = ""
 DEFAULT_FULL_CHARGE_DAY = "Wednesday"
-DEFAULT_CURRENCY = 366
-DEFAULT_INVEST = 9400
+DEFAULT_CURRENCY = 366   # Sunsynk API internal currency code for GBP (not ISO 4217)
+DEFAULT_INVEST = 9400    # default battery system cost in the above currency unit, used for ROI display in the Sunsynk portal
 DEFAULT_OPERATION_MODE = "auto"
 
 FULL_CHARGE_DAY_OPTIONS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]

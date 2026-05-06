@@ -56,10 +56,12 @@ STATUS_OPTIONS = ["import", "export"]
 
 
 def _time_selector() -> selector.TextSelector:
+    """Return a plain text selector used for HH:MM time entry fields."""
     return selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT))
 
 
 def _base_schema(values: dict[str, Any] | None = None) -> vol.Schema:
+    """Build the main settings schema, pre-populated with `values` when reconfiguring."""
     values = values or {}
     return vol.Schema(
         {
@@ -104,6 +106,7 @@ def _base_schema(values: dict[str, Any] | None = None) -> vol.Schema:
 
 
 def _charge_schema(charges: list[dict[str, Any]], start: int, end: int) -> vol.Schema:
+    """Build schema for tariff rows `start` to `end` (exclusive) from the charges list."""
     schema: dict[Any, Any] = {}
     for idx in range(start, end):
         entry = charges[idx]
@@ -120,6 +123,7 @@ def _charge_schema(charges: list[dict[str, Any]], start: int, end: int) -> vol.S
 
 
 def _flux_schema(flux_products: list[dict[str, Any]]) -> vol.Schema:
+    """Build schema for the two Flux windows (index 0 = import, index 1 = export)."""
     return vol.Schema(
         {
             vol.Required("flux_1_start", default=str(flux_products[0]["startTime"])): _time_selector(),
@@ -137,6 +141,12 @@ def _flux_schema(flux_products: list[dict[str, Any]]) -> vol.Schema:
 
 
 async def _validate_input(hass: HomeAssistant, user_input: dict[str, Any], validate_login: bool = True) -> dict[str, str]:
+    """Validate config form input. Returns a dict of field → error key (empty = valid).
+
+    Checks that the SolarSynkV3 battery_soc and grid_pac entities exist, the weather and
+    forecast entities exist, the notify service is registered, and (on initial setup only)
+    that the Sunsynk API credentials are accepted.
+    """
     errors: dict[str, str] = {}
     plant_id = str(user_input[CONF_PLANT_ID]).strip()
     inverter_serial = str(user_input[CONF_INVERTER_SERIAL]).strip()
@@ -205,11 +215,18 @@ class SunsynkOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class SunsynkOptimizerOptionsFlow(config_entries.OptionsFlow):
+    """Multi-step options flow: init → charges_1 → charges_2 → flux.
+
+    Settings accumulate in self._working across steps and are saved as options
+    on the final step, which triggers a config-entry reload.
+    """
+
     def __init__(self, config_entry):
         self._config_entry = config_entry
         self._working = merge_entry_data(dict(config_entry.data), dict(config_entry.options))
 
     async def async_step_init(self, user_input=None):
+        """Step 1 of 4 — main settings (credentials excluded, all other fields)."""
         if user_input is not None:
             errors = await _validate_input(self.hass, user_input, validate_login=False)
             if not errors:
@@ -222,18 +239,21 @@ class SunsynkOptimizerOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="init", data_schema=_base_schema(self._working))
 
     async def async_step_charges_1(self, user_input=None):
+        """Step 2 of 4 — tariff rows 1–4 (import and export prices for the first four windows)."""
         if user_input is not None:
             self._save_charge_rows(user_input, 0, 4)
             return await self.async_step_charges_2()
         return self.async_show_form(step_id="charges_1", data_schema=_charge_schema(self._working[CONF_CHARGES], 0, 4))
 
     async def async_step_charges_2(self, user_input=None):
+        """Step 3 of 4 — tariff rows 5–8 (import and export prices for the remaining windows)."""
         if user_input is not None:
             self._save_charge_rows(user_input, 4, 8)
             return await self.async_step_flux()
         return self.async_show_form(step_id="charges_2", data_schema=_charge_schema(self._working[CONF_CHARGES], 4, 8))
 
     async def async_step_flux(self, user_input=None):
+        """Step 4 of 4 — baseline Flux 1 (import) and Flux 2 (export) windows."""
         if user_input is not None:
             self._working[CONF_FLUX_PRODUCTS] = [
                 {"provider": 2, "direction": 1, "startTime": user_input["flux_1_start"], "endTime": user_input["flux_1_end"], "targetSoc": int(user_input["flux_1_target"])},
@@ -243,6 +263,7 @@ class SunsynkOptimizerOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="flux", data_schema=_flux_schema(self._working[CONF_FLUX_PRODUCTS]))
 
     def _save_charge_rows(self, user_input: dict[str, Any], start: int, end: int) -> None:
+        """Parse numbered charge_N_* fields from user_input and write them back to self._working."""
         charges = self._working[CONF_CHARGES]
         for idx in range(start, end):
             line = idx + 1
