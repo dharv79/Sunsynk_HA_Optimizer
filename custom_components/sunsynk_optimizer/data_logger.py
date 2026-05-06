@@ -26,13 +26,14 @@ DATA_DIR_NAME = "sunsynk_optimizer_data"
 class DataLogger:
     """Appends JSONL records and analyses history for adaptive corrections."""
 
-    _MIN_DAYS_FORECAST_CORRECTION = 7
-    _MIN_DAYS_SOC_ADJUSTMENT = 5
-    _EVENING_SOC_LOW = 20.0   # below → charged too little overnight
-    _EVENING_SOC_HIGH = 35.0  # above → charged too much overnight
-    _RETAIN_MONTHS = 13
+    _MIN_DAYS_FORECAST_CORRECTION = 7   # fewer paired days → too noisy to trust a ratio
+    _MIN_DAYS_SOC_ADJUSTMENT = 5        # minimum for drain and evening-nudge corrections
+    _EVENING_SOC_LOW = 20.0             # below this at 22:00 → battery ran low; we under-charged
+    _EVENING_SOC_HIGH = 35.0            # above this at 22:00 → battery still full; we over-charged
+    _RETAIN_MONTHS = 13                 # one full year + one month so year-over-year patterns are always available
 
     def __init__(self, hass: HomeAssistant) -> None:
+        """Resolve the data directory path from the HA config directory."""
         self.hass = hass
         self._data_dir = hass.config.path(DATA_DIR_NAME)
 
@@ -121,6 +122,7 @@ class DataLogger:
         return self._pair_records(records)
 
     def _read_recent(self, days: int) -> list[dict[str, Any]]:
+        """Read all JSONL records from the relevant monthly files within the last `days` days."""
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         months: set[str] = set()
         now = datetime.now(timezone.utc)
@@ -150,6 +152,7 @@ class DataLogger:
         return records
 
     def _pair_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Join import_plan + day_actuals + morning_state records by date into unified dicts."""
         plans = {
             r["date"]: r
             for r in records
@@ -245,14 +248,14 @@ class DataLogger:
             d for d in paired_days
             if d.get("overnight_drain_pct") is not None
             and d["overnight_drain_pct"] >= 0
-            and d.get("morning_pv_power", 0) < 50
+            and d.get("morning_pv_power", 0) < 50  # <50 W means solar hasn't started; reading is pure battery drain
             and not d["is_full_day"]
         ]
         if len(valid) < self._MIN_DAYS_SOC_ADJUSTMENT:
             return 0
         mean_drain = sum(d["overnight_drain_pct"] for d in valid) / len(valid)
         rounded = round(mean_drain / 5) * 5
-        return max(0, min(20, int(rounded)))
+        return max(0, min(20, int(rounded)))  # cap at 20% to avoid overreacting to outlier nights
 
     # ------------------------------------------------------------------ #
     # Retention                                                            #
@@ -263,6 +266,7 @@ class DataLogger:
         await self.hass.async_add_executor_job(self._prune_old_files, retain_months)
 
     def _prune_old_files(self, retain_months: int) -> None:
+        """Delete JSONL files whose month falls outside the retention window."""
         if not os.path.isdir(self._data_dir):
             return
         now = datetime.now(timezone.utc)
@@ -293,9 +297,11 @@ class DataLogger:
     # ------------------------------------------------------------------ #
 
     async def _async_append(self, record: dict[str, Any]) -> None:
+        """Offload the blocking file write to the executor so it doesn't block the event loop."""
         await self.hass.async_add_executor_job(self._write_record, record)
 
     def _write_record(self, record: dict[str, Any]) -> None:
+        """Append one JSON line to the current month's JSONL file, creating it if needed."""
         os.makedirs(self._data_dir, exist_ok=True)
         month_file = os.path.join(
             self._data_dir,

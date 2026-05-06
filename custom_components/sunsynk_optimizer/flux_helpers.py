@@ -41,7 +41,13 @@ def default_charges() -> list[dict[str, Any]]:
 
 
 def default_flux_products() -> list[dict[str, Any]]:
-    """Return default Flux windows based on the original working values."""
+    """Return default Flux windows based on the original working values.
+
+    Index 0 is always Flux 1 (import, direction=1).
+    Index 1 is always Flux 2 (export, direction=0).
+    provider=2 is the Sunsynk API code for the Flux tariff product.
+    These indices are fixed by the Sunsynk API — never reorder them.
+    """
     return [
         {"provider": 2, "direction": 1, "startTime": "02:00", "endTime": "04:30", "targetSoc": 100},
         {"provider": 2, "direction": 0, "startTime": "16:00", "endTime": "16:15", "targetSoc": 85},
@@ -49,7 +55,12 @@ def default_flux_products() -> list[dict[str, Any]]:
 
 
 def merge_entry_data(data: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
-    """Merge config-entry data and options, with options overriding."""
+    """Merge config-entry data and options, with options overriding.
+
+    Always call this instead of reading entry.data or entry.options directly —
+    settings may exist in either location depending on whether they were set
+    at initial setup or via a later reconfiguration.
+    """
     merged = deepcopy(data)
     merged.update(options)
     merged.setdefault(CONF_CHARGES, default_charges())
@@ -64,7 +75,11 @@ def apply_flux_override(
     flux_1: dict[str, Any] | None = None,
     flux_2: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Apply Flux 1 / Flux 2 overrides to the configured defaults."""
+    """Apply Flux 1 / Flux 2 overrides to the configured defaults.
+
+    Provider and direction are preserved from the base config so callers only
+    need to supply the fields they want to change (startTime, endTime, targetSoc).
+    """
     rows = deepcopy(flux_products) if flux_products else default_flux_products()
     if len(rows) < 2:
         rows = default_flux_products()
@@ -72,16 +87,16 @@ def apply_flux_override(
     if flux_1:
         rows[0].update(flux_1)
         rows[0].setdefault("provider", 2)
-        rows[0].setdefault("direction", 1)
+        rows[0].setdefault("direction", 1)  # direction=1 → import
     if flux_2:
         rows[1].update(flux_2)
         rows[1].setdefault("provider", 2)
-        rows[1].setdefault("direction", 0)
+        rows[1].setdefault("direction", 0)  # direction=0 → export
     return rows
 
 
 def build_payload(config: dict[str, Any], flux_products: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Build the Sunsynk income payload."""
+    """Build the full Sunsynk income POST body from config and optional flux override."""
     return {
         "id": str(config[CONF_PLANT_ID]).strip(),
         "currency": int(config[CONF_CURRENCY]),
