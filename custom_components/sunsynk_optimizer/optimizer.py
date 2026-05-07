@@ -25,6 +25,8 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BATTERY_CAPACITY,
+    CONF_CHARGE_RATE,
     CONF_DEFAULT_FULL_CHARGE_DAY,
     CONF_EXPORT_DISABLE_THRESHOLD,
     CONF_FLUX_PRODUCTS,
@@ -35,6 +37,8 @@ from .const import (
     CONF_PLANT_ID,
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_WEATHER_ENTITY,
+    DEFAULT_BATTERY_CAPACITY,
+    DEFAULT_CHARGE_RATE,
     DEFAULT_OPERATION_MODE,
     FULL_CHARGE_DAY_OPTIONS,
 )
@@ -392,6 +396,8 @@ class SunsynkOptimizer:
         is_full_day = today == full_day
         forecast_entity = self.cfg[CONF_SOLAR_FORECAST_SENSOR]
         raw_forecast_kwh = self._state_float(forecast_entity, 0)
+        battery_capacity_kwh = float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))
+        charge_rate_kw = float(self.cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
 
         paired_days = await self.data_logger.async_load_paired_days(days=30)
         forecast_correction = self.data_logger.compute_forecast_correction(paired_days)
@@ -437,36 +443,17 @@ class SunsynkOptimizer:
             flux1_end = "05:00"
             logic_branch = "low_solar_full_window"
         else:
-            # Start from 04:00 as the neutral end time, then adjust based on SOC and forecast band.
-            end = dt_util.now().replace(hour=4, minute=0, second=0, microsecond=0)
-
-            # Higher current SOC means the battery needs less time to reach target → shorten window.
-            if soc > 75:
-                end = end.replace(hour=2, minute=30)
-            elif soc > 65:
-                end = end.replace(hour=3, minute=0)
-            elif soc > 50:
-                end = end.replace(hour=3, minute=30)
-
-            # Forecast band shifts: summer expects solar to compensate so import less;
-            # winter expects little solar so import longer.
-            if forecast_band == "summer_like":
-                end = end - timedelta(minutes=60)
-            elif forecast_band == "winter_like":
-                end = end + timedelta(minutes=30)
-
-            # Extra summer-month trim: April–September has the longest days,
-            # so solar recovery is more reliable and we can afford a shorter import.
-            month = dt_util.now().month
-            is_summer_month = month in [4, 5, 6, 7, 8, 9]
-            if is_summer_month and forecast_band == "summer_like":
-                end = end - timedelta(minutes=30)
+            # Physics-based window: charge exactly as long as needed to reach target_soc.
+            energy_needed_kwh = max(0.0, (target_soc - soc) / 100.0 * battery_capacity_kwh)
+            raw_minutes = (energy_needed_kwh / charge_rate_kw) * 60
+            # Round up to the next 15-minute slot so the window always covers the full charge need.
+            quarter_slots = int((raw_minutes + 14) // 15)
+            end = dt_util.now().replace(hour=2, minute=0, second=0, microsecond=0) + timedelta(minutes=quarter_slots * 15)
 
             # Clamp to 02:15–05:00. The 02:15 floor ensures the window is never shorter
             # than 15 minutes from the fixed 02:00 start, which isn't worth the API call.
             earliest = dt_util.now().replace(hour=2, minute=15, second=0, microsecond=0)
             latest = dt_util.now().replace(hour=5, minute=0, second=0, microsecond=0)
-
             if end < earliest:
                 end = earliest
             if end > latest:

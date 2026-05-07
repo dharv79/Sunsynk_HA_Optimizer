@@ -41,6 +41,11 @@ DEFAULT_FULL_CHARGE_DAY = "Wednesday"
 DEFAULT_CURRENCY = 366   # Sunsynk API internal currency code for GBP (not ISO 4217)
 DEFAULT_INVEST = 9400    # default battery system cost in the above currency unit, used for ROI display in the Sunsynk portal
 DEFAULT_OPERATION_MODE = "auto"
+DEFAULT_BATTERY_CAPACITY = 10.0  # kWh — typical home battery system size
+DEFAULT_CHARGE_RATE = 3.0        # kW — 0.3C rate typical for LiFePO4 systems
+
+CONF_BATTERY_CAPACITY = "battery_capacity_kwh"
+CONF_CHARGE_RATE = "charge_rate_kw"
 
 FULL_CHARGE_DAY_OPTIONS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 OPERATION_MODE_OPTIONS = ["auto", "monitor"]

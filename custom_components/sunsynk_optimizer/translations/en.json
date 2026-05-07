@@ -17,7 +17,9 @@
           "currency": "Currency",
           "invest": "Invest",
           "export_disable_threshold": "Evening export disable threshold (W)",
-          "default_full_charge_day": "Default full charge day"
+          "default_full_charge_day": "Default full charge day",
+          "battery_capacity_kwh": "Battery capacity (kWh)",
+          "charge_rate_kw": "Charge rate (kW)"
         }
       }
     },
@@ -48,7 +50,9 @@
           "currency": "Currency",
           "invest": "Invest",
           "export_disable_threshold": "Evening export disable threshold (W)",
-          "default_full_charge_day": "Default full charge day"
+          "default_full_charge_day": "Default full charge day",
+          "battery_capacity_kwh": "Battery capacity (kWh)",
+          "charge_rate_kw": "Charge rate (kW)"
         }
       },
       "charges_1": {
