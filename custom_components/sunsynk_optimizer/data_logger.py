@@ -197,7 +197,7 @@ class DataLogger:
         return paired
 
     def compute_forecast_correction(self, paired_days: list[dict[str, Any]]) -> float:
-        """Return mean(actual/forecast) ratio over recent days, capped at [0.5, 1.5].
+        """Return mean(actual/forecast) ratio over recent days, capped at [0.5, 3.0].
 
         Returns 1.0 (no correction) until at least 7 paired days exist.
         Skips days where forecast was near-zero to avoid division noise.
@@ -207,7 +207,7 @@ class DataLogger:
             return 1.0
         ratios = [d["actual_solar_kwh"] / d["solar_forecast_kwh"] for d in valid]
         factor = sum(ratios) / len(ratios)
-        return max(0.5, min(1.5, round(factor, 3)))
+        return max(0.5, min(3.0, round(factor, 3)))
 
     def compute_soc_target_adjustment(
         self, paired_days: list[dict[str, Any]], forecast_band: str
@@ -256,6 +256,29 @@ class DataLogger:
         mean_drain = sum(d["overnight_drain_pct"] for d in valid) / len(valid)
         rounded = round(mean_drain / 5) * 5
         return max(0, min(20, int(rounded)))  # cap at 20% to avoid overreacting to outlier nights
+
+    def count_forecast_correction_days(self, paired_days: list[dict[str, Any]]) -> int:
+        """Return how many valid paired days exist toward the forecast correction threshold."""
+        return len([d for d in paired_days if d["solar_forecast_kwh"] > 0.5])
+
+    def count_drain_adjustment_days(self, paired_days: list[dict[str, Any]]) -> int:
+        """Return how many valid morning-state days exist toward the drain adjustment threshold."""
+        return len([
+            d for d in paired_days
+            if d.get("overnight_drain_pct") is not None
+            and d["overnight_drain_pct"] >= 0
+            and d.get("morning_pv_power", 0) < 50
+            and not d["is_full_day"]
+        ])
+
+    def count_soc_adjustment_days(self, paired_days: list[dict[str, Any]], forecast_band: str) -> int:
+        """Return how many relevant days exist toward the evening SOC nudge threshold."""
+        return len([
+            d for d in paired_days
+            if d["forecast_band"] == forecast_band
+            and not d["is_full_day"]
+            and not d["evening_export_disabled"]
+        ])
 
     # ------------------------------------------------------------------ #
     # Retention                                                            #
