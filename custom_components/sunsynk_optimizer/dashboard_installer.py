@@ -54,24 +54,30 @@ Suggestion: use **mid SOC targets** and let forecast drive import end times more
 {{% endif %}}"""
 
     adaptive_learning_content = f"""{{% set factor = state_attr('sensor.import_plan_end', 'forecast_correction_factor') | float(1.0) %}}
+{{% set factor_days = state_attr('sensor.import_plan_end', 'forecast_correction_days') | int(0) %}}
 {{% set drain = state_attr('sensor.import_plan_end', 'overnight_drain_adjustment') | int(0) %}}
+{{% set drain_days = state_attr('sensor.import_plan_end', 'overnight_drain_days') | int(0) %}}
 {{% set nudge = state_attr('sensor.import_plan_end', 'soc_adjustment') | int(0) %}}
+{{% set nudge_days = state_attr('sensor.import_plan_end', 'soc_adjustment_days') | int(0) %}}
 
 **Forecast correction:** {{{{ '%.3f' | format(factor) }}}} × raw forecast
-{{% if factor < 0.95 %}}→ Forecast.Solar over-predicts for your location — solar used is {{{{ '%.0f' | format((1 - factor) * 100) }}}}% lower than forecast.
+{{% if factor_days < 7 %}}→ Collecting data — {{{{factor_days}}}}/7 days so far, {{{{7 - factor_days}}}} more needed.
+{{% elif factor < 0.95 %}}→ Forecast.Solar over-predicts for your location — solar used is {{{{ '%.0f' | format((1 - factor) * 100) }}}}% lower than forecast.
 {{% elif factor > 1.05 %}}→ Forecast.Solar under-predicts — actual generation runs {{{{ '%.0f' | format((factor - 1) * 100) }}}}% higher than forecast.
 {{% else %}}→ Forecast accuracy looks good (within 5%).
 {{% endif %}}
 
 **Overnight drain:** +{{{{drain}}}}% added to target
-{{% if drain > 0 %}}→ Battery loses ~{{{{drain}}}}% SOC between charging end and 06:00.
-{{% else %}}→ Not enough morning readings yet — no drain adjustment applied.
+{{% if drain_days < 5 %}}→ Collecting data — {{{{drain_days}}}}/5 mornings so far, {{{{5 - drain_days}}}} more needed.
+{{% elif drain > 0 %}}→ Battery loses ~{{{{drain}}}}% SOC between charging end and 06:00.
+{{% else %}}→ Overnight drain is negligible — no adjustment needed.
 {{% endif %}}
 
 **Evening SOC nudge:** {{{{nudge | int | abs}}}}% {{{{'+' if nudge > 0 else ('-' if nudge < 0 else '')}}}}
-{{% if nudge < 0 %}}→ Battery ends the day too full — reducing overnight target.
+{{% if nudge_days < 5 %}}→ Collecting data — {{{{nudge_days}}}}/5 days in this band, {{{{5 - nudge_days}}}} more needed.
+{{% elif nudge < 0 %}}→ Battery ends the day too full — reducing overnight target.
 {{% elif nudge > 0 %}}→ Battery ends the day too empty — increasing overnight target.
-{{% else %}}→ Evening SOC is in the right range, no nudge needed.
+{{% else %}}→ Evening SOC is in the right range — no nudge needed.
 {{% endif %}}"""
 
     notes_content = f"""**Plant ID:** {api_plant_id}

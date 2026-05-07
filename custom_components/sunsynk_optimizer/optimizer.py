@@ -438,6 +438,10 @@ class SunsynkOptimizer:
             )
             target_soc = max(50, min(100, target_soc + overnight_drain_adjustment + soc_adjustment))
 
+        forecast_correction_days = self.data_logger.count_forecast_correction_days(paired_days)
+        overnight_drain_days = self.data_logger.count_drain_adjustment_days(paired_days)
+        soc_adjustment_days = self.data_logger.count_soc_adjustment_days(paired_days, forecast_band)
+
         if solar_forecast_kwh < 7:
             # Extend to maximum window when solar is scarce — we need all the cheap import we can get.
             flux1_end = "05:00"
@@ -493,7 +497,10 @@ class SunsynkOptimizer:
             "target_soc": target_soc,
             "target_soc_reason": soc_reason,
             "overnight_drain_adjustment": overnight_drain_adjustment,
+            "overnight_drain_days": overnight_drain_days,
             "soc_adjustment": soc_adjustment,
+            "soc_adjustment_days": soc_adjustment_days,
+            "forecast_correction_days": forecast_correction_days,
             "flux1_end": flux1_end,
             "next_import_window": next_import_window,
             "payload": payload,
