@@ -21,7 +21,9 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import SunsynkApiClient
 from .const import (
+    CONF_BATTERY_CAPACITY,
     CONF_CHARGES,
+    CONF_CHARGE_RATE,
     CONF_CURRENCY,
     CONF_DEFAULT_FULL_CHARGE_DAY,
     CONF_EXPORT_DISABLE_THRESHOLD,
@@ -36,6 +38,8 @@ from .const import (
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_USERNAME,
     CONF_WEATHER_ENTITY,
+    DEFAULT_BATTERY_CAPACITY,
+    DEFAULT_CHARGE_RATE,
     DEFAULT_CURRENCY,
     DEFAULT_EXPORT_DISABLE_THRESHOLD,
     DEFAULT_FULL_CHARGE_DAY,
@@ -100,6 +104,12 @@ def _base_schema(values: dict[str, Any] | None = None) -> vol.Schema:
                 default=values.get(CONF_DEFAULT_FULL_CHARGE_DAY, DEFAULT_FULL_CHARGE_DAY),
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(options=FULL_CHARGE_DAY_OPTIONS, mode=selector.SelectSelectorMode.DROPDOWN)
+            ),
+            vol.Required(CONF_BATTERY_CAPACITY, default=values.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=50, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWh")
+            ),
+            vol.Required(CONF_CHARGE_RATE, default=values.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0.5, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
         }
     )
