@@ -18,7 +18,7 @@ from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_PLANT_ID, CONF_INVERTER_SERIAL
+from .const import CONF_AVG_CONSUMPTION_KW, CONF_PLANT_ID, CONF_INVERTER_SERIAL, DEFAULT_AVG_CONSUMPTION_KW
 from .flux_helpers import merge_entry_data
 
 
@@ -34,6 +34,7 @@ def _build_dashboard(config: dict) -> dict:
     api_plant_id = str(config[CONF_PLANT_ID]).strip()
     forecast_sensor = config.get("solar_forecast_sensor", "sensor.energy_production_today")
     weather_entity = config.get("weather_entity", "weather.forecast_home")
+    avg_consumption_kw = float(config.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
 
     def s(name: str) -> str:
         return f"sensor.solarsynkv3_{solar_entity_suffix}_{name}"
@@ -53,7 +54,13 @@ Suggestion: bias toward **higher overnight SOC targets**, longer import windows,
 Suggestion: use **mid SOC targets** and let forecast drive import end times more aggressively.
 {{% endif %}}"""
 
-    adaptive_learning_content = f"""{{% set factor = state_attr('sensor.import_plan_end', 'forecast_correction_factor') | float(1.0) %}}
+    adaptive_learning_content = f"""{{% set solar_start = state_attr('sensor.import_plan_end', 'solar_start_time') %}}
+{{% set hrs = state_attr('sensor.import_plan_end', 'hours_to_solar') | float(0) %}}
+{{% if solar_start %}}
+**Solar bridge:** ~{{{{solar_start}}}} start — {{{{hrs}}}}h × {avg_consumption_kw}kW = {{{{ (hrs * {avg_consumption_kw}) | round(1) }}}} kWh to cover
+{{% endif %}}
+
+{{% set factor = state_attr('sensor.import_plan_end', 'forecast_correction_factor') | float(1.0) %}}
 {{% set factor_days = state_attr('sensor.import_plan_end', 'forecast_correction_days') | int(0) %}}
 {{% set drain = state_attr('sensor.import_plan_end', 'overnight_drain_adjustment') | int(0) %}}
 {{% set drain_days = state_attr('sensor.import_plan_end', 'overnight_drain_days') | int(0) %}}

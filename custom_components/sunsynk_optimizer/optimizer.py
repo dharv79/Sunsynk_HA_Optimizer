@@ -25,6 +25,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
     CONF_DEFAULT_FULL_CHARGE_DAY,
@@ -36,10 +37,13 @@ from .const import (
     CONF_OPERATION_MODE,
     CONF_PLANT_ID,
     CONF_SOLAR_FORECAST_SENSOR,
+    CONF_SOLAR_START_OFFSET_HOURS,
     CONF_WEATHER_ENTITY,
+    DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
     DEFAULT_OPERATION_MODE,
+    DEFAULT_SOLAR_START_OFFSET_HOURS,
     FULL_CHARGE_DAY_OPTIONS,
 )
 from .data_logger import DataLogger
@@ -398,13 +402,29 @@ class SunsynkOptimizer:
         raw_forecast_kwh = self._state_float(forecast_entity, 0)
         battery_capacity_kwh = float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))
         charge_rate_kw = float(self.cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
+        avg_consumption_kw = float(self.cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        solar_start_offset_hours = float(self.cfg.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS))
 
         paired_days = await self.data_logger.async_load_paired_days(days=30)
         forecast_correction = self.data_logger.compute_forecast_correction(paired_days)
         solar_forecast_kwh = round(raw_forecast_kwh * forecast_correction, 2)
         forecast_band = self._forecast_band(solar_forecast_kwh)
 
-        # SOC target tiers — chosen to balance overnight grid cost against solar recovery risk.
+        # Compute solar start time from sun.sun entity (sunrise + configured offset).
+        solar_start_time: str | None = None
+        hours_to_solar: float = 0.0
+        sun_state = self.hass.states.get("sun.sun")
+        if sun_state:
+            next_rising_str = sun_state.attributes.get("next_rising")
+            if next_rising_str:
+                next_rising = dt_util.parse_datetime(next_rising_str)
+                if next_rising:
+                    solar_start_dt = dt_util.as_local(next_rising) + timedelta(hours=solar_start_offset_hours)
+                    solar_start_time = solar_start_dt.strftime("%H:%M")
+                    solar_start_hours = solar_start_dt.hour + solar_start_dt.minute / 60.0
+                    # Use 05:00 as the worst-case charge window end to avoid circularity.
+                    hours_to_solar = max(0.0, solar_start_hours - 5.0)
+
         if is_full_day:
             target_soc = 100
             soc_reason = "weekly_full_charge_day"
@@ -417,15 +437,23 @@ class SunsynkOptimizer:
                 else:
                     target_soc = 95
                     soc_reason = "low_solar_override"
-            elif forecast_band == "winter_like":
-                target_soc = 95   # limited solar → stay high to cover the day
-                soc_reason = "winter_like"
-            elif forecast_band == "summer_like":
-                target_soc = 80   # plenty of solar → leave headroom for PV absorption
-                soc_reason = "summer_like"
+            elif solar_start_time is not None:
+                # Charge only enough to bridge from charge window end (05:00) to when solar covers load.
+                energy_to_cover = hours_to_solar * avg_consumption_kw
+                target_soc = int(10 + energy_to_cover / battery_capacity_kwh * 100)
+                target_soc = max(20, min(100, target_soc))
+                soc_reason = "solar_bridge"
             else:
-                target_soc = 85   # shoulder — mid point
-                soc_reason = "shoulder"
+                # sun.sun unavailable — fall back to band-based targets.
+                if forecast_band == "winter_like":
+                    target_soc = 95
+                    soc_reason = "winter_like"
+                elif forecast_band == "summer_like":
+                    target_soc = 80
+                    soc_reason = "summer_like"
+                else:
+                    target_soc = 85
+                    soc_reason = "shoulder"
 
         overnight_drain_adjustment = 0
         soc_adjustment = 0
@@ -436,7 +464,7 @@ class SunsynkOptimizer:
             soc_adjustment = self.data_logger.compute_soc_target_adjustment(
                 paired_days, forecast_band
             )
-            target_soc = max(50, min(100, target_soc + overnight_drain_adjustment + soc_adjustment))
+            target_soc = max(20, min(100, target_soc + overnight_drain_adjustment + soc_adjustment))
 
         forecast_correction_days = self.data_logger.count_forecast_correction_days(paired_days)
         overnight_drain_days = self.data_logger.count_drain_adjustment_days(paired_days)
@@ -494,6 +522,8 @@ class SunsynkOptimizer:
             "solar_forecast_kwh": solar_forecast_kwh,
             "forecast_band": forecast_band,
             "logic_branch": logic_branch,
+            "solar_start_time": solar_start_time,
+            "hours_to_solar": round(hours_to_solar, 2),
             "target_soc": target_soc,
             "target_soc_reason": soc_reason,
             "overnight_drain_adjustment": overnight_drain_adjustment,

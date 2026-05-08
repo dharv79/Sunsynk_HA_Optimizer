@@ -19,7 +19,9 @@
           "export_disable_threshold": "Evening export disable threshold (W)",
           "default_full_charge_day": "Default full charge day",
           "battery_capacity_kwh": "Battery capacity (kWh)",
-          "charge_rate_kw": "Charge rate (kW)"
+          "charge_rate_kw": "Charge rate (kW)",
+          "avg_consumption_kw": "Average home consumption (kW)",
+          "solar_start_offset_hours": "Hours after sunrise until solar covers load"
         }
       }
     },
@@ -52,7 +54,9 @@
           "export_disable_threshold": "Evening export disable threshold (W)",
           "default_full_charge_day": "Default full charge day",
           "battery_capacity_kwh": "Battery capacity (kWh)",
-          "charge_rate_kw": "Charge rate (kW)"
+          "charge_rate_kw": "Charge rate (kW)",
+          "avg_consumption_kw": "Average home consumption (kW)",
+          "solar_start_offset_hours": "Hours after sunrise until solar covers load"
         }
       },
       "charges_1": {
