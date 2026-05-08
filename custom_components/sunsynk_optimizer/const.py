@@ -43,9 +43,13 @@ DEFAULT_INVEST = 9400    # default battery system cost in the above currency uni
 DEFAULT_OPERATION_MODE = "auto"
 DEFAULT_BATTERY_CAPACITY = 10.0  # kWh — typical home battery system size
 DEFAULT_CHARGE_RATE = 3.0        # kW — 0.3C rate typical for LiFePO4 systems
+DEFAULT_AVG_CONSUMPTION_KW = 0.75    # kW — mid-range of typical 500–1000 W home load
+DEFAULT_SOLAR_START_OFFSET_HOURS = 2.5  # hours after sunrise when solar covers home load
 
 CONF_BATTERY_CAPACITY = "battery_capacity_kwh"
 CONF_CHARGE_RATE = "charge_rate_kw"
+CONF_AVG_CONSUMPTION_KW = "avg_consumption_kw"
+CONF_SOLAR_START_OFFSET_HOURS = "solar_start_offset_hours"
 
 FULL_CHARGE_DAY_OPTIONS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 OPERATION_MODE_OPTIONS = ["auto", "monitor"]
