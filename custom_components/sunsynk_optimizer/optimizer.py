@@ -440,8 +440,8 @@ class SunsynkOptimizer:
             elif solar_start_time is not None:
                 # Charge only enough to bridge from charge window end (05:00) to when solar covers load.
                 energy_to_cover = hours_to_solar * avg_consumption_kw
-                target_soc = int(10 + energy_to_cover / battery_capacity_kwh * 100)
-                target_soc = max(20, min(100, target_soc))
+                target_soc = int(20 + energy_to_cover / battery_capacity_kwh * 100)
+                target_soc = max(30, min(100, target_soc))
                 soc_reason = "solar_bridge"
             else:
                 # sun.sun unavailable — fall back to band-based targets.
@@ -465,6 +465,12 @@ class SunsynkOptimizer:
                 paired_days, forecast_band
             )
             target_soc = max(20, min(100, target_soc + overnight_drain_adjustment + soc_adjustment))
+            # Ensure estimated morning SOC (at 06:00) stays above safe minimum.
+            # overnight_drain_adjustment reflects the measured drop from charge end to 06:00.
+            if overnight_drain_adjustment > 0:
+                estimated_morning_soc = target_soc - overnight_drain_adjustment
+                if estimated_morning_soc < 25:
+                    target_soc = min(100, 25 + overnight_drain_adjustment)
 
         forecast_correction_days = self.data_logger.count_forecast_correction_days(paired_days)
         overnight_drain_days = self.data_logger.count_drain_adjustment_days(paired_days)

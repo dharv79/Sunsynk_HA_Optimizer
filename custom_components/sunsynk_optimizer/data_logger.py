@@ -31,6 +31,7 @@ class DataLogger:
     _EVENING_SOC_LOW = 20.0             # below this at 22:00 → battery ran low; we under-charged
     _EVENING_SOC_HIGH = 35.0            # above this at 22:00 → battery still full; we over-charged
     _RETAIN_MONTHS = 13                 # one full year + one month so year-over-year patterns are always available
+    _HIGH_SOLAR_THRESHOLD_KWH = 15.0   # days above this excluded from evening nudge — high SOC is solar-caused, not import-caused
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Resolve the data directory path from the HA config directory."""
@@ -223,6 +224,7 @@ class DataLogger:
             if d["forecast_band"] == forecast_band
             and not d["is_full_day"]
             and not d["evening_export_disabled"]
+            and d.get("actual_solar_kwh", 0) < self._HIGH_SOLAR_THRESHOLD_KWH
         ]
         if len(relevant) < self._MIN_DAYS_SOC_ADJUSTMENT:
             return 0
@@ -278,6 +280,7 @@ class DataLogger:
             if d["forecast_band"] == forecast_band
             and not d["is_full_day"]
             and not d["evening_export_disabled"]
+            and d.get("actual_solar_kwh", 0) < self._HIGH_SOLAR_THRESHOLD_KWH
         ])
 
     # ------------------------------------------------------------------ #
