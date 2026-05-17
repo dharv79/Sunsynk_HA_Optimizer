@@ -26,6 +26,7 @@ from .const import (
     CONF_CHARGES,
     CONF_CHARGE_RATE,
     CONF_CURRENCY,
+    CONF_DATA_REPORT_TARGET,
     CONF_DEFAULT_FULL_CHARGE_DAY,
     CONF_EXPORT_DISABLE_THRESHOLD,
     CONF_FLUX_PRODUCTS,
@@ -121,6 +122,10 @@ def _base_schema(values: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(CONF_SOLAR_START_OFFSET_HOURS, default=values.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=6.0, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="h")
             ),
+            vol.Optional(
+                CONF_DATA_REPORT_TARGET,
+                default=values.get(CONF_DATA_REPORT_TARGET, ""),
+            ): selector.TextSelector(),
         }
     )
 

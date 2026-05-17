@@ -28,6 +28,7 @@ from .const import (
     CONF_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
+    CONF_DATA_REPORT_TARGET,
     CONF_DEFAULT_FULL_CHARGE_DAY,
     CONF_EXPORT_DISABLE_THRESHOLD,
     CONF_FLUX_PRODUCTS,
@@ -209,7 +210,7 @@ class SunsynkOptimizer:
             return "winter_like"
         return "shoulder"
 
-    async def async_notify(self, title: str, message: str) -> None:
+    async def async_notify(self, title: str, message: str, target: str | None = None) -> None:
         """Send a notification via the configured HA notify service."""
         service_string = str(self.cfg.get(CONF_NOTIFY_SERVICE, "")).strip()
         if "." not in service_string:
@@ -226,7 +227,7 @@ class SunsynkOptimizer:
 
         domain, service = service_string.split(".", 1)
         data: dict[str, Any] = {"title": title, "message": message}
-        notify_target = str(self.cfg.get(CONF_NOTIFY_TARGET, "")).strip()
+        notify_target = target or str(self.cfg.get(CONF_NOTIFY_TARGET, "")).strip()
         if notify_target:
             data["target"] = [notify_target]
 
@@ -476,6 +477,16 @@ class SunsynkOptimizer:
         overnight_drain_days = self.data_logger.count_drain_adjustment_days(paired_days)
         soc_adjustment_days = self.data_logger.count_soc_adjustment_days(paired_days, forecast_band)
 
+        effective_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
+            paired_days, battery_capacity_kwh, overnight_drain_adjustment
+        )
+        charge_rate_calibration_days = self.data_logger.count_charge_rate_calibration_days(paired_days)
+        used_charge_rate = (
+            min(charge_rate_kw, effective_charge_rate)
+            if effective_charge_rate is not None and effective_charge_rate < charge_rate_kw * 0.9
+            else charge_rate_kw
+        )
+
         if solar_forecast_kwh < 7:
             # Extend to maximum window when solar is scarce — we need all the cheap import we can get.
             flux1_end = "05:00"
@@ -483,7 +494,7 @@ class SunsynkOptimizer:
         else:
             # Physics-based window: charge exactly as long as needed to reach target_soc.
             energy_needed_kwh = max(0.0, (target_soc - soc) / 100.0 * battery_capacity_kwh)
-            raw_minutes = (energy_needed_kwh / charge_rate_kw) * 60
+            raw_minutes = (energy_needed_kwh / used_charge_rate) * 60
             # Round up to the next 15-minute slot so the window always covers the full charge need.
             quarter_slots = int((raw_minutes + 14) // 15)
             end = dt_util.now().replace(hour=2, minute=0, second=0, microsecond=0) + timedelta(minutes=quarter_slots * 15)
@@ -537,6 +548,9 @@ class SunsynkOptimizer:
             "soc_adjustment": soc_adjustment,
             "soc_adjustment_days": soc_adjustment_days,
             "forecast_correction_days": forecast_correction_days,
+            "effective_charge_rate_kw": effective_charge_rate,
+            "used_charge_rate_kw": round(used_charge_rate, 2),
+            "charge_rate_calibration_days": charge_rate_calibration_days,
             "flux1_end": flux1_end,
             "next_import_window": next_import_window,
             "payload": payload,
@@ -562,6 +576,12 @@ class SunsynkOptimizer:
         if soc_adjustment:
             adjustment_parts.append(f"eve {soc_adjustment:+d}%")
         adjustment_note = f" ({', '.join(adjustment_parts)})" if adjustment_parts else ""
+        charge_rate_warning = ""
+        if effective_charge_rate is not None and effective_charge_rate < charge_rate_kw * 0.75:
+            charge_rate_warning = (
+                f" ⚠ Effective charge rate ~{effective_charge_rate}kW vs configured "
+                f"{charge_rate_kw}kW — consider updating Charge rate setting."
+            )
         await self.async_notify(
             "🔋 Sunsynk Import Plan",
             (
@@ -569,7 +589,7 @@ class SunsynkOptimizer:
                 f"SOC: {round(soc, 1)}%. "
                 f"Solar forecast: {round(solar_forecast_kwh, 1)} kWh{forecast_note}. "
                 f"Import: 02:00 → {flux1_end} target {target_soc}%{adjustment_note}. "
-                f"Band: {forecast_band}. Logic: {logic_branch}."
+                f"Band: {forecast_band}. Logic: {logic_branch}.{charge_rate_warning}"
             ),
         )
 
@@ -769,14 +789,25 @@ class SunsynkOptimizer:
             self._state_float(self.pv_mppt0_entity, 0)
             + self._state_float(self.pv_mppt1_entity, 0)
         )
+        date = dt_util.now().date().isoformat()
         await self.data_logger.async_log_morning_state(
-            date=dt_util.now().date().isoformat(),
+            date=date,
             morning_soc=soc,
             morning_pv_power=pv_power,
+        )
+        self.coordinator.update_state(
+            touch=False,
+            last_morning_state={
+                "type": "morning_state",
+                "date": date,
+                "morning_soc": round(soc, 1),
+                "morning_pv_power": round(pv_power, 1),
+            },
         )
 
     async def _async_capture_day_actuals(self, _now) -> None:
         """Capture end-of-day actuals at 22:00 and log them."""
+        import json as _json
         soc = self._state_float(self.battery_soc_entity, 0)
         actual_solar_kwh = self._state_float(self.day_pv_energy_entity, 0)
         date = dt_util.now().date().isoformat()
@@ -787,3 +818,24 @@ class SunsynkOptimizer:
             actual_solar_kwh=actual_solar_kwh,
             evening_export_disabled=evening_export_disabled,
         )
+        data_report_target = str(self.cfg.get(CONF_DATA_REPORT_TARGET, "")).strip()
+        if data_report_target:
+            plan_rec = self.coordinator.state.last_import_plan or {}
+            morning_rec = self.coordinator.state.last_morning_state or {}
+            actuals_rec = {
+                "type": "day_actuals",
+                "date": date,
+                "evening_soc": round(soc, 1),
+                "actual_solar_kwh": round(actual_solar_kwh, 2),
+                "evening_export_disabled": evening_export_disabled,
+            }
+            lines = "\n".join(
+                _json.dumps(r)
+                for r in [plan_rec, morning_rec, actuals_rec]
+                if r
+            )
+            await self.async_notify(
+                f"Sunsynk Daily Data — {date}",
+                lines,
+                target=data_report_target,
+            )

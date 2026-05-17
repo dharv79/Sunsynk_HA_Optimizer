@@ -48,6 +48,7 @@ class OptimizerState:
     current_soc_target: int | None = None
     operation_mode: str = "auto"
     last_payload_hash: str | None = None
+    last_morning_state: dict = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
