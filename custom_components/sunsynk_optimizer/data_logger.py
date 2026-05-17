@@ -403,19 +403,60 @@ class DataLogger:
     # Write helpers                                                        #
     # ------------------------------------------------------------------ #
 
+    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals")
+
     async def _async_append(self, record: dict[str, Any]) -> None:
         """Offload the blocking file write to the executor so it doesn't block the event loop."""
         await self.hass.async_add_executor_job(self._write_record, record)
 
     def _write_record(self, record: dict[str, Any]) -> None:
-        """Append one JSON line to the current month's JSONL file, creating it if needed."""
+        """Append one JSON line to the current month's JSONL file, creating it if needed.
+
+        For per-day record types (import_plan, morning_state, day_actuals) the
+        current month's file is scanned for an existing record with the same
+        type+date and the write is skipped if found. This prevents duplicate
+        entries from corrupting paired-day computations after HA restarts that
+        cross a scheduled-event boundary (e.g. restart at 05:55 → second
+        morning_state at 06:00).
+        """
         os.makedirs(self._data_dir, exist_ok=True)
         month_file = os.path.join(
             self._data_dir,
             f"{datetime.now(timezone.utc).strftime('%Y-%m')}.jsonl",
         )
+        if (
+            record.get("type") in self._DEDUP_TYPES
+            and record.get("date")
+            and self._record_exists(month_file, record["type"], record["date"])
+        ):
+            _LOGGER.info(
+                "Skipping duplicate %s record for %s (already in %s)",
+                record["type"], record["date"], os.path.basename(month_file),
+            )
+            return
         try:
             with open(month_file, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record) + "\n")
         except OSError:
             _LOGGER.exception("Failed to write data log to %s", month_file)
+
+    @staticmethod
+    def _record_exists(path: str, record_type: str, date: str) -> bool:
+        """Return True if a record with the given type and date already exists in the file."""
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if rec.get("type") == record_type and rec.get("date") == date:
+                        return True
+        except OSError:
+            return False
+        return False

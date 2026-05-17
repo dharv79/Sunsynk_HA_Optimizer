@@ -93,4 +93,17 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
         if touch:
             self.state.updated_at = datetime.now(timezone.utc).isoformat()
         self.async_set_updated_data(self.state)
-        self.hass.async_create_task(self.storage.async_save(self.state.__dict__))
+        self.hass.async_create_task(self._async_save_state())
+
+    async def _async_save_state(self) -> None:
+        """Persist state to storage with error handling.
+
+        A failure here means subsequent restarts lose recent state, so log loudly
+        and surface via last_error so the user notices on the dashboard.
+        """
+        try:
+            await self.storage.async_save(self.state.__dict__)
+        except Exception as exc:  # pragma: no cover
+            self.logger.exception("Failed to persist optimizer state")
+            self.state.last_error = f"State persistence failed: {exc}"
+            self.async_set_updated_data(self.state)

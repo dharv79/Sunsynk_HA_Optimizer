@@ -192,6 +192,20 @@ class SunsynkOptimizer:
         except (ValueError, TypeError):
             return default
 
+    def _essential_state(self, entity_id: str) -> float | None:
+        """Like _state_float but returns None when the entity is missing/unavailable.
+
+        Use for inputs whose absence should abort the cycle (battery_soc, forecast)
+        rather than silently defaulting to 0 and producing a worst-case action.
+        """
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", "none", ""):
+            return None
+        try:
+            return float(state.state)
+        except (ValueError, TypeError):
+            return None
+
     def _cooldown_ok(self, seconds: int = 1800) -> bool:
         """Return True if at least `seconds` have elapsed since the last trim action."""
         if self.last_trim_ts is None:
@@ -256,15 +270,40 @@ class SunsynkOptimizer:
                 },
             )
 
-    async def async_push_current_config(self) -> None:
+    async def _async_post_with_status(self, payload: dict[str, Any]) -> bool:
+        """POST to the API and surface success/failure via coordinator state.
+
+        Returns True on success, False on failure. On failure the exception is
+        logged, last_error is populated, and last_api_result records the error
+        so callers and the dashboard see that the push did NOT apply.
+        """
+        try:
+            result = await self.coordinator.api.async_post_income(self.plant_id, payload)
+        except Exception as exc:  # pragma: no cover
+            _LOGGER.exception("Sunsynk API push failed")
+            self.coordinator.update_state(
+                last_api_result={"ok": False, "error": str(exc)},
+                last_error=f"API push failed: {exc}",
+            )
+            return False
+        self.coordinator.update_state(
+            last_api_result={"ok": True, **(result if isinstance(result, dict) else {"result": result})},
+        )
+        return True
+
+    async def async_push_current_config(self) -> bool:
         """Push the baseline Flux config from settings to the Sunsynk API without any overrides."""
         config = self.cfg
         payload = build_payload(config)
-        result = await self.coordinator.api.async_post_income(self.plant_id, payload)
-        self.coordinator.update_state(last_api_result=result)
+        return await self._async_post_with_status(payload)
 
-    async def async_push_flux_override(self, payload: dict[str, Any]) -> None:
-        """Merge a Flux 1/2 override dict onto the config baseline and push to the API."""
+    async def async_push_flux_override(self, payload: dict[str, Any]) -> bool:
+        """Merge a Flux 1/2 override dict onto the config baseline and push to the API.
+
+        Returns True on success, False on API failure — callers should reflect this
+        in their notification text so the user knows whether the inverter received
+        the new config.
+        """
         config = self.cfg
         flux_products = apply_flux_override(
             config.get(CONF_FLUX_PRODUCTS, []),
@@ -272,21 +311,27 @@ class SunsynkOptimizer:
             payload.get("flux_2"),
         )
         full_payload = build_payload(config, flux_products)
-        result = await self.coordinator.api.async_post_income(self.plant_id, full_payload)
-        self.coordinator.update_state(last_api_result=result)
+        return await self._async_post_with_status(full_payload)
 
     async def async_reset_flux_baseline(self) -> None:
         config = self.cfg
         baseline = config.get(CONF_FLUX_PRODUCTS, [])
         payload = build_payload(config, baseline)
-        result = await self.coordinator.api.async_post_income(self.plant_id, payload)
+        ok = await self._async_post_with_status(payload)
         self.coordinator.update_state(
-            last_api_result=result,
-            last_flux2_action={"action": "reset_baseline", "payload": payload, "notified": True},
+            last_flux2_action={
+                "action": "reset_baseline",
+                "payload": payload,
+                "notified": True,
+                "source": "user_button",
+                "reason": "manual_reset",
+                "api_ok": ok,
+            },
             evening_export_disabled=False,
         )
+        status_prefix = "" if ok else "⚠ API push FAILED — "
         await self.async_notify(
-            "🔋 Sunsynk baseline restored",
+            f"{status_prefix}🔋 Sunsynk baseline restored",
             "Flux baseline settings were restored.",
         )
 
@@ -386,21 +431,54 @@ class SunsynkOptimizer:
             ),
         )
 
-    async def async_run_import_plan(self) -> None:
+    async def async_run_import_plan(self, source: str = "automatic") -> None:
         """Calculate and push overnight import plan."""
         if self.operation_mode == "monitor":
             self.coordinator.update_state(
                 operation_mode="monitor",
-                last_import_plan={"logic_branch": "monitor_only"},
+                last_import_plan={"logic_branch": "monitor_only", "source": source},
             )
             return
 
-        soc = self._state_float(self.battery_soc_entity, 0)
+        # Pre-flight: battery SOC is essential. If missing we cannot compute
+        # energy_needed = (target - soc), so skip rather than default soc=0
+        # which would size a full-window max-import.
+        soc_val = self._essential_state(self.battery_soc_entity)
+        if soc_val is None:
+            msg = f"Battery SOC entity {self.battery_soc_entity} unavailable — import plan skipped"
+            _LOGGER.warning(msg)
+            self.coordinator.update_state(last_error=msg)
+            await self.async_notify("⚠ Sunsynk plan skipped", msg)
+            return
+        soc = soc_val
+
         today = dt_util.now().strftime("%A")
         full_day = self.selected_full_charge_day
         is_full_day = today == full_day
         forecast_entity = self.cfg[CONF_SOLAR_FORECAST_SENSOR]
-        raw_forecast_kwh = self._state_float(forecast_entity, 0)
+
+        # Pre-flight: forecast is essential because solar_forecast_kwh < 7 toggles
+        # the maximum-import low-solar override. A missing forecast read as 0
+        # would push 100% target + full window unnecessarily.
+        forecast_val = self._essential_state(forecast_entity)
+        forecast_fallback_note = ""
+        if forecast_val is None:
+            last_plan = self.coordinator.state.last_import_plan or {}
+            prior_raw = last_plan.get("raw_forecast_kwh") if isinstance(last_plan, dict) else None
+            if prior_raw is None or not isinstance(prior_raw, (int, float)):
+                msg = (
+                    f"Forecast sensor {forecast_entity} unavailable and no prior plan — "
+                    "import plan skipped"
+                )
+                _LOGGER.warning(msg)
+                self.coordinator.update_state(last_error=msg)
+                await self.async_notify("⚠ Sunsynk plan skipped", msg)
+                return
+            raw_forecast_kwh = float(prior_raw)
+            forecast_fallback_note = " (using yesterday's forecast — sensor unavailable)"
+        else:
+            raw_forecast_kwh = forecast_val
+
         battery_capacity_kwh = float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))
         charge_rate_kw = float(self.cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
         avg_consumption_kw = float(self.cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
@@ -408,7 +486,13 @@ class SunsynkOptimizer:
 
         paired_days = await self.data_logger.async_load_paired_days(days=30)
         forecast_correction = self.data_logger.compute_forecast_correction(paired_days)
-        solar_forecast_kwh = round(raw_forecast_kwh * forecast_correction, 2)
+        # When the forecast sensor was unavailable we already used yesterday's raw
+        # value; don't apply the correction factor a second time on top of values
+        # that may already have been corrected by the prior plan run.
+        if forecast_fallback_note:
+            solar_forecast_kwh = round(raw_forecast_kwh, 2)
+        else:
+            solar_forecast_kwh = round(raw_forecast_kwh * forecast_correction, 2)
         forecast_band = self._forecast_band(solar_forecast_kwh)
 
         # Compute solar start time from sun.sun entity (sunrise + configured offset).
@@ -526,7 +610,7 @@ class SunsynkOptimizer:
             },
         }
 
-        await self.async_push_flux_override(payload)
+        api_ok = await self.async_push_flux_override(payload)
 
         plan_state = {
             "date": dt_util.now().date().isoformat(),
@@ -554,6 +638,9 @@ class SunsynkOptimizer:
             "flux1_end": flux1_end,
             "next_import_window": next_import_window,
             "payload": payload,
+            "source": source,
+            "api_ok": api_ok,
+            "forecast_fallback": bool(forecast_fallback_note),
         }
 
         await self.data_logger.async_log_import_plan(plan_state)
@@ -582,28 +669,53 @@ class SunsynkOptimizer:
                 f" ⚠ Effective charge rate ~{effective_charge_rate}kW vs configured "
                 f"{charge_rate_kw}kW — consider updating Charge rate setting."
             )
+        status_prefix = "" if api_ok else "⚠ API push FAILED — "
+        api_note = "" if api_ok else " — inverter NOT updated; will retry next cycle."
         await self.async_notify(
-            "🔋 Sunsynk Import Plan",
+            f"{status_prefix}🔋 Sunsynk Import Plan",
             (
                 f"Today: {today} (Full charge: {is_full_day}). "
                 f"SOC: {round(soc, 1)}%. "
-                f"Solar forecast: {round(solar_forecast_kwh, 1)} kWh{forecast_note}. "
+                f"Solar forecast: {round(solar_forecast_kwh, 1)} kWh{forecast_note}{forecast_fallback_note}. "
                 f"Import: 02:00 → {flux1_end} target {target_soc}%{adjustment_note}. "
-                f"Band: {forecast_band}. Logic: {logic_branch}.{charge_rate_warning}"
+                f"Band: {forecast_band}. Logic: {logic_branch}.{charge_rate_warning}{api_note}"
             ),
         )
 
-    async def async_run_flux2_check(self) -> None:
+    async def async_run_flux2_check(self, source: str = "automatic") -> None:
         """Run Flux 2 evening export / trim logic."""
         if self.operation_mode == "monitor":
             self.coordinator.update_state(
                 operation_mode="monitor",
-                last_flux2_action={"action": "monitor_only", "notified": False},
+                last_flux2_action={"action": "monitor_only", "notified": False, "source": source},
             )
             return
 
-        soc = self._state_float(self.battery_soc_entity, 0)
-        grid_pac = self._state_float(self.grid_pac_entity, 0)
+        # Pre-flight: both SOC and grid_pac are decision inputs. If either is
+        # missing the trim/export logic would fire on garbage data.
+        soc_val = self._essential_state(self.battery_soc_entity)
+        grid_pac_val = self._essential_state(self.grid_pac_entity)
+        if soc_val is None or grid_pac_val is None:
+            missing = []
+            if soc_val is None:
+                missing.append(self.battery_soc_entity)
+            if grid_pac_val is None:
+                missing.append(self.grid_pac_entity)
+            msg = f"Flux 2 check skipped — unavailable: {', '.join(missing)}"
+            _LOGGER.warning(msg)
+            self.coordinator.update_state(
+                last_error=msg,
+                last_flux2_action={
+                    "action": "skipped",
+                    "notified": False,
+                    "source": source,
+                    "reason": "essential_entity_unavailable",
+                    "missing": missing,
+                },
+            )
+            return
+        soc = soc_val
+        grid_pac = grid_pac_val
         today = dt_util.now().strftime("%A")
         is_full_day = today == self.selected_full_charge_day
         now_local = dt_util.now()
@@ -613,12 +725,15 @@ class SunsynkOptimizer:
             "soc": soc,
             "grid_pac": grid_pac,
             "notified": False,
+            "source": source,
+            "reason": "no_trigger",
         }
         evening_export_disabled = False
 
+        export_threshold = float(self.cfg[CONF_EXPORT_DISABLE_THRESHOLD])
         if (
             16 <= now_local.hour < 19
-            and grid_pac > float(self.cfg[CONF_EXPORT_DISABLE_THRESHOLD])
+            and grid_pac > export_threshold
         ):
             payload = {
                 "flux_2": {
@@ -628,7 +743,7 @@ class SunsynkOptimizer:
                 }
             }
 
-            await self.async_push_flux_override(payload)
+            api_ok = await self.async_push_flux_override(payload)
 
             action = {
                 "action": "disable_evening_export",
@@ -636,6 +751,9 @@ class SunsynkOptimizer:
                 "grid_pac": grid_pac,
                 "payload": payload,
                 "notified": True,
+                "source": source,
+                "reason": f"grid_pac_{round(grid_pac)}W_exceeds_{round(export_threshold)}W",
+                "api_ok": api_ok,
             }
 
             evening_export_disabled = True
@@ -646,11 +764,13 @@ class SunsynkOptimizer:
                 operation_mode=self.operation_mode,
             )
 
+            status_prefix = "" if api_ok else "⚠ API push FAILED — "
+            api_note = "" if api_ok else " (inverter NOT updated)"
             await self.async_notify(
-                "🏠 Flux 2 Export Disabled",
+                f"{status_prefix}🏠 Flux 2 Export Disabled",
                 (
                     f"Grid/load is {round(grid_pac, 0)}W between 16:00 and 19:00. "
-                    "Flux 2 export disabled by setting target SOC to 100%."
+                    f"Flux 2 export disabled by setting target SOC to 100%.{api_note}"
                 ),
             )
             return
@@ -670,7 +790,7 @@ class SunsynkOptimizer:
                 }
             }
 
-            await self.async_push_flux_override(payload)
+            api_ok = await self.async_push_flux_override(payload)
 
             action = {
                 "action": "trim_to_82",
@@ -678,6 +798,9 @@ class SunsynkOptimizer:
                 "grid_pac": grid_pac,
                 "payload": payload,
                 "notified": True,
+                "source": source,
+                "reason": f"soc_{round(soc)}%_exceeds_85",
+                "api_ok": api_ok,
             }
 
             self.coordinator.update_state(
@@ -686,9 +809,11 @@ class SunsynkOptimizer:
                 operation_mode=self.operation_mode,
             )
 
+            status_prefix = "" if api_ok else "⚠ API push FAILED — "
+            api_note = "" if api_ok else " (inverter NOT updated)"
             await self.async_notify(
-                "🔋 SOC Control",
-                f"SOC {round(soc, 1)}% is above 85%. Trimming to 82%.",
+                f"{status_prefix}🔋 SOC Control",
+                f"SOC {round(soc, 1)}% is above 85%. Trimming to 82%.{api_note}",
             )
             return
 
@@ -747,7 +872,7 @@ class SunsynkOptimizer:
                         "targetSoc": 82,
                     }
                 }
-                await self.async_push_flux_override(payload)
+                api_ok = await self.async_push_flux_override(payload)
                 self.coordinator.update_state(
                     last_flux2_action={
                         "action": "full_day_trim_to_82",
@@ -755,13 +880,18 @@ class SunsynkOptimizer:
                         "grid_pac": self._state_float(self.grid_pac_entity, 0),
                         "payload": payload,
                         "notified": True,
+                        "source": "automatic",
+                        "reason": "held_100%_for_1h",
+                        "api_ok": api_ok,
                     },
                     evening_export_disabled=False,
                     operation_mode=self.operation_mode,
                 )
+                status_prefix = "" if api_ok else "⚠ API push FAILED — "
+                api_note = "" if api_ok else " (inverter NOT updated)"
                 await self.async_notify(
-                    "🔋 Full Charge Trim",
-                    "Held at 100% for 1 hour. Trimming to 82%.",
+                    f"{status_prefix}🔋 Full Charge Trim",
+                    f"Held at 100% for 1 hour. Trimming to 82%.{api_note}",
                 )
 
             # Hold at 100% for 1 hour to fully condition the cells, then trim to 82%.
@@ -775,6 +905,8 @@ class SunsynkOptimizer:
                     "action": "schedule_full_trim",
                     "soc": soc,
                     "notified": False,
+                    "source": "automatic",
+                    "reason": "soc_reached_99.5%_on_full_day",
                 },
                 operation_mode=self.operation_mode,
             )

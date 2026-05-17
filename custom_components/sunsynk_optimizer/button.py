@@ -53,9 +53,9 @@ class SunsynkOptimizerButton(CoordinatorEntity, ButtonEntity):
         if self._key == "choose_best_day":
             await self.coordinator.optimizer.async_choose_best_full_charge_day()
         elif self._key == "run_import":
-            await self.coordinator.optimizer.async_run_import_plan()
+            await self.coordinator.optimizer.async_run_import_plan(source="user_button")
         elif self._key == "run_flux2":
-            await self.coordinator.optimizer.async_run_flux2_check()
+            await self.coordinator.optimizer.async_run_flux2_check(source="user_button")
         elif self._key == "reset_baseline":
             await self.coordinator.optimizer.async_reset_flux_baseline()
         elif self._key == "install_dashboard":

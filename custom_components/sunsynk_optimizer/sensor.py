@@ -21,6 +21,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 
 
+_ADAPTIVE_THRESHOLDS = {
+    "forecast_correction": 7,        # _MIN_DAYS_FORECAST_CORRECTION
+    "overnight_drain_adjustment": 5,  # _MIN_DAYS_SOC_ADJUSTMENT
+    "evening_soc_adjustment": 5,      # _MIN_DAYS_SOC_ADJUSTMENT
+    "effective_charge_rate": 3,       # min for compute_effective_charge_rate_kw
+}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -38,6 +46,10 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "next_import_window", "Next import window"),
             SunsynkOptimizerSensor(coordinator, entry, "current_soc_target", "Current SOC target"),
             SunsynkOptimizerSensor(coordinator, entry, "operation_mode", "Operation mode"),
+            SunsynkOptimizerSensor(coordinator, entry, "forecast_correction", "Forecast correction"),
+            SunsynkOptimizerSensor(coordinator, entry, "overnight_drain_adjustment", "Overnight drain adjustment"),
+            SunsynkOptimizerSensor(coordinator, entry, "evening_soc_adjustment", "Evening SOC adjustment"),
+            SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate"),
         ]
     )
 
@@ -72,6 +84,24 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return state.last_error or "OK"
         if self._sensor_key == "last_updated":
             return state.updated_at
+
+        # Adaptive learning sensors — read from last_import_plan attributes.
+        # Default values keep history continuous even before the first plan runs.
+        if self._sensor_key in (
+            "forecast_correction",
+            "overnight_drain_adjustment",
+            "evening_soc_adjustment",
+            "effective_charge_rate",
+        ):
+            plan = state.last_import_plan if isinstance(state.last_import_plan, dict) else {}
+            if self._sensor_key == "forecast_correction":
+                return plan.get("forecast_correction_factor", 1.0)
+            if self._sensor_key == "overnight_drain_adjustment":
+                return plan.get("overnight_drain_adjustment", 0)
+            if self._sensor_key == "evening_soc_adjustment":
+                return plan.get("soc_adjustment", 0)
+            if self._sensor_key == "effective_charge_rate":
+                return plan.get("effective_charge_rate_kw")
 
         if self._sensor_key == "import_plan_end":
             plan = state.last_import_plan
@@ -140,4 +170,22 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             if state.last_notification:
                 attrs["last_notification"] = state.last_notification
             return attrs
+
+        # Adaptive learning sensors expose calibration progress so the user can
+        # see when a correction will activate (days_collected vs days_required).
+        if self._sensor_key in _ADAPTIVE_THRESHOLDS:
+            plan = state.last_import_plan if isinstance(state.last_import_plan, dict) else {}
+            days_required = _ADAPTIVE_THRESHOLDS[self._sensor_key]
+            days_key = {
+                "forecast_correction": "forecast_correction_days",
+                "overnight_drain_adjustment": "overnight_drain_days",
+                "evening_soc_adjustment": "soc_adjustment_days",
+                "effective_charge_rate": "charge_rate_calibration_days",
+            }[self._sensor_key]
+            days_collected = plan.get(days_key, 0) or 0
+            return {
+                "days_collected": days_collected,
+                "days_required": days_required,
+                "active": days_collected >= days_required,
+            }
         return {}

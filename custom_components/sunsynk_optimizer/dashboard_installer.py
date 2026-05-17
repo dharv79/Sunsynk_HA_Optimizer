@@ -275,11 +275,12 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                 "show_header_toggle": False,
                                 "entities": [
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "raw_forecast_kwh", "name": "Raw forecast (kWh)"},
-                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "forecast_correction_factor", "name": "Forecast correction ×"},
+                                    {"entity": "sensor.forecast_correction", "name": "Forecast correction ×"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "solar_forecast_kwh", "name": "Adjusted forecast (kWh)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "forecast_band", "name": "Forecast band"},
-                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "overnight_drain_adjustment", "name": "Drain compensation (%)"},
-                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "soc_adjustment", "name": "Evening SOC nudge (%)"},
+                                    {"entity": "sensor.overnight_drain_adjustment", "name": "Drain compensation (%)"},
+                                    {"entity": "sensor.evening_soc_adjustment", "name": "Evening SOC nudge (%)"},
+                                    {"entity": "sensor.effective_charge_rate", "name": "Effective charge rate (kW)"},
                                 ],
                             },
                             {
