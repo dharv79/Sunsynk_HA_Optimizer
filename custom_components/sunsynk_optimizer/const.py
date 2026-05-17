@@ -54,6 +54,8 @@ CONF_SOLAR_START_OFFSET_HOURS = "solar_start_offset_hours"
 FULL_CHARGE_DAY_OPTIONS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 OPERATION_MODE_OPTIONS = ["auto", "monitor"]
 
+CONF_DATA_REPORT_TARGET = "data_report_target"
+
 SERVICE_RECALCULATE_FULL_CHARGE_DAY = "recalculate_full_charge_day"
 SERVICE_RUN_IMPORT_PLAN_NOW = "run_import_plan_now"
 SERVICE_RUN_FLUX2_CHECK_NOW = "run_flux2_check_now"

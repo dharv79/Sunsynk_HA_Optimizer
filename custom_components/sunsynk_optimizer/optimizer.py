@@ -28,6 +28,7 @@ from .const import (
     CONF_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
+    CONF_DATA_REPORT_TARGET,
     CONF_DEFAULT_FULL_CHARGE_DAY,
     CONF_EXPORT_DISABLE_THRESHOLD,
     CONF_FLUX_PRODUCTS,
@@ -209,7 +210,7 @@ class SunsynkOptimizer:
             return "winter_like"
         return "shoulder"
 
-    async def async_notify(self, title: str, message: str) -> None:
+    async def async_notify(self, title: str, message: str, target: str | None = None) -> None:
         """Send a notification via the configured HA notify service."""
         service_string = str(self.cfg.get(CONF_NOTIFY_SERVICE, "")).strip()
         if "." not in service_string:
@@ -226,7 +227,7 @@ class SunsynkOptimizer:
 
         domain, service = service_string.split(".", 1)
         data: dict[str, Any] = {"title": title, "message": message}
-        notify_target = str(self.cfg.get(CONF_NOTIFY_TARGET, "")).strip()
+        notify_target = target or str(self.cfg.get(CONF_NOTIFY_TARGET, "")).strip()
         if notify_target:
             data["target"] = [notify_target]
 
@@ -788,14 +789,25 @@ class SunsynkOptimizer:
             self._state_float(self.pv_mppt0_entity, 0)
             + self._state_float(self.pv_mppt1_entity, 0)
         )
+        date = dt_util.now().date().isoformat()
         await self.data_logger.async_log_morning_state(
-            date=dt_util.now().date().isoformat(),
+            date=date,
             morning_soc=soc,
             morning_pv_power=pv_power,
+        )
+        self.coordinator.update_state(
+            touch=False,
+            last_morning_state={
+                "type": "morning_state",
+                "date": date,
+                "morning_soc": round(soc, 1),
+                "morning_pv_power": round(pv_power, 1),
+            },
         )
 
     async def _async_capture_day_actuals(self, _now) -> None:
         """Capture end-of-day actuals at 22:00 and log them."""
+        import json as _json
         soc = self._state_float(self.battery_soc_entity, 0)
         actual_solar_kwh = self._state_float(self.day_pv_energy_entity, 0)
         date = dt_util.now().date().isoformat()
@@ -806,3 +818,24 @@ class SunsynkOptimizer:
             actual_solar_kwh=actual_solar_kwh,
             evening_export_disabled=evening_export_disabled,
         )
+        data_report_target = str(self.cfg.get(CONF_DATA_REPORT_TARGET, "")).strip()
+        if data_report_target:
+            plan_rec = self.coordinator.state.last_import_plan or {}
+            morning_rec = self.coordinator.state.last_morning_state or {}
+            actuals_rec = {
+                "type": "day_actuals",
+                "date": date,
+                "evening_soc": round(soc, 1),
+                "actual_solar_kwh": round(actual_solar_kwh, 2),
+                "evening_export_disabled": evening_export_disabled,
+            }
+            lines = "\n".join(
+                _json.dumps(r)
+                for r in [plan_rec, morning_rec, actuals_rec]
+                if r
+            )
+            await self.async_notify(
+                f"Sunsynk Daily Data — {date}",
+                lines,
+                target=data_report_target,
+            )
