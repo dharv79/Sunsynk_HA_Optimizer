@@ -194,6 +194,8 @@ class DataLogger:
                 "evening_soc": actual.get("evening_soc", 0.0),
                 "evening_export_disabled": actual.get("evening_export_disabled", False),
                 "is_full_day": plan.get("is_full_day", False),
+                "initial_soc": plan.get("soc"),
+                "flux1_end": plan.get("flux1_end", ""),
             })
         return paired
 
@@ -281,6 +283,85 @@ class DataLogger:
             and not d["is_full_day"]
             and not d["evening_export_disabled"]
             and d.get("actual_solar_kwh", 0) < self._HIGH_SOLAR_THRESHOLD_KWH
+        ])
+
+    @staticmethod
+    def _flux1_end_hours(flux1_end: str) -> float:
+        """Convert 'HH:MM' to fractional hours, e.g. '03:15' → 3.25."""
+        try:
+            h, m = flux1_end.split(":")
+            return int(h) + int(m) / 60.0
+        except (ValueError, AttributeError):
+            return 0.0
+
+    def compute_effective_charge_rate_kw(
+        self,
+        paired_days: list[dict[str, Any]],
+        battery_kwh: float,
+        overnight_drain_adj: float,
+    ) -> float | None:
+        """Estimate actual battery charge rate from historical charging days.
+
+        Compares estimated SOC at charge-end (back-calculated from morning SOC
+        and drain rate) against initial SOC to derive how fast the battery charged.
+        Returns None until 3+ valid calibration days exist.
+        """
+        no_charge = [
+            d for d in paired_days
+            if d.get("initial_soc") is not None
+            and d.get("target_soc") is not None
+            and d["initial_soc"] >= d["target_soc"] - 5
+            and d.get("morning_soc") is not None
+            and d.get("morning_pv_power", 0) < 50
+            and not d["is_full_day"]
+        ]
+        if no_charge:
+            drain_rate = max(
+                0.0,
+                sum((d["initial_soc"] - d["morning_soc"]) / 3.75 for d in no_charge) / len(no_charge),
+            )
+        else:
+            drain_rate = overnight_drain_adj / 4.0
+
+        rates = []
+        for d in paired_days:
+            initial = d.get("initial_soc")
+            target = d.get("target_soc")
+            morning = d.get("morning_soc")
+            flux1 = d.get("flux1_end", "")
+            if (
+                initial is None or target is None or morning is None
+                or initial <= 0 or not flux1
+                or target - initial < 10
+                or d.get("morning_pv_power", 0) >= 50
+                or d.get("is_full_day")
+            ):
+                continue
+            end_h = self._flux1_end_hours(flux1)
+            charge_h = end_h - 2.0
+            drain_h = 6.0 - end_h
+            if charge_h < 0.25 or drain_h < 0:
+                continue
+            est_end_soc = min(morning + drain_rate * drain_h, float(target))
+            gained = max(0.0, est_end_soc - initial)
+            if gained < 5:
+                continue
+            rates.append((gained / 100.0 * battery_kwh) / charge_h)
+
+        if len(rates) < 3:
+            return None
+        return round(sum(rates) / len(rates), 2)
+
+    def count_charge_rate_calibration_days(self, paired_days: list[dict[str, Any]]) -> int:
+        """Return how many valid charging days exist toward charge rate calibration (needs 3)."""
+        return len([
+            d for d in paired_days
+            if d.get("initial_soc") is not None
+            and d.get("target_soc") is not None
+            and d["target_soc"] - d["initial_soc"] >= 10
+            and d.get("morning_pv_power", 0) < 50
+            and not d.get("is_full_day")
+            and self._flux1_end_hours(d.get("flux1_end", "")) > 2.5
         ])
 
     # ------------------------------------------------------------------ #
