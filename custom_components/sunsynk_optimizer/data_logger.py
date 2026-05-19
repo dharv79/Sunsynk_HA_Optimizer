@@ -276,13 +276,18 @@ class DataLogger:
         ])
 
     def count_soc_adjustment_days(self, paired_days: list[dict[str, Any]], forecast_band: str) -> int:
-        """Return how many relevant days exist toward the evening SOC nudge threshold."""
+        """Return how many in-band non-full-charge days exist toward the evening SOC nudge threshold.
+
+        Intentionally does NOT apply the high-solar exclusion so the counter reflects real
+        progress during summer. The nudge computation (compute_soc_target_adjustment) still
+        filters out high-solar days to avoid a false "over-charged" signal; when all in-band
+        days are high-solar the nudge correctly returns 0 ("no adjustment needed").
+        """
         return len([
             d for d in paired_days
             if d["forecast_band"] == forecast_band
             and not d["is_full_day"]
             and not d["evening_export_disabled"]
-            and d.get("actual_solar_kwh", 0) < self._HIGH_SOLAR_THRESHOLD_KWH
         ])
 
     @staticmethod
