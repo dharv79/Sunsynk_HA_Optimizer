@@ -511,8 +511,16 @@ class SunsynkOptimizer:
                     hours_to_solar = max(0.0, solar_start_hours - 5.0)
 
         if is_full_day:
-            target_soc = 100
             soc_reason = "weekly_full_charge_day"
+            if solar_forecast_kwh >= 7 and solar_start_time is not None:
+                # Good solar expected — bridge overnight import to solar start time;
+                # PV charges the battery to 100% during the day for free.
+                energy_to_cover = hours_to_solar * avg_consumption_kw
+                bridge_soc = int(20 + energy_to_cover / battery_capacity_kwh * 100)
+                target_soc = max(30, min(100, bridge_soc))
+            else:
+                # Poor solar forecast on the chosen day — import fully from grid as fallback.
+                target_soc = 100
         else:
             if solar_forecast_kwh < 7:
                 # Very low solar — fill up regardless of band to ensure enough energy.
@@ -542,7 +550,10 @@ class SunsynkOptimizer:
 
         overnight_drain_adjustment = 0
         soc_adjustment = 0
-        if not is_full_day:
+        if target_soc < 100:
+            # Apply drain and evening-nudge corrections whenever the import target has
+            # headroom below 100%. This covers both regular nights and full-charge-day
+            # solar-bridge plans. Skipped when target is already 100% (nothing to add).
             overnight_drain_adjustment = self.data_logger.compute_overnight_drain_adjustment(
                 paired_days
             )
