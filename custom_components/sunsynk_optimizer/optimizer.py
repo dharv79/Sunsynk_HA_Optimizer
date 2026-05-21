@@ -674,12 +674,6 @@ class SunsynkOptimizer:
         if soc_adjustment:
             adjustment_parts.append(f"eve {soc_adjustment:+d}%")
         adjustment_note = f" ({', '.join(adjustment_parts)})" if adjustment_parts else ""
-        charge_rate_warning = ""
-        if effective_charge_rate is not None and effective_charge_rate < charge_rate_kw * 0.75:
-            charge_rate_warning = (
-                f" ⚠ Effective charge rate ~{effective_charge_rate}kW vs configured "
-                f"{charge_rate_kw}kW — consider updating Charge rate setting."
-            )
         status_prefix = "" if api_ok else "⚠ API push FAILED — "
         api_note = "" if api_ok else " — inverter NOT updated; will retry next cycle."
         await self.async_notify(
@@ -689,7 +683,7 @@ class SunsynkOptimizer:
                 f"SOC: {round(soc, 1)}%. "
                 f"Solar forecast: {round(solar_forecast_kwh, 1)} kWh{forecast_note}{forecast_fallback_note}. "
                 f"Import: 02:00 → {flux1_end} target {target_soc}%{adjustment_note}. "
-                f"Band: {forecast_band}. Logic: {logic_branch}.{charge_rate_warning}{api_note}"
+                f"Band: {forecast_band}. Logic: {logic_branch}.{api_note}"
             ),
         )
 
