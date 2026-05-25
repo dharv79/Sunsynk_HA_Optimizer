@@ -465,9 +465,14 @@ class SunsynkOptimizer:
         if forecast_val is None:
             last_plan = self.coordinator.state.last_import_plan or {}
             prior_raw = last_plan.get("raw_forecast_kwh") if isinstance(last_plan, dict) else None
-            if prior_raw is None or not isinstance(prior_raw, (int, float)):
+            prior_date = last_plan.get("date") if isinstance(last_plan, dict) else None
+            today_str = dt_util.now().strftime("%Y-%m-%d")
+            prior_too_old = prior_date != today_str and prior_date != (
+                dt_util.now() - timedelta(days=1)
+            ).strftime("%Y-%m-%d")
+            if prior_raw is None or not isinstance(prior_raw, (int, float)) or prior_too_old:
                 msg = (
-                    f"Forecast sensor {forecast_entity} unavailable and no prior plan — "
+                    f"Forecast sensor {forecast_entity} unavailable and no usable prior plan — "
                     "import plan skipped"
                 )
                 _LOGGER.warning(msg)
@@ -479,7 +484,7 @@ class SunsynkOptimizer:
         else:
             raw_forecast_kwh = forecast_val
 
-        battery_capacity_kwh = float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))
+        battery_capacity_kwh = max(0.1, float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
         charge_rate_kw = float(self.cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
         avg_consumption_kw = float(self.cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
         solar_start_offset_hours = float(self.cfg.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS))

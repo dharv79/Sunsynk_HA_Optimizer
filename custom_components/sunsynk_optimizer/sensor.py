@@ -14,6 +14,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -41,15 +42,15 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "selected_full_charge_day", "Selected full charge day"),
             SunsynkOptimizerSensor(coordinator, entry, "import_plan_end", "Import plan end"),
             SunsynkOptimizerSensor(coordinator, entry, "flux2_action", "Flux 2 action"),
-            SunsynkOptimizerSensor(coordinator, entry, "last_error", "Last error"),
-            SunsynkOptimizerSensor(coordinator, entry, "last_updated", "Last updated"),
             SunsynkOptimizerSensor(coordinator, entry, "next_import_window", "Next import window"),
             SunsynkOptimizerSensor(coordinator, entry, "current_soc_target", "Current SOC target"),
             SunsynkOptimizerSensor(coordinator, entry, "operation_mode", "Operation mode"),
-            SunsynkOptimizerSensor(coordinator, entry, "forecast_correction", "Forecast correction"),
-            SunsynkOptimizerSensor(coordinator, entry, "overnight_drain_adjustment", "Overnight drain adjustment"),
-            SunsynkOptimizerSensor(coordinator, entry, "evening_soc_adjustment", "Evening SOC adjustment"),
-            SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate"),
+            SunsynkOptimizerSensor(coordinator, entry, "last_error", "Last error", entity_category=EntityCategory.DIAGNOSTIC),
+            SunsynkOptimizerSensor(coordinator, entry, "last_updated", "Last updated", entity_category=EntityCategory.DIAGNOSTIC),
+            SunsynkOptimizerSensor(coordinator, entry, "forecast_correction", "Forecast correction", entity_category=EntityCategory.DIAGNOSTIC),
+            SunsynkOptimizerSensor(coordinator, entry, "overnight_drain_adjustment", "Overnight drain adjustment", entity_category=EntityCategory.DIAGNOSTIC),
+            SunsynkOptimizerSensor(coordinator, entry, "evening_soc_adjustment", "Evening SOC adjustment", entity_category=EntityCategory.DIAGNOSTIC),
+            SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate", entity_category=EntityCategory.DIAGNOSTIC),
         ]
     )
 
@@ -57,11 +58,19 @@ async def async_setup_entry(
 class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry: ConfigEntry, sensor_key: str, name: str) -> None:
+    def __init__(
+        self,
+        coordinator,
+        entry: ConfigEntry,
+        sensor_key: str,
+        name: str,
+        entity_category: EntityCategory | None = None,
+    ) -> None:
         super().__init__(coordinator)
         self._sensor_key = sensor_key
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
+        self._attr_entity_category = entity_category
 
     @property
     def native_value(self) -> str | int | None:

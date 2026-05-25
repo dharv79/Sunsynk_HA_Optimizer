@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import json
 
@@ -20,6 +21,8 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_AVG_CONSUMPTION_KW, CONF_PLANT_ID, CONF_INVERTER_SERIAL, DEFAULT_AVG_CONSUMPTION_KW
 from .flux_helpers import merge_entry_data
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _build_dashboard(config: dict) -> dict:
@@ -518,7 +521,17 @@ async def async_install_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> No
     filename = f"sunsynk_optimizer_{entry.entry_id}.yaml"
     dst = config_dir / filename
     content = json.dumps(dashboard, indent=2)
-    await hass.async_add_executor_job(dst.write_text, content, "utf-8")
+    try:
+        await hass.async_add_executor_job(dst.write_text, content, "utf-8")
+    except Exception as err:
+        _LOGGER.error("Dashboard install failed: %s", err)
+        persistent_notification.async_create(
+            hass,
+            f"Dashboard file could not be written to {dst}:\n{err}",
+            title="Sunsynk Optimizer dashboard install failed",
+            notification_id="sunsynk_optimizer_dashboard_install",
+        )
+        return
 
     snippet = f"""Add this to configuration.yaml and reload Home Assistant YAML/Lovelace:
 

@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -28,8 +28,14 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
-            SunsynkOptimizerBinarySensor(coordinator, entry, "evening_export_disabled", "Evening export disabled"),
-            SunsynkOptimizerBinarySensor(coordinator, entry, "monitor_only", "Monitor only mode"),
+            SunsynkOptimizerBinarySensor(
+                coordinator, entry, "evening_export_disabled", "Evening export disabled",
+                device_class=BinarySensorDeviceClass.RUNNING,
+            ),
+            SunsynkOptimizerBinarySensor(
+                coordinator, entry, "monitor_only", "Monitor only mode",
+                icon="mdi:eye-outline",
+            ),
         ]
     )
 
@@ -37,11 +43,22 @@ async def async_setup_entry(
 class SunsynkOptimizerBinarySensor(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry: ConfigEntry, key: str, name: str) -> None:
+    def __init__(
+        self,
+        coordinator,
+        entry: ConfigEntry,
+        key: str,
+        name: str,
+        device_class: BinarySensorDeviceClass | None = None,
+        icon: str | None = None,
+    ) -> None:
         super().__init__(coordinator)
         self._key = key
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_device_class = device_class
+        if icon:
+            self._attr_icon = icon
 
     @property
     def is_on(self) -> bool:
