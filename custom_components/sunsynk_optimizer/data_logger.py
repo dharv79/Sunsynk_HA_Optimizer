@@ -317,7 +317,7 @@ class DataLogger:
             and d.get("target_soc") is not None
             and d["initial_soc"] >= d["target_soc"] - 5
             and d.get("morning_soc") is not None
-            and d.get("morning_pv_power", 0) < 50
+            and d.get("morning_pv_power", 0) < 200
             and not d["is_full_day"]
         ]
         if no_charge:
@@ -338,7 +338,7 @@ class DataLogger:
                 initial is None or target is None or morning is None
                 or initial <= 0 or not flux1
                 or target - initial < 10
-                or d.get("morning_pv_power", 0) >= 50
+                or d.get("morning_pv_power", 0) >= 200
                 or d.get("is_full_day")
             ):
                 continue
@@ -364,7 +364,8 @@ class DataLogger:
             if d.get("initial_soc") is not None
             and d.get("target_soc") is not None
             and d["target_soc"] - d["initial_soc"] >= 10
-            and d.get("morning_pv_power", 0) < 50
+            and d.get("morning_soc") is not None
+            and d.get("morning_pv_power", 0) < 200
             and not d.get("is_full_day")
             and self._flux1_end_hours(d.get("flux1_end", "")) > 2.5
         ])
