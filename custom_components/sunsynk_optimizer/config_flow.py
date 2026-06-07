@@ -22,6 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import SunsynkApiClient
 from .const import (
     CONF_AVG_CONSUMPTION_KW,
+    CONF_WEEKEND_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGES,
     CONF_CHARGE_RATE,
@@ -39,9 +40,12 @@ from .const import (
     CONF_PLANT_ID,
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_SOLAR_START_OFFSET_HOURS,
+    CONF_HOURLY_FORECAST_SENSOR,
+    CONF_HOURLY_FORECAST_ATTRIBUTE,
     CONF_USERNAME,
     CONF_WEATHER_ENTITY,
     DEFAULT_AVG_CONSUMPTION_KW,
+    DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
     DEFAULT_CURRENCY,
@@ -53,6 +57,7 @@ from .const import (
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_FORECAST_SENSOR,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
+    DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_WEATHER_ENTITY,
     DOMAIN,
     FULL_CHARGE_DAY_OPTIONS,
@@ -119,9 +124,14 @@ def _base_schema(values: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(CONF_AVG_CONSUMPTION_KW, default=values.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
+            vol.Optional(CONF_WEEKEND_AVG_CONSUMPTION_KW, default=values.get(CONF_WEEKEND_AVG_CONSUMPTION_KW, DEFAULT_WEEKEND_AVG_CONSUMPTION_KW)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
+            ),
             vol.Required(CONF_SOLAR_START_OFFSET_HOURS, default=values.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=6.0, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="h")
             ),
+            vol.Optional(CONF_HOURLY_FORECAST_SENSOR, default=values.get(CONF_HOURLY_FORECAST_SENSOR, "")): selector.TextSelector(),
+            vol.Optional(CONF_HOURLY_FORECAST_ATTRIBUTE, default=values.get(CONF_HOURLY_FORECAST_ATTRIBUTE, DEFAULT_HOURLY_FORECAST_ATTRIBUTE)): selector.TextSelector(),
             vol.Optional(
                 CONF_DATA_REPORT_TARGET,
                 default=values.get(CONF_DATA_REPORT_TARGET, ""),

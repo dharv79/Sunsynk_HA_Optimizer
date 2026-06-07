@@ -26,6 +26,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_AVG_CONSUMPTION_KW,
+    CONF_WEEKEND_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
     CONF_DATA_REPORT_TARGET,
@@ -39,10 +40,14 @@ from .const import (
     CONF_PLANT_ID,
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_SOLAR_START_OFFSET_HOURS,
+    CONF_HOURLY_FORECAST_SENSOR,
+    CONF_HOURLY_FORECAST_ATTRIBUTE,
     CONF_WEATHER_ENTITY,
     DEFAULT_AVG_CONSUMPTION_KW,
+    DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
+    DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
     FULL_CHARGE_DAY_OPTIONS,
@@ -99,6 +104,10 @@ class SunsynkOptimizer:
     @property
     def pv_mppt1_entity(self) -> str:
         return f"sensor.solarsynkv3_{self.inverter_serial}_pv_mppt1_power"
+
+    @property
+    def battery_temp_entity(self) -> str:
+        return f"sensor.solarsynkv3_{self.inverter_serial}_battery_temperature"
 
     @property
     def selected_full_charge_day(self) -> str:
@@ -431,6 +440,50 @@ class SunsynkOptimizer:
             ),
         )
 
+    def _get_hourly_forecast_kwh(self) -> dict[int, float] | None:
+        """Return hourly solar forecast as {hour: kWh}, or None if unavailable/unconfigured.
+
+        Supports two attribute formats:
+        - Forecast.Solar: dict keyed by "YYYY-MM-DD HH:MM:SS" with float kWh per hour
+        - Solcast: list of {"period_start": iso_str, "pv_estimate": kWh per 30-min period}
+          (consecutive 30-min periods are summed to hourly buckets)
+        """
+        sensor_id = str(self.cfg.get(CONF_HOURLY_FORECAST_SENSOR, "")).strip()
+        if not sensor_id:
+            return None
+        state = self.hass.states.get(sensor_id)
+        if state is None or state.state in ("unknown", "unavailable", "none", ""):
+            return None
+        attr_name = str(self.cfg.get(CONF_HOURLY_FORECAST_ATTRIBUTE, DEFAULT_HOURLY_FORECAST_ATTRIBUTE)).strip()
+        raw = state.attributes.get(attr_name)
+        if not raw:
+            return None
+
+        hourly: dict[int, float] = {}
+
+        if isinstance(raw, dict):
+            # Forecast.Solar format: {"YYYY-MM-DD HH:MM:SS": kwh, ...}
+            for key, val in raw.items():
+                try:
+                    hour = int(str(key).split(" ")[1].split(":")[0]) if " " in str(key) else int(str(key).split("T")[1].split(":")[0])
+                    hourly[hour] = hourly.get(hour, 0.0) + float(val)
+                except (ValueError, IndexError):
+                    continue
+        elif isinstance(raw, list):
+            # Solcast format: [{"period_start": iso_str, "pv_estimate": kwh_per_30min}, ...]
+            for item in raw:
+                try:
+                    period_start = str(item.get("period_start", ""))
+                    val = float(item.get("pv_estimate", 0))
+                    # Parse hour from ISO string (handles both "T" and " " separators)
+                    time_part = period_start.split("T")[1] if "T" in period_start else period_start.split(" ")[1]
+                    hour = int(time_part.split(":")[0])
+                    hourly[hour] = hourly.get(hour, 0.0) + val
+                except (ValueError, IndexError, AttributeError):
+                    continue
+
+        return hourly if hourly else None
+
     async def async_run_import_plan(self, source: str = "automatic") -> None:
         """Calculate and push overnight import plan."""
         if self.operation_mode == "monitor":
@@ -487,6 +540,10 @@ class SunsynkOptimizer:
         battery_capacity_kwh = max(0.1, float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
         charge_rate_kw = float(self.cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
         avg_consumption_kw = float(self.cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        weekend_avg_consumption_kw = float(self.cfg.get(CONF_WEEKEND_AVG_CONSUMPTION_KW, DEFAULT_WEEKEND_AVG_CONSUMPTION_KW))
+        is_weekend = today in ("Saturday", "Sunday")
+        if is_weekend:
+            avg_consumption_kw = weekend_avg_consumption_kw
         solar_start_offset_hours = float(self.cfg.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS))
 
         paired_days = await self.data_logger.async_load_paired_days(days=30)
@@ -499,6 +556,9 @@ class SunsynkOptimizer:
         else:
             solar_forecast_kwh = round(raw_forecast_kwh * forecast_correction, 2)
         forecast_band = self._forecast_band(solar_forecast_kwh)
+        hourly_forecast_kwh = self._get_hourly_forecast_kwh()
+        hourly_forecast_used = False
+        bridge_hour: int | None = None
 
         # Compute solar start time from sun.sun entity (sunrise + configured offset).
         solar_start_time: str | None = None
@@ -535,6 +595,22 @@ class SunsynkOptimizer:
                 else:
                     target_soc = 95
                     soc_reason = "low_solar_override"
+            elif hourly_forecast_kwh:
+                # Hourly forecast available (Forecast.Solar / Solcast): walk hours 5–12 and
+                # accumulate the energy deficit until solar generation covers home load.
+                hourly_correction = forecast_correction if not forecast_fallback_note else 1.0
+                energy_gap = 0.0
+                for h in range(5, 13):
+                    solar_h = hourly_forecast_kwh.get(h, 0.0) * hourly_correction
+                    if solar_h >= avg_consumption_kw:
+                        if bridge_hour is None:
+                            bridge_hour = h
+                        break
+                    energy_gap += max(0.0, avg_consumption_kw - solar_h)
+                bridge_soc = int(20 + energy_gap / battery_capacity_kwh * 100)
+                target_soc = max(30, min(100, bridge_soc))
+                soc_reason = "solar_bridge_hourly"
+                hourly_forecast_used = True
             elif solar_start_time is not None:
                 # Charge only enough to bridge from charge window end (05:00) to when solar covers load.
                 energy_to_cover = hours_to_solar * avg_consumption_kw
@@ -587,6 +663,17 @@ class SunsynkOptimizer:
             else charge_rate_kw
         )
 
+        battery_temp_c = self._state_float(self.battery_temp_entity, 20.0)
+        if battery_temp_c > 15:
+            temp_deration_factor = 1.0
+        elif battery_temp_c > 10:
+            temp_deration_factor = 0.85
+        elif battery_temp_c > 5:
+            temp_deration_factor = 0.70
+        else:
+            temp_deration_factor = 0.55
+        used_charge_rate = round(used_charge_rate * temp_deration_factor, 2)
+
         if solar_forecast_kwh < 7:
             # Extend to maximum window when solar is scarce — we need all the cheap import we can get.
             flux1_end = "05:00"
@@ -609,7 +696,7 @@ class SunsynkOptimizer:
                 end = latest
 
             flux1_end = end.strftime("%H:%M")
-            logic_branch = "adaptive"
+            logic_branch = "adaptive_hourly" if hourly_forecast_used else "adaptive"
 
         next_import_window = f"02:00→{flux1_end}"
 
@@ -657,6 +744,12 @@ class SunsynkOptimizer:
             "source": source,
             "api_ok": api_ok,
             "forecast_fallback": bool(forecast_fallback_note),
+            "is_weekend": is_weekend,
+            "avg_consumption_kw": avg_consumption_kw,
+            "battery_temp_c": battery_temp_c,
+            "temp_deration_factor": temp_deration_factor,
+            "hourly_forecast_used": hourly_forecast_used,
+            "bridge_hour": bridge_hour,
         }
 
         await self.data_logger.async_log_import_plan(plan_state)
