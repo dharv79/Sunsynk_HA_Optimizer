@@ -59,8 +59,21 @@ Suggestion: use **mid SOC targets** and let forecast drive import end times more
 
     adaptive_learning_content = f"""{{% set solar_start = state_attr('sensor.import_plan_end', 'solar_start_time') %}}
 {{% set hrs = state_attr('sensor.import_plan_end', 'hours_to_solar') | float(0) %}}
-{{% if solar_start %}}
-**Solar bridge:** ~{{{{solar_start}}}} start — {{{{hrs}}}}h × {avg_consumption_kw}kW = {{{{ (hrs * {avg_consumption_kw}) | round(1) }}}} kWh to cover
+{{% set hourly_used = state_attr('sensor.import_plan_end', 'hourly_forecast_used') %}}
+{{% set bridge_h = state_attr('sensor.import_plan_end', 'bridge_hour') %}}
+{{% set cons = state_attr('sensor.import_plan_end', 'avg_consumption_kw') | float({avg_consumption_kw}) %}}
+{{% set is_wknd = state_attr('sensor.import_plan_end', 'is_weekend') %}}
+{{% if is_wknd %}}**Mode:** Weekend consumption rate ({{{{cons}}}} kW)
+{{% endif %}}
+{{% if hourly_used %}}
+**Solar bridge (hourly):** solar covers load from ~{{{{bridge_h}}}}:00 — deficit above filled overnight.
+{{% elif solar_start %}}
+**Solar bridge:** ~{{{{solar_start}}}} start — {{{{hrs}}}}h × {{{{cons}}}} kW = {{{{ (hrs * cons) | round(1) }}}} kWh to cover
+{{% endif %}}
+
+{{% set temp_c = state_attr('sensor.import_plan_end', 'battery_temp_c') | float(20) %}}
+{{% set derate = state_attr('sensor.import_plan_end', 'temp_deration_factor') | float(1.0) %}}
+{{% if derate < 1.0 %}}**Battery temp:** {{{{temp_c | round(1)}}}} °C → charge rate derated to {{{{ '%.0f' | format(derate * 100) }}}}%
 {{% endif %}}
 
 {{% set factor = state_attr('sensor.import_plan_end', 'forecast_correction_factor') | float(1.0) %}}
@@ -405,6 +418,7 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": s("pv_mppt0_power"), "name": "PV MPPT0"},
                                     {"entity": s("pv_mppt1_power"), "name": "PV MPPT1"},
                                     {"entity": s("load_total_power"), "name": "Load power"},
+                                    {"entity": s("battery_temperature"), "name": "Battery temp"},
                                 ],
                             },
                             {
@@ -486,9 +500,15 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "target_soc_reason", "name": "SOC target reason"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "overnight_drain_adjustment", "name": "Drain compensation (%)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "soc_adjustment", "name": "Evening SOC nudge (%)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "is_weekend", "name": "Weekend mode"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "avg_consumption_kw", "name": "Consumption rate used (kW)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "target_soc", "name": "Final target SOC"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "flux1_end", "name": "Import end time"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "logic_branch", "name": "Logic branch"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "hourly_forecast_used", "name": "Hourly forecast used"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "bridge_hour", "name": "Solar bridge hour"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "battery_temp_c", "name": "Battery temp (°C)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "temp_deration_factor", "name": "Charge rate deration ×"},
                                 ],
                             },
                             {
