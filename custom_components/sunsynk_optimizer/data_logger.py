@@ -254,7 +254,7 @@ class DataLogger:
             d for d in paired_days
             if d.get("overnight_drain_pct") is not None
             and d["overnight_drain_pct"] >= 0
-            and d.get("morning_pv_power", 0) < 100  # <100 W means net battery drain still dominates at 06:00
+            and d.get("morning_pv_power", 0) < 200  # <200 W means net battery drain still dominates at 06:00
             and not d["is_full_day"]
         ]
         if len(valid) < self._MIN_DAYS_SOC_ADJUSTMENT:
