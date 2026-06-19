@@ -28,7 +28,7 @@ class DataLogger:
 
     _MIN_DAYS_FORECAST_CORRECTION = 7   # fewer paired days → too noisy to trust a ratio
     _MIN_DAYS_SOC_ADJUSTMENT = 5        # minimum for drain and evening-nudge corrections
-    _DEFAULT_DRAIN_ADJUSTMENT = 10      # fallback when fewer than 5 drain days exist — avoids cliff-edge drop to 0%
+    _DEFAULT_DRAIN_ADJUSTMENT = 15      # fallback when fewer than 5 drain days exist — avoids cliff-edge drop to 0%
     _EVENING_SOC_LOW = 20.0             # below this at 22:00 → battery ran low; we under-charged
     _EVENING_SOC_HIGH = 35.0            # above this at 22:00 → battery still full; we over-charged
     _RETAIN_MONTHS = 13                 # one full year + one month so year-over-year patterns are always available
@@ -254,7 +254,7 @@ class DataLogger:
             d for d in paired_days
             if d.get("overnight_drain_pct") is not None
             and d["overnight_drain_pct"] >= 0
-            and d.get("morning_pv_power", 0) < 50  # <50 W means solar hasn't started; reading is pure battery drain
+            and d.get("morning_pv_power", 0) < 100  # <100 W means net battery drain still dominates at 06:00
             and not d["is_full_day"]
         ]
         if len(valid) < self._MIN_DAYS_SOC_ADJUSTMENT:
