@@ -29,6 +29,7 @@ class DataLogger:
     _MIN_DAYS_FORECAST_CORRECTION = 7   # fewer paired days → too noisy to trust a ratio
     _MIN_DAYS_SOC_ADJUSTMENT = 5        # minimum for drain and evening-nudge corrections
     _DEFAULT_DRAIN_ADJUSTMENT = 15      # fallback when fewer than 5 drain days exist — avoids cliff-edge drop to 0%
+    _DRAIN_PERCENTILE = 75              # buffer sized to cover ~3 of 4 nights, not the average night
     _EVENING_SOC_LOW = 20.0             # below this at 22:00 → battery ran low; we under-charged
     _EVENING_SOC_HIGH = 35.0            # above this at 22:00 → battery still full; we over-charged
     _RETAIN_MONTHS = 13                 # one full year + one month so year-over-year patterns are always available
@@ -245,9 +246,16 @@ class DataLogger:
 
         Measures the SOC difference between what was charged to (target_soc) and
         what remained at 06:00 (morning_soc). Only uses days where PV power at 6am
-        was negligible (<50W) so the reading isn't contaminated by early solar.
+        was negligible (<200W) so the reading isn't contaminated by early solar.
+
+        Uses the 75th percentile of recent drains rather than the mean: this is a
+        safety buffer, so it should cover the heavier nights (e.g. dishwasher /
+        washing machine running overnight) rather than the typical night. The mean
+        washes those out and leaves the battery short on appliance nights. The p75
+        covers roughly 3 of every 4 nights while quiet weeks still pull it down.
+
         Rounds to nearest 5% and caps at 20% to avoid overreacting to outliers.
-        Returns _DEFAULT_DRAIN_ADJUSTMENT (10%) until at least 5 valid days exist,
+        Returns _DEFAULT_DRAIN_ADJUSTMENT until at least 5 valid days exist,
         so target SOC never drops to the bare bridge base when history is thin.
         """
         valid = [
@@ -259,9 +267,24 @@ class DataLogger:
         ]
         if len(valid) < self._MIN_DAYS_SOC_ADJUSTMENT:
             return self._DEFAULT_DRAIN_ADJUSTMENT
-        mean_drain = sum(d["overnight_drain_pct"] for d in valid) / len(valid)
-        rounded = round(mean_drain / 5) * 5
+        drains = [d["overnight_drain_pct"] for d in valid]
+        buffer_drain = self._percentile(drains, self._DRAIN_PERCENTILE)
+        rounded = round(buffer_drain / 5) * 5
         return max(0, min(20, int(rounded)))  # cap at 20% to avoid overreacting to outlier nights
+
+    @staticmethod
+    def _percentile(values: list[float], pct: float) -> float:
+        """Return the pct-th percentile (0-100) using linear interpolation between ranks."""
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        if len(ordered) == 1:
+            return float(ordered[0])
+        rank = (pct / 100.0) * (len(ordered) - 1)
+        low = int(rank)
+        high = min(low + 1, len(ordered) - 1)
+        frac = rank - low
+        return ordered[low] + (ordered[high] - ordered[low]) * frac
 
     def count_forecast_correction_days(self, paired_days: list[dict[str, Any]]) -> int:
         """Return how many valid paired days exist toward the forecast correction threshold."""
