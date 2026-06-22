@@ -348,16 +348,6 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     },
                                     {
                                         "type": "button",
-                                        "name": "Choose best day",
-                                        "icon": "mdi:calendar-star",
-                                        "tap_action": {
-                                            "action": "call-service",
-                                            "service": "button.press",
-                                            "target": {"entity_id": "button.run_choose_best_day"},
-                                        },
-                                    },
-                                    {
-                                        "type": "button",
                                         "name": "Reset baseline",
                                         "icon": "mdi:restore",
                                         "tap_action": {
