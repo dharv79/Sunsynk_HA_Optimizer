@@ -358,7 +358,7 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     },
                                     {
                                         "type": "button",
-                                        "name": "Install dashboard",
+                                        "name": "Update dashboard",
                                         "icon": "mdi:view-dashboard-edit",
                                         "tap_action": {
                                             "action": "call-service",
