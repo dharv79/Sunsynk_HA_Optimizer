@@ -484,9 +484,15 @@ class SunsynkOptimizer:
 
         return hourly if hourly else None
 
-    async def async_run_import_plan(self, source: str = "automatic") -> None:
-        """Calculate and push overnight import plan."""
-        if self.operation_mode == "monitor":
+    async def async_run_import_plan(self, source: str = "automatic", dry_run: bool = False) -> None:
+        """Calculate and push overnight import plan.
+
+        When ``dry_run`` is True the full plan is computed but nothing is pushed
+        to the inverter, no record is logged, and persisted state is left
+        untouched — the computed plan JSON is sent to the app notification only.
+        This lets the user test the logic any time of day without side effects.
+        """
+        if self.operation_mode == "monitor" and not dry_run:
             self.coordinator.update_state(
                 operation_mode="monitor",
                 last_import_plan={"logic_branch": "monitor_only", "source": source},
@@ -713,7 +719,10 @@ class SunsynkOptimizer:
             },
         }
 
-        api_ok = await self.async_push_flux_override(payload)
+        if dry_run:
+            api_ok = None
+        else:
+            api_ok = await self.async_push_flux_override(payload)
 
         plan_state = {
             "date": dt_util.now().date().isoformat(),
@@ -751,6 +760,14 @@ class SunsynkOptimizer:
             "hourly_forecast_used": hourly_forecast_used,
             "bridge_hour": bridge_hour,
         }
+
+        if dry_run:
+            import json as _json
+            await self.async_notify(
+                f"🧪 Sunsynk Import Plan TEST — {plan_state['date']}",
+                _json.dumps(plan_state),
+            )
+            return
 
         await self.data_logger.async_log_import_plan(plan_state)
 

@@ -338,22 +338,12 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                 "cards": [
                                     {
                                         "type": "button",
-                                        "name": "Run import plan",
-                                        "icon": "mdi:clock-start",
+                                        "name": "Test plan (dry run)",
+                                        "icon": "mdi:flask-outline",
                                         "tap_action": {
                                             "action": "call-service",
                                             "service": "button.press",
-                                            "target": {"entity_id": "button.run_import_plan"},
-                                        },
-                                    },
-                                    {
-                                        "type": "button",
-                                        "name": "Run Flux 2 check",
-                                        "icon": "mdi:transmission-tower-export",
-                                        "tap_action": {
-                                            "action": "call-service",
-                                            "service": "button.press",
-                                            "target": {"entity_id": "button.run_flux_2_check"},
+                                            "target": {"entity_id": "button.test_plan"},
                                         },
                                     },
                                     {
