@@ -30,8 +30,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             SunsynkOptimizerButton(coordinator, entry, "choose_best_day", "Run choose best day"),
-            SunsynkOptimizerButton(coordinator, entry, "run_import", "Run import plan"),
-            SunsynkOptimizerButton(coordinator, entry, "run_flux2", "Run Flux 2 check"),
+            SunsynkOptimizerButton(coordinator, entry, "test_plan", "Test plan"),
             SunsynkOptimizerButton(coordinator, entry, "reset_baseline", "Reset to baseline"),
             SunsynkOptimizerButton(coordinator, entry, "install_dashboard", "Install dashboard"),
         ]
@@ -52,10 +51,8 @@ class SunsynkOptimizerButton(CoordinatorEntity, ButtonEntity):
         """Dispatch button press to the matching optimizer method."""
         if self._key == "choose_best_day":
             await self.coordinator.optimizer.async_choose_best_full_charge_day()
-        elif self._key == "run_import":
-            await self.coordinator.optimizer.async_run_import_plan(source="user_button")
-        elif self._key == "run_flux2":
-            await self.coordinator.optimizer.async_run_flux2_check(source="user_button")
+        elif self._key == "test_plan":
+            await self.coordinator.optimizer.async_run_import_plan(source="test_button", dry_run=True)
         elif self._key == "reset_baseline":
             await self.coordinator.optimizer.async_reset_flux_baseline()
         elif self._key == "install_dashboard":
