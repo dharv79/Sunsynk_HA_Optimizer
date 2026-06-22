@@ -296,7 +296,7 @@ class DataLogger:
             d for d in paired_days
             if d.get("overnight_drain_pct") is not None
             and d["overnight_drain_pct"] >= 0
-            and d.get("morning_pv_power", 0) < 50
+            and d.get("morning_pv_power", 0) < 200  # match compute_overnight_drain_adjustment so the counter reflects the same qualifying days
             and not d["is_full_day"]
         ])
 
