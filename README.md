@@ -2,21 +2,19 @@
 
 Smart Home Assistant integration to optimise Sunsynk inverter charging and export behaviour using solar forecast, battery SOC, time-of-use windows, and automated Flux control.
 
-Current stable release: **v1.0.7**
-Current beta release: **v1.0.8b3** (adaptive learning beta)
-
-> **Beta notice:** Features marked *(beta)* below are available in v1.0.8b3 only. The current stable release (v1.0.7) does not include them. Install the beta via HACS by selecting the pre-release version.
+Current release: **v1.0.8b27** (pre-release)
 
 ## Features
 
 - Smart overnight import planning driven by solar forecast and battery SOC
-- Adaptive learning — self-corrects forecast bias, overnight battery drain, and evening SOC outcomes over time *(beta)*
+- Adaptive learning — self-corrects forecast bias, overnight battery drain, and evening SOC outcomes over time
+- Battery temperature deration — reduces charge rate automatically in cold weather
+- Weekend consumption mode — uses a higher consumption figure on Saturdays and Sundays
 - Dynamic Flux 2 export control with evening export disable when grid draw is high
 - SOC-based trim logic — trims to 82% when battery exceeds 85%, and trims after a 1-hour hold on full-charge days
 - Weekly best full-charge day selection scored from weather forecast
 - Monitor mode — observe decisions without writing to the Sunsynk API
-- Manual control buttons for all actions
-- Auto-generated Lovelace dashboard with adaptive learning, history graphs, and tuning assist sections *(dashboard adaptive learning section and 48h graphs are beta)*
+- Auto-generated Lovelace dashboard with adaptive learning, history graphs, and tuning assist sections
 - Optional push notifications via any HA notify service
 
 ## Requirements
@@ -158,19 +156,13 @@ HA notify service to use for plan and action notifications.
 notify.notify
 ```
 
-or if using Slack:
-
-```text
-notify.slack
-```
-
 #### Notify target (optional)
 
 Target channel or device for the notify service.
 
-```text
-#slackhomenotifications
-```
+#### Data report target (optional)
+
+A secondary notify target that receives a full JSON debug report at 22:00 each day, containing the import plan, morning state, and day actuals. Useful for logging to a Slack channel or similar.
 
 #### Operation mode
 
@@ -183,15 +175,18 @@ Grid/load power above this wattage between 16:00–19:00 disables Flux 2 export 
 
 Default: `1500`
 
+#### Average consumption (weekday / weekend)
+
+Average home load in kW, used for the solar bridge target calculation. Separate values for weekdays and weekends.
+
+Default weekday: `0.75` kW  
+Default weekend: `0.90` kW
+
 #### Default full-charge day
 
 Fallback full-charge day used before the weekly scoring has run.
 
 Default: `Wednesday`
-
-#### Currency / Invest
-
-Used internally for tariff tracking. Defaults are `366` and `9400` respectively.
 
 ## Important ID mapping
 
@@ -201,11 +196,6 @@ These two values are different and must not be swapped.
 |---|---|
 | SolarSynkV3 sensor entity suffix | `inverter_serial` |
 | Sunsynk API writes | `plant_id` |
-
-Example:
-
-- SolarSynkV3 entities use `1111111111`
-- Sunsynk API writes use `111111`
 
 ## Options flow (reconfiguring)
 
@@ -232,26 +222,26 @@ All logic paths run and state entities are updated, but no API calls are made. U
 
 Runs each night at 01:55 to set the overnight charging window (Flux 1).
 
-Before calculating targets, three adaptive corrections are fetched from historical data:
+Before calculating targets, four adaptive corrections are fetched from historical data:
 
 1. **Forecast correction** — scales the raw forecast by the actual/forecast ratio from the last 30 days. Active after 7+ paired days.
-2. **Overnight drain compensation** — extra % added to target SOC to cover battery drain between charge end and 06:00. Active after 5+ mornings.
+2. **Overnight drain compensation** — extra % added to target SOC to cover battery drain between charge end and 06:00. Uses the 75th percentile of recent drain values so appliance-heavy nights are covered. Active after 5+ qualifying mornings (returns 15% fallback until then).
 3. **Evening SOC nudge** — shifts target ±5% if the battery consistently ends the day too full or too empty. Active after 5+ matching days per forecast band.
+4. **Effective charge rate** — calibrated kW rate from historical charging sessions, used to size the import window precisely.
 
 SOC target is calculated as:
 
 | Condition | Target SOC |
 |---|---|
-| Full-charge day | 100% |
+| Full-charge day (solar bridge) | 20% + hours-to-solar × consumption / capacity |
 | Low solar (< 7 kWh), winter-like | 100% |
 | Low solar (< 7 kWh), other | 95% |
-| Winter-like (≤ 5 kWh) | 95% |
-| Summer-like (≥ 10 kWh) | 80% |
-| Shoulder | 85% |
+| Solar bridge (normal) | 20% + hours-to-solar × consumption / capacity |
+| Band fallback, summer-like | 80% |
+| Band fallback, shoulder | 85% |
+| Band fallback, winter-like | 95% |
 
-Adaptive corrections are applied on top (clamped 50–100%).
-
-Import window end time starts at 04:00 and is adjusted based on current SOC and forecast band, then clamped to 02:15–05:00. If forecast is below 7 kWh the window is always extended to 05:00.
+Adaptive corrections are applied on top (clamped 30–100%).
 
 ### Morning state capture (06:00 daily)
 
@@ -278,11 +268,9 @@ Controls Flux 2 (export window) based on real-time conditions:
 
 ### Evening actuals capture (22:00 daily)
 
-Records end-of-day battery SOC and actual PV generation (`pv_etoday`) for adaptive learning.
+Records end-of-day battery SOC and actual PV generation (`pv_etoday`) for adaptive learning. If a data report target is configured, posts the full day JSON to that notify target.
 
-## Adaptive learning *(beta — v1.0.8b3 only)*
-
-> This feature is not present in the stable v1.0.7 release. On a fresh install from the stable channel the optimizer behaviour is unchanged from v1.0.7.
+## Adaptive learning
 
 History is written to JSONL files at:
 
@@ -301,7 +289,7 @@ Four record types are logged:
 
 Files older than 13 months are pruned automatically on HA startup.
 
-All three corrections return neutral values (no effect) until enough days have accumulated, so the optimizer behaves identically to v1.0.7 on a fresh install.
+All corrections return neutral values until enough days have accumulated — the optimizer behaves conservatively on a fresh install.
 
 ## Entities
 
@@ -310,12 +298,12 @@ All three corrections return neutral values (no effect) until enough days have a
 | Entity | Description |
 |---|---|
 | `sensor.selected_full_charge_day` | Currently selected full-charge day. Attributes include all day scores. |
-| `sensor.import_plan_end` | Current import window summary (e.g. `02:00→04:00 target 85%`). Attributes expose the full plan including all adaptive corrections. |
+| `sensor.import_plan_end` | Current import window summary. Attributes expose the full plan including all adaptive corrections. |
 | `sensor.flux_2_action` | Last Flux 2 action taken. Attributes expose the full action dict. |
 | `sensor.next_import_window` | Import window string for the upcoming night. |
 | `sensor.current_soc_target` | Target SOC set by the last import plan. |
 | `sensor.operation_mode` | Current mode: `auto` or `monitor`. |
-| `sensor.last_error` | Last error message, or `OK`. Attributes include last API result and notification status. |
+| `sensor.last_error` | Last error message, or `OK`. |
 | `sensor.last_updated` | ISO timestamp of the last state update. |
 
 ### Binary sensors
@@ -329,11 +317,9 @@ All three corrections return neutral values (no effect) until enough days have a
 
 | Button | Action |
 |---|---|
-| Run import plan | Manually trigger the overnight import plan calculation and API push |
-| Run Flux 2 check | Manually trigger the Flux 2 export/trim check |
-| Run choose best day | Manually trigger the full-charge day scoring |
+| Test plan (dry run) | Recomputes the full import plan and sends the complete JSON to the app notification — no inverter push, safe to use any time |
 | Reset to baseline | Push the baseline Flux settings from config and clear export-disabled state |
-| Install dashboard | Regenerate the Lovelace dashboard file |
+| Update dashboard | Regenerate the Lovelace dashboard YAML file |
 
 ## Step 3: Install the dashboard
 
@@ -342,17 +328,13 @@ Once the integration is configured:
 1. Open **Settings → Devices & Services**
 2. Open the **Sunsynk Optimizer** integration
 3. Go to its **Entities**
-4. Find and press:
-
-```text
-Install dashboard
-```
+4. Find and press **Update dashboard**
 
 This generates a dashboard YAML file in the HA config directory, with all SolarSynkV3 entity IDs built automatically from your configured inverter serial.
 
 ## Step 4: Add the Lovelace dashboard config
 
-After pressing **Install dashboard**, a persistent notification shows the generated filename.
+After pressing **Update dashboard**, a persistent notification shows the generated filename.
 
 Add the snippet from the notification to your `configuration.yaml`:
 
@@ -369,29 +351,24 @@ lovelace:
 
 ## Step 5: Restart HA
 
-Restart HA after saving `configuration.yaml`.
-
-Once back up, open the dashboard from the sidebar.
+Restart HA after saving `configuration.yaml`. Once back up, open the dashboard from the sidebar.
 
 ## Dashboard sections
 
 | Section | Contents |
 |---|---|
 | Power flow | Live Sunsynk power flow card |
-| KPI summary | Daily energy totals and optimizer KPIs (SOC target, import window, mode) |
+| KPI summary | Daily energy totals and optimizer KPIs |
 | Adaptive learning | Active correction factors and a plain-English explanation of what the system has learned |
 | Optimizer status | All optimizer state entities |
-| Manual controls | Buttons for all actions plus config notes |
+| Manual controls | Test plan, Reset baseline, Update dashboard buttons |
 | Forecast and live values | Weather, forecast sensor, key inverter values, 48-hour SOC/grid and PV history graphs |
 | Tuning assist | Seasonal guidance and all relevant input values |
-| Event detail | Last import plan, last Flux 2 action, Why this plan attributes, logbook |
+| Event detail | Last import plan, last Flux 2 action, logbook |
 
 ## Updating the dashboard
 
-If you change the integration configuration or the dashboard layout changes in a new release:
-
-1. Press **Install dashboard** again
-2. The dashboard file is rebuilt immediately — no manual editing needed
+If you change the integration configuration or the dashboard layout changes in a new release, press **Update dashboard** again. The dashboard file is rebuilt immediately — no manual editing needed.
 
 ## Notifications
 
@@ -404,8 +381,6 @@ Notifications use the configured notify service and are sent for:
 - Full-charge day trim to 82%
 - Baseline restored
 
-If your notify platform needs a target, set `notify_target` in configuration.
-
 ## Troubleshooting
 
 ### Integration will not save during setup
@@ -414,44 +389,31 @@ The setup validates that `sensor.solarsynkv3_{inverter_serial}_battery_soc` and 
 
 ### Dashboard installs with wrong sensors
 
-Check that:
-
-- `inverter_serial` is the SolarSynkV3 serial (alphanumeric)
-- `plant_id` is the Sunsynk API plant ID (numeric)
-
-Then press **Install dashboard** again.
+Check that `inverter_serial` is the SolarSynkV3 serial (alphanumeric) and `plant_id` is the Sunsynk API plant ID (numeric), then press **Update dashboard** again.
 
 ### Notifications do not send
 
-Check:
-
-- the notify service exists in HA
-- the notify target is correct if required
-- the integration `Last error` entity for details
+Check the notify service exists in HA, the notify target is correct if required, and the integration **Last error** entity for details.
 
 ### Import plan fails
 
-Check:
-
-- `plant_id` is correct
-- Sunsynk credentials are correct
-- the integration can reach the Sunsynk API (check `Last error` entity)
+Check that `plant_id` is correct, Sunsynk credentials are correct, and the integration can reach the Sunsynk API (check **Last error** entity).
 
 ### Adaptive corrections not activating
 
-Corrections are inactive until enough days of history exist (7+ for forecast correction, 5+ for drain and evening nudge). This is expected on a fresh install.
+Corrections are inactive until enough days of history exist (7+ for forecast correction, 5+ for drain and evening nudge). This is expected on a fresh install. The overnight drain adjustment returns a 15% safety buffer until the 5-day threshold is met.
 
-### Spook shows unknown dashboard entities
+### HACS shows no information
 
-Press **Install dashboard** again after correcting config values and remove any older static dashboards.
+Press **Update information** from the HACS context menu for this integration to force a refresh of the repository info.
 
 ## Updating
 
 When updating through HACS:
 
 1. Download the update
-2. Reload the integration via **Settings → Devices & Services** if needed
-3. Press **Install dashboard** again if the dashboard structure has changed
+2. Reload the integration via **Settings → Devices & Services**
+3. Press **Update dashboard** if the dashboard structure has changed in the release notes
 
 ## Notes
 
