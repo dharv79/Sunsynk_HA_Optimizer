@@ -40,7 +40,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             SunsynkOptimizerSensor(coordinator, entry, "selected_full_charge_day", "Selected full charge day"),
-            SunsynkOptimizerSensor(coordinator, entry, "import_plan_end", "Import plan end"),
+            SunsynkOptimizerSensor(coordinator, entry, "import_plan_end", "Import plan"),
             SunsynkOptimizerSensor(coordinator, entry, "flux2_action", "Flux 2 action"),
             SunsynkOptimizerSensor(coordinator, entry, "next_import_window", "Next import window"),
             SunsynkOptimizerSensor(coordinator, entry, "current_soc_target", "Current SOC target"),

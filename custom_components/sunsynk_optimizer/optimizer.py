@@ -338,11 +338,13 @@ class SunsynkOptimizer:
             },
             evening_export_disabled=False,
         )
-        status_prefix = "" if ok else "⚠ API push FAILED — "
-        await self.async_notify(
-            f"{status_prefix}🔋 Sunsynk baseline restored",
-            "Flux baseline settings were restored.",
+        title = "🔋 Sunsynk: baseline restored" if ok else "⚠️ Sunsynk: baseline NOT restored"
+        body = (
+            "Inverter Flux windows returned to your configured baseline. Evening export re-enabled."
+            if ok
+            else "API push failed — the inverter still has the previous settings. Try again or check Last error."
         )
+        await self.async_notify(title, body)
 
     async def async_choose_best_full_charge_day(self) -> None:
         """Choose the best Monday-Friday full-charge day from weather forecast."""
@@ -429,14 +431,14 @@ class SunsynkOptimizer:
         await self.data_logger.async_log_full_charge_scores(scores, best_day)
 
         await self.async_notify(
-            "🔋 Sunsynk Full Charge Day Updated",
+            "🔋 Sunsynk: full-charge day chosen",
             (
-                f"Chosen day: {best_day}. "
-                f"Scores - Monday: {scores['Monday']}, "
-                f"Tuesday: {scores['Tuesday']}, "
-                f"Wednesday: {scores['Wednesday']}, "
-                f"Thursday: {scores['Thursday']}, "
-                f"Friday: {scores['Friday']}."
+                f"Chosen day: {best_day} ({scores[best_day]}). "
+                f"Scores — Mon {scores['Monday']}, "
+                f"Tue {scores['Tuesday']}, "
+                f"Wed {scores['Wednesday']}, "
+                f"Thu {scores['Thursday']}, "
+                f"Fri {scores['Friday']}."
             ),
         )
 
@@ -507,7 +509,7 @@ class SunsynkOptimizer:
             msg = f"Battery SOC entity {self.battery_soc_entity} unavailable — import plan skipped"
             _LOGGER.warning(msg)
             self.coordinator.update_state(last_error=msg)
-            await self.async_notify("⚠ Sunsynk plan skipped", msg)
+            await self.async_notify("⚠️ Sunsynk: plan skipped", msg)
             return
         soc = soc_val
 
@@ -536,7 +538,7 @@ class SunsynkOptimizer:
                 )
                 _LOGGER.warning(msg)
                 self.coordinator.update_state(last_error=msg)
-                await self.async_notify("⚠ Sunsynk plan skipped", msg)
+                await self.async_notify("⚠️ Sunsynk: plan skipped", msg)
                 return
             raw_forecast_kwh = float(prior_raw)
             forecast_fallback_note = " (using yesterday's forecast — sensor unavailable)"
@@ -764,7 +766,7 @@ class SunsynkOptimizer:
         if dry_run:
             import json as _json
             await self.async_notify(
-                f"🧪 Sunsynk Import Plan TEST — {plan_state['date']}",
+                f"🧪 Sunsynk: test plan (dry run) — {plan_state['date']}",
                 _json.dumps(plan_state),
             )
             return
@@ -789,16 +791,20 @@ class SunsynkOptimizer:
         if soc_adjustment:
             adjustment_parts.append(f"eve {soc_adjustment:+d}%")
         adjustment_note = f" ({', '.join(adjustment_parts)})" if adjustment_parts else ""
-        status_prefix = "" if api_ok else "⚠ API push FAILED — "
-        api_note = "" if api_ok else " — inverter NOT updated; will retry next cycle."
+        title = "🔋 Sunsynk: import plan set" if api_ok else "⚠️ Sunsynk: import plan NOT applied"
+        api_note = "" if api_ok else " Inverter NOT updated; will retry next cycle."
+        full_day_note = " — full-charge day" if is_full_day else ""
+        # "summer_like" → "summer-like": keep internal band names out of user text.
+        season = forecast_band.replace("_", "-")
+        fallback_logic_note = "" if logic_branch.startswith("adaptive") else " (fallback logic)."
         await self.async_notify(
-            f"{status_prefix}🔋 Sunsynk Import Plan",
+            title,
             (
-                f"Today: {today} (Full charge: {is_full_day}). "
+                f"Today: {today}{full_day_note}. "
                 f"SOC: {round(soc, 1)}%. "
                 f"Solar forecast: {round(solar_forecast_kwh, 1)} kWh{forecast_note}{forecast_fallback_note}. "
                 f"Import: 02:00 → {flux1_end} target {target_soc}%{adjustment_note}. "
-                f"Band: {forecast_band}. Logic: {logic_branch}.{api_note}"
+                f"Season: {season}.{fallback_logic_note}{api_note}"
             ),
         )
 
@@ -884,13 +890,13 @@ class SunsynkOptimizer:
                 operation_mode=self.operation_mode,
             )
 
-            status_prefix = "" if api_ok else "⚠ API push FAILED — "
+            title = "🔋 Sunsynk: evening export paused" if api_ok else "⚠️ Sunsynk: export pause NOT applied"
             api_note = "" if api_ok else " (inverter NOT updated)"
             await self.async_notify(
-                f"{status_prefix}🏠 Flux 2 Export Disabled",
+                title,
                 (
-                    f"Grid/load is {round(grid_pac, 0)}W between 16:00 and 19:00. "
-                    f"Flux 2 export disabled by setting target SOC to 100%.{api_note}"
+                    f"Grid draw is {round(grid_pac)} W during the 16:00–19:00 export window. "
+                    f"Export paused by holding target SOC at 100%; it re-enables automatically.{api_note}"
                 ),
             )
             return
@@ -929,10 +935,10 @@ class SunsynkOptimizer:
                 operation_mode=self.operation_mode,
             )
 
-            status_prefix = "" if api_ok else "⚠ API push FAILED — "
+            title = "🔋 Sunsynk: battery trim" if api_ok else "⚠️ Sunsynk: battery trim NOT applied"
             api_note = "" if api_ok else " (inverter NOT updated)"
             await self.async_notify(
-                f"{status_prefix}🔋 SOC Control",
+                title,
                 f"SOC {round(soc, 1)}% is above 85%. Trimming to 82%.{api_note}",
             )
             return
@@ -1007,10 +1013,10 @@ class SunsynkOptimizer:
                     evening_export_disabled=False,
                     operation_mode=self.operation_mode,
                 )
-                status_prefix = "" if api_ok else "⚠ API push FAILED — "
+                title = "🔋 Sunsynk: full-charge hold complete" if api_ok else "⚠️ Sunsynk: full-charge trim NOT applied"
                 api_note = "" if api_ok else " (inverter NOT updated)"
                 await self.async_notify(
-                    f"{status_prefix}🔋 Full Charge Trim",
+                    title,
                     f"Held at 100% for 1 hour. Trimming to 82%.{api_note}",
                 )
 
