@@ -15,21 +15,24 @@
           "notify_target": "Notify target (optional)",
           "operation_mode": "Operation mode",
           "currency": "Currency",
-          "invest": "Invest",
+          "invest": "Investment value (Sunsynk income API)",
           "export_disable_threshold": "Evening export disable threshold (W)",
           "default_full_charge_day": "Default full charge day",
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "charge_rate_kw": "Charge rate (kW)",
           "avg_consumption_kw": "Average home consumption (kW)",
+          "weekend_avg_consumption_kw": "Weekend average consumption (kW)",
           "solar_start_offset_hours": "Hours after sunrise until solar covers load",
+          "hourly_forecast_sensor": "Hourly forecast sensor (optional)",
+          "hourly_forecast_attribute": "Hourly forecast attribute",
           "data_report_target": "Daily data report notify target (optional, developer)"
         }
       }
     },
     "error": {
       "cannot_connect": "Could not log in to Sunsynk.",
-      "battery_soc_not_found": "Battery SOC entity was not found.",
-      "grid_pac_not_found": "Grid PAC entity was not found.",
+      "battery_soc_not_found": "Battery SOC sensor was not found for this inverter serial.",
+      "grid_pac_not_found": "Grid power (grid_pac) sensor was not found for this inverter serial.",
       "entity_not_found": "Entity was not found.",
       "invalid_service": "Service must be in domain.service format.",
       "service_not_found": "Service was not found."
@@ -51,13 +54,16 @@
           "notify_target": "Notify target (optional)",
           "operation_mode": "Operation mode",
           "currency": "Currency",
-          "invest": "Invest",
+          "invest": "Investment value (Sunsynk income API)",
           "export_disable_threshold": "Evening export disable threshold (W)",
           "default_full_charge_day": "Default full charge day",
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "charge_rate_kw": "Charge rate (kW)",
           "avg_consumption_kw": "Average home consumption (kW)",
+          "weekend_avg_consumption_kw": "Weekend average consumption (kW)",
           "solar_start_offset_hours": "Hours after sunrise until solar covers load",
+          "hourly_forecast_sensor": "Hourly forecast sensor (optional)",
+          "hourly_forecast_attribute": "Hourly forecast attribute",
           "data_report_target": "Daily data report notify target (optional, developer)"
         }
       },

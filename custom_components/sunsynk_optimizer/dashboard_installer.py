@@ -54,7 +54,7 @@ Suggestion: bias toward **higher overnight SOC targets**, longer import windows,
 {{% else %}}
 **Season:** Shoulder / mixed day  
 
-Suggestion: use **mid SOC targets** and let forecast drive import end times more aggressively.
+Suggestion: use **mid SOC targets** and let the forecast shorten or extend the import window.
 {{% endif %}}"""
 
     adaptive_learning_content = f"""{{% set solar_start = state_attr('sensor.import_plan_end', 'solar_start_time') %}}
@@ -103,7 +103,7 @@ Suggestion: use **mid SOC targets** and let forecast drive import end times more
 {{% else %}}→ Evening SOC is in the right range — no nudge needed.
 {{% endif %}}"""
 
-    notes_content = f"""**Plant ID:** {api_plant_id}
+    notes_content = f"""**Plant ID:** {api_plant_id}  
 **Inverter S/N:** {solar_entity_suffix}  
 **Weather entity:** {weather_entity}  
 **Forecast sensor:** {forecast_sensor}
@@ -466,7 +466,7 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                             },
                             {
                                 "type": "entities",
-                                "title": "Why this plan",
+                                "title": "Why this plan?",
                                 "show_header_toggle": False,
                                 "entities": [
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "today", "name": "Today"},
@@ -533,7 +533,7 @@ async def async_install_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> No
         )
         return
 
-    snippet = f"""Add this to configuration.yaml and reload Home Assistant YAML/Lovelace:
+    snippet = f"""Add this to configuration.yaml, then reload dashboards via Developer Tools → YAML → Lovelace dashboards (or restart Home Assistant):
 
 lovelace:
   dashboards:

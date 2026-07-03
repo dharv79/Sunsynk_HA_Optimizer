@@ -32,7 +32,7 @@ async def async_setup_entry(
             SunsynkOptimizerButton(coordinator, entry, "choose_best_day", "Run choose best day"),
             SunsynkOptimizerButton(coordinator, entry, "test_plan", "Test plan"),
             SunsynkOptimizerButton(coordinator, entry, "reset_baseline", "Reset to baseline"),
-            SunsynkOptimizerButton(coordinator, entry, "install_dashboard", "Install dashboard"),
+            SunsynkOptimizerButton(coordinator, entry, "install_dashboard", "Update dashboard"),
         ]
     )
 
