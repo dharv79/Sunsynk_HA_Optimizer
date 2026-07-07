@@ -778,6 +778,11 @@ class SunsynkOptimizer:
             next_import_window=next_import_window,
             last_import_plan=plan_state,
             operation_mode=self.operation_mode,
+            # Clear any stale error (e.g. a transient "SOC unavailable" skip from a
+            # reload) once a plan completes and pushes cleanly. Keep the error when
+            # the push failed — _async_post_with_status already set it and the user
+            # needs to see the inverter did not receive the plan.
+            last_error=None if api_ok else self.coordinator.state.last_error,
         )
 
         forecast_note = (
