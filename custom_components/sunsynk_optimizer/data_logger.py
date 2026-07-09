@@ -187,6 +187,7 @@ class DataLogger:
             paired.append({
                 "date": date,
                 "solar_forecast_kwh": plan.get("solar_forecast_kwh", 0.0),
+                "raw_forecast_kwh": plan.get("raw_forecast_kwh"),
                 "actual_solar_kwh": actual.get("actual_solar_kwh", 0.0),
                 "forecast_band": plan.get("forecast_band"),
                 "target_soc": target_soc,
@@ -202,7 +203,15 @@ class DataLogger:
         return paired
 
     def compute_forecast_correction(self, paired_days: list[dict[str, Any]]) -> float:
-        """Return mean(actual/forecast) ratio over recent days, capped at [0.5, 3.0].
+        """Return median(actual/forecast) ratio over recent days, capped at [0.5, 3.0].
+
+        The denominator is the stored (already-corrected) forecast, which makes
+        the update self-damping: at equilibrium the factor settles at
+        sqrt(actual/raw_forecast) rather than the full raw bias. That
+        under-corrects — deliberately the safe direction, since a forecast the
+        planner believes is lower than reality means more overnight charge, not
+        less. Median (not mean) so a single anomalous day (tiny forecast, big
+        actual → unbounded ratio) cannot move the factor.
 
         Returns 1.0 (no correction) until at least 7 paired days exist.
         Skips days where forecast was near-zero to avoid division noise.
@@ -210,8 +219,8 @@ class DataLogger:
         valid = [d for d in paired_days if d["solar_forecast_kwh"] > 0.5]
         if len(valid) < self._MIN_DAYS_FORECAST_CORRECTION:
             return 1.0
-        ratios = [d["actual_solar_kwh"] / d["solar_forecast_kwh"] for d in valid]
-        factor = sum(ratios) / len(ratios)
+        ratios = sorted(d["actual_solar_kwh"] / d["solar_forecast_kwh"] for d in valid)
+        factor = self._percentile(ratios, 50)
         return max(0.5, min(3.0, round(factor, 3)))
 
     def compute_soc_target_adjustment(
