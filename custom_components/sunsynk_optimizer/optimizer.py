@@ -564,6 +564,13 @@ class SunsynkOptimizer:
         else:
             solar_forecast_kwh = round(raw_forecast_kwh * forecast_correction, 2)
         forecast_band = self._forecast_band(solar_forecast_kwh)
+        # Low-solar decisions key on the PESSIMISTIC of raw vs corrected. The
+        # learned correction is derived mostly from good days; on a genuinely bad
+        # day the raw forecast is already right, and multiplying it above the
+        # 7 kWh threshold would skip the max-import override and leave the
+        # battery short (the Jun 17 empty-battery incident class). If either
+        # forecast says a bad day, believe it.
+        low_solar_forecast_kwh = min(raw_forecast_kwh, solar_forecast_kwh)
         hourly_forecast_kwh = self._get_hourly_forecast_kwh()
         hourly_forecast_used = False
         bridge_hour: int | None = None
@@ -585,7 +592,7 @@ class SunsynkOptimizer:
 
         if is_full_day:
             soc_reason = "weekly_full_charge_day"
-            if solar_forecast_kwh >= 7 and solar_start_time is not None:
+            if low_solar_forecast_kwh >= 7 and solar_start_time is not None:
                 # Good solar expected — bridge overnight import to solar start time;
                 # PV charges the battery to 100% during the day for free.
                 energy_to_cover = hours_to_solar * avg_consumption_kw
@@ -595,7 +602,7 @@ class SunsynkOptimizer:
                 # Poor solar forecast on the chosen day — import fully from grid as fallback.
                 target_soc = 100
         else:
-            if solar_forecast_kwh < 7:
+            if low_solar_forecast_kwh < 7:
                 # Very low solar — fill up regardless of band to ensure enough energy.
                 if forecast_band == "winter_like":
                     target_soc = 100
@@ -682,7 +689,7 @@ class SunsynkOptimizer:
             temp_deration_factor = 0.55
         used_charge_rate = round(used_charge_rate * temp_deration_factor, 2)
 
-        if solar_forecast_kwh < 7:
+        if low_solar_forecast_kwh < 7:
             # Extend to maximum window when solar is scarce — we need all the cheap import we can get.
             flux1_end = "05:00"
             logic_branch = "low_solar_full_window"
@@ -735,6 +742,7 @@ class SunsynkOptimizer:
             "raw_forecast_kwh": raw_forecast_kwh,
             "forecast_correction_factor": forecast_correction,
             "solar_forecast_kwh": solar_forecast_kwh,
+            "low_solar_forecast_kwh": round(low_solar_forecast_kwh, 2),
             "forecast_band": forecast_band,
             "logic_branch": logic_branch,
             "solar_start_time": solar_start_time,
