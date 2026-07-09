@@ -866,6 +866,26 @@ class SunsynkOptimizer:
             16 <= now_local.hour < 19
             and grid_pac > export_threshold
         ):
+            # Idempotency: SOC changes can fire this check every ~30s for the whole
+            # 16:00–19:00 window. If export is already paused, don't re-push the
+            # identical payload to the API or re-notify on every tick.
+            if self.coordinator.state.evening_export_disabled:
+                self.coordinator.update_state(
+                    last_flux2_action={
+                        "action": "disable_evening_export",
+                        "soc": soc,
+                        "grid_pac": grid_pac,
+                        "notified": False,
+                        "source": source,
+                        "reason": "already_disabled",
+                        "api_ok": True,
+                    },
+                    evening_export_disabled=True,
+                    operation_mode=self.operation_mode,
+                    touch=False,
+                )
+                return
+
             payload = {
                 "flux_2": {
                     "startTime": "16:00",
@@ -954,26 +974,46 @@ class SunsynkOptimizer:
             operation_mode=self.operation_mode,
         )
 
-    async def _async_initial_refresh(self, _now) -> None:
-        """Populate initial state soon after startup."""
+    async def _guarded(self, coro_factory, label: str) -> None:
+        """Run a scheduled coroutine, surfacing any exception via last_error.
+
+        Scheduled time-change/interval callbacks otherwise let an exception
+        (e.g. a misconfigured charge rate causing ZeroDivisionError, or a
+        missing config key) escape into the HA event loop with no plan pushed,
+        no notification, and nothing on the dashboard — a silent failure.
+        """
         try:
-            await self.async_run_import_plan()
+            await coro_factory()
         except Exception as exc:  # pragma: no cover
-            _LOGGER.exception("Initial refresh failed")
-            self.coordinator.update_state(last_error=f"Initial refresh failed: {exc}")
+            _LOGGER.exception("%s failed", label)
+            self.coordinator.update_state(last_error=f"{label} failed: {exc}")
+
+    async def _async_initial_refresh(self, _now) -> None:
+        """Populate initial state soon after startup.
+
+        Skips the one-shot plan if a reload lands mid-evening while export is
+        paused: the plan re-pushes flux_2 to its default (targetSoc 85) and
+        would re-enable export at the worst moment. The periodic Flux 2 check
+        keeps the pause and the nightly 01:55 plan re-plans normally.
+        """
+        now = dt_util.now()
+        if self.coordinator.state.evening_export_disabled and 16 <= now.hour < 19:
+            _LOGGER.info("Skipping initial import plan — evening export pause active")
+            return
+        await self._guarded(self.async_run_import_plan, "Initial refresh")
 
     async def _async_choose_best_full_charge_day(self, _now) -> None:
         """Time-change callback at 18:00 daily — only acts on Sundays."""
         if dt_util.now().strftime("%A") == "Sunday":
-            await self.async_choose_best_full_charge_day()
+            await self._guarded(self.async_choose_best_full_charge_day, "Full-charge-day selection")
 
     async def _async_run_import_plan(self, _now) -> None:
         """Time-change callback at 01:55 daily."""
-        await self.async_run_import_plan()
+        await self._guarded(self.async_run_import_plan, "Scheduled import plan")
 
     async def _async_periodic_flux2_check(self, _now) -> None:
         """30-minute interval callback."""
-        await self.async_run_flux2_check()
+        await self._guarded(self.async_run_flux2_check, "Periodic Flux 2 check")
 
     async def _async_battery_soc_changed(self, event: Event) -> None:
         """Handle SOC threshold-based reactions."""
