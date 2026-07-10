@@ -263,23 +263,47 @@ class DataLogger:
         washes those out and leaves the battery short on appliance nights. The p75
         covers roughly 3 of every 4 nights while quiet weeks still pull it down.
 
+        Only nights where a real overnight charge happened (initial SOC below
+        target) are counted. On a "no-charge" night the battery started above
+        target and simply discharged from a high point — target − morning then
+        conflates the evening discharge with post-charge drain and inflates the
+        buffer. Excluding those makes the metric correct by construction (it
+        matched the summer result already, but protects winter nights when high
+        targets make no-charge starts common).
+
         Rounds to nearest 5% and caps at 20% to avoid overreacting to outliers.
         Returns _DEFAULT_DRAIN_ADJUSTMENT until at least 5 valid days exist,
         so target SOC never drops to the bare bridge base when history is thin.
         """
-        valid = [
-            d for d in paired_days
-            if d.get("overnight_drain_pct") is not None
-            and d["overnight_drain_pct"] >= 0
-            and d.get("morning_pv_power", 0) < 200  # <200 W means net battery drain still dominates at 06:00
-            and not d["is_full_day"]
-        ]
+        valid = [d for d in paired_days if self._is_drain_night(d)]
         if len(valid) < self._MIN_DAYS_SOC_ADJUSTMENT:
             return self._DEFAULT_DRAIN_ADJUSTMENT
         drains = [d["overnight_drain_pct"] for d in valid]
         buffer_drain = self._percentile(drains, self._DRAIN_PERCENTILE)
         rounded = round(buffer_drain / 5) * 5
         return max(0, min(20, int(rounded)))  # cap at 20% to avoid overreacting to outlier nights
+
+    @staticmethod
+    def _is_drain_night(d: dict[str, Any]) -> bool:
+        """True if a paired day is a valid post-charge overnight-drain sample.
+
+        Requires: a computed drain, negligible PV at 06:00 (so early solar isn't
+        masking the drain), a non-full-charge day, and — critically — that a real
+        overnight charge happened (initial SOC below target). A no-charge night
+        (initial >= target) discharges from a high start and is not a post-charge
+        drain measurement.
+        """
+        initial = d.get("initial_soc")
+        target = d.get("target_soc")
+        return (
+            d.get("overnight_drain_pct") is not None
+            and d["overnight_drain_pct"] >= 0
+            and d.get("morning_pv_power", 0) < 200  # <200 W means net battery drain still dominates at 06:00
+            and not d["is_full_day"]
+            and initial is not None
+            and target is not None
+            and initial < target
+        )
 
     @staticmethod
     def _percentile(values: list[float], pct: float) -> float:
@@ -300,14 +324,12 @@ class DataLogger:
         return len([d for d in paired_days if d["solar_forecast_kwh"] > 0.5])
 
     def count_drain_adjustment_days(self, paired_days: list[dict[str, Any]]) -> int:
-        """Return how many valid morning-state days exist toward the drain adjustment threshold."""
-        return len([
-            d for d in paired_days
-            if d.get("overnight_drain_pct") is not None
-            and d["overnight_drain_pct"] >= 0
-            and d.get("morning_pv_power", 0) < 200  # match compute_overnight_drain_adjustment so the counter reflects the same qualifying days
-            and not d["is_full_day"]
-        ])
+        """Return how many valid drain-night samples exist toward the drain threshold.
+
+        Uses the same _is_drain_night predicate as compute_overnight_drain_adjustment
+        so the progress counter always reflects the exact qualifying set.
+        """
+        return len([d for d in paired_days if self._is_drain_night(d)])
 
     def count_soc_adjustment_days(self, paired_days: list[dict[str, Any]], forecast_band: str) -> int:
         """Return how many in-band non-full-charge days exist toward the evening SOC nudge threshold.
