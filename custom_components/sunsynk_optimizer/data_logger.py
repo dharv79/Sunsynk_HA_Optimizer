@@ -188,6 +188,7 @@ class DataLogger:
                 "date": date,
                 "solar_forecast_kwh": plan.get("solar_forecast_kwh", 0.0),
                 "raw_forecast_kwh": plan.get("raw_forecast_kwh"),
+                "effective_charge_rate_kw": plan.get("effective_charge_rate_kw"),
                 "actual_solar_kwh": actual.get("actual_solar_kwh", 0.0),
                 "forecast_band": plan.get("forecast_band"),
                 "target_soc": target_soc,
@@ -412,6 +413,19 @@ class DataLogger:
         if len(rates) < 3:
             return None
         return round(sum(rates) / len(rates), 2)
+
+    @staticmethod
+    def last_known_charge_rate_kw(paired_days: list[dict[str, Any]]) -> float | None:
+        """Return the most recent non-null learned charge rate from history, or None.
+
+        Used to seed the fallback so a fresh install/upgrade doesn't revert to the
+        optimistic nameplate config for the days it takes calibration to recover.
+        """
+        for d in sorted(paired_days, key=lambda x: x.get("date", ""), reverse=True):
+            rate = d.get("effective_charge_rate_kw")
+            if rate is not None:
+                return float(rate)
+        return None
 
     def count_charge_rate_calibration_days(self, paired_days: list[dict[str, Any]]) -> int:
         """Return how many valid charging days exist toward charge rate calibration (needs 3)."""
