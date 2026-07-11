@@ -668,10 +668,21 @@ class SunsynkOptimizer:
         overnight_drain_days = self.data_logger.count_drain_adjustment_days(paired_days)
         soc_adjustment_days = self.data_logger.count_soc_adjustment_days(paired_days, forecast_band)
 
-        effective_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
+        computed_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
             paired_days, battery_capacity_kwh, overnight_drain_adjustment
         )
         charge_rate_calibration_days = self.data_logger.count_charge_rate_calibration_days(paired_days)
+        # When calibration thins below its minimum (common in summer — charge gaps
+        # rarely reach the 10% needed to calibrate), reuse the last learned rate
+        # rather than the optimistic nameplate config, which under-sizes the window.
+        # Fallback chain: fresh computation → persisted last-known → most recent
+        # non-null rate in history (seeds the persisted value on first run).
+        charge_rate_from_cache = computed_charge_rate is None
+        effective_charge_rate = computed_charge_rate
+        if effective_charge_rate is None:
+            effective_charge_rate = self.coordinator.state.last_effective_charge_rate_kw
+        if effective_charge_rate is None:
+            effective_charge_rate = self.data_logger.last_known_charge_rate_kw(paired_days)
         used_charge_rate = (
             min(charge_rate_kw, effective_charge_rate)
             if effective_charge_rate is not None and effective_charge_rate < charge_rate_kw * 0.9
@@ -755,6 +766,7 @@ class SunsynkOptimizer:
             "soc_adjustment_days": soc_adjustment_days,
             "forecast_correction_days": forecast_correction_days,
             "effective_charge_rate_kw": effective_charge_rate,
+            "charge_rate_from_cache": charge_rate_from_cache,
             "used_charge_rate_kw": round(used_charge_rate, 2),
             "charge_rate_calibration_days": charge_rate_calibration_days,
             "flux1_end": flux1_end,
@@ -791,6 +803,12 @@ class SunsynkOptimizer:
             # the push failed — _async_post_with_status already set it and the user
             # needs to see the inverter did not receive the plan.
             last_error=None if api_ok else self.coordinator.state.last_error,
+            # Remember the freshest known rate so a later plan can reuse it when
+            # calibration thins: the new computation if there is one, otherwise the
+            # value we resolved from cache or history (locks in the seed on first run).
+            last_effective_charge_rate_kw=(
+                computed_charge_rate if computed_charge_rate is not None else effective_charge_rate
+            ),
         )
 
         forecast_note = (
