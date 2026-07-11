@@ -2,7 +2,7 @@
 
 Smart Home Assistant integration to optimise Sunsynk inverter charging and export behaviour using solar forecast, battery SOC, time-of-use windows, and automated Flux control.
 
-Current release: **v1.0.8b27** (pre-release)
+Current release: **v1.0.8b35** (pre-release)
 
 ## Features
 
@@ -224,10 +224,12 @@ Runs each night at 01:55 to set the overnight charging window (Flux 1).
 
 Before calculating targets, four adaptive corrections are fetched from historical data:
 
-1. **Forecast correction** — scales the raw forecast by the actual/forecast ratio from the last 30 days. Active after 7+ paired days.
-2. **Overnight drain compensation** — extra % added to target SOC to cover battery drain between charge end and 06:00. Uses the 75th percentile of recent drain values so appliance-heavy nights are covered. Active after 5+ qualifying mornings (returns 15% fallback until then).
+1. **Forecast correction** — scales the raw forecast by the *median* actual/forecast ratio from the last 30 days (median so one freak day can't skew it). Active after 7+ paired days.
+2. **Overnight drain compensation** — extra % added to target SOC to cover battery drain between charge end and 06:00. Uses the 75th percentile of recent drain values so appliance-heavy nights are covered, measured only on nights where the battery actually charged (so a night that started already-full isn't mistaken for drain). Active after 5+ qualifying mornings (returns 15% fallback until then).
 3. **Evening SOC nudge** — shifts target ±5% if the battery consistently ends the day too full or too empty. Active after 5+ matching days per forecast band.
-4. **Effective charge rate** — calibrated kW rate from historical charging sessions, used to size the import window precisely.
+4. **Effective charge rate** — calibrated kW rate from historical charging sessions, used to size the import window precisely. When recent nights are too short to calibrate (common in summer), the last learned rate is reused rather than reverting to the configured nameplate rate.
+
+Low-solar decisions use the **pessimistic** of the raw and corrected forecast, so a genuinely poor day isn't inflated above the low-solar threshold by the learned correction (which is derived mostly from good days).
 
 SOC target is calculated as:
 
