@@ -8,7 +8,19 @@ A Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's c
 
 ## Development workflow
 
-There is no local test runner, linter config, or CI pipeline in this repo. Development requires a real or dev Home Assistant instance:
+### Tests
+
+The pure adaptive-learning logic in `data_logger.py` has unit tests under `tests/` that run **without** a Home Assistant install — `tests/conftest.py` stubs `homeassistant.core` and loads `data_logger.py` directly by file path (bypassing the package `__init__.py` and its coordinator/optimizer import chain). Run them with:
+
+```bash
+pip install pytest && python3 -m pytest
+```
+
+`tests/conftest.py` exposes a `dl` fixture (a bare `DataLogger` instance for calling its pure methods) and a `make_day(**overrides)` helper for building paired-day dicts. When you change any `compute_*` / `count_*` / `_is_drain_night` / `_percentile` logic, add or update a test that pins the new behaviour. The `.github/workflows/tests.yml` workflow runs `py_compile` + `pytest` on every push to `main` and every PR. Testing code that imports HA more deeply (optimizer, coordinator) requires mocking `hass`; prefer extracting pure helpers so they can be tested directly.
+
+### Home Assistant iteration
+
+Beyond the unit tests, development requires a real or dev Home Assistant instance:
 
 1. Copy `custom_components/sunsynk_optimizer/` into the HA instance's `custom_components/` directory.
 2. Restart Home Assistant or reload the integration via **Settings → Devices & Services**.
