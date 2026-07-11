@@ -123,7 +123,8 @@ class SunsynkApiClient:
             },
         ) as response:
             body = await self._json_or_raise(response)
-            token = body.get("data", {}).get("access_token")
+            data = body.get("data")
+            token = data.get("access_token") if isinstance(data, dict) else None
             if not token:
                 raise SunsynkApiError(f"Access token missing in response: {body}")
             self._token = token

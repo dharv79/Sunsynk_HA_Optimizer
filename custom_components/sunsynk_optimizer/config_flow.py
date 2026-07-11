@@ -74,15 +74,22 @@ def _time_selector() -> selector.TextSelector:
     return selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT))
 
 
-def _base_schema(values: dict[str, Any] | None = None) -> vol.Schema:
-    """Build the main settings schema, pre-populated with `values` when reconfiguring."""
+def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool = True) -> vol.Schema:
+    """Build the main settings schema, pre-populated with `values` when reconfiguring.
+
+    `include_credentials` is False for the options (reconfigure) flow: credentials
+    are captured once at initial setup and live in entry.data, so the reconfigure
+    form neither collects nor echoes the stored password back to the browser.
+    """
     values = values or {}
-    return vol.Schema(
+    fields: dict[Any, Any] = {}
+    if include_credentials:
+        fields[vol.Required(CONF_USERNAME, default=values.get(CONF_USERNAME, ""))] = selector.TextSelector()
+        fields[vol.Required(CONF_PASSWORD, default=values.get(CONF_PASSWORD, ""))] = selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        )
+    fields.update(
         {
-            vol.Required(CONF_USERNAME, default=values.get(CONF_USERNAME, "")): selector.TextSelector(),
-            vol.Required(CONF_PASSWORD, default=values.get(CONF_PASSWORD, "")): selector.TextSelector(
-                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
-            ),
             vol.Required(CONF_INVERTER_SERIAL, description={"suggested_value": values.get(CONF_INVERTER_SERIAL, "")}): selector.TextSelector(),
             vol.Required(CONF_PLANT_ID, description={"suggested_value": values.get(CONF_PLANT_ID, "")}): selector.TextSelector(),
             vol.Required(CONF_WEATHER_ENTITY, default=values.get(CONF_WEATHER_ENTITY, DEFAULT_WEATHER_ENTITY)): selector.EntitySelector(
@@ -138,6 +145,7 @@ def _base_schema(values: dict[str, Any] | None = None) -> vol.Schema:
             ): selector.TextSelector(),
         }
     )
+    return vol.Schema(fields)
 
 
 def _charge_schema(charges: list[dict[str, Any]], start: int, end: int) -> vol.Schema:
@@ -269,9 +277,9 @@ class SunsynkOptimizerOptionsFlow(config_entries.OptionsFlow):
                 self._working.setdefault(CONF_NOTIFY_TARGET, DEFAULT_NOTIFY_TARGET)
                 self._working.setdefault(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
                 return await self.async_step_charges_1()
-            return self.async_show_form(step_id="init", data_schema=_base_schema(user_input), errors=errors)
+            return self.async_show_form(step_id="init", data_schema=_base_schema(user_input, include_credentials=False), errors=errors)
 
-        return self.async_show_form(step_id="init", data_schema=_base_schema(self._working))
+        return self.async_show_form(step_id="init", data_schema=_base_schema(self._working, include_credentials=False))
 
     async def async_step_charges_1(self, user_input=None):
         """Step 2 of 4 — tariff rows 1–4 (import and export prices for the first four windows)."""

@@ -21,32 +21,55 @@ import pytest
 _PKG = Path(__file__).resolve().parent.parent / "custom_components" / "sunsynk_optimizer"
 
 
+def _stub(name: str, **attrs) -> types.ModuleType:
+    mod = types.ModuleType(name)
+    for k, v in attrs.items():
+        setattr(mod, k, v)
+    sys.modules[name] = mod
+    return mod
+
+
 def _install_ha_stubs() -> None:
-    ha = types.ModuleType("homeassistant")
-    core = types.ModuleType("homeassistant.core")
-    core.HomeAssistant = object
-    ha.core = core
-    sys.modules.setdefault("homeassistant", ha)
-    sys.modules.setdefault("homeassistant.core", core)
+    ha = _stub("homeassistant")
+    ha.core = _stub("homeassistant.core", HomeAssistant=object)
+    ha.config_entries = _stub("homeassistant.config_entries", ConfigEntry=object)
+    components = _stub("homeassistant.components")
+    components.persistent_notification = _stub(
+        "homeassistant.components.persistent_notification", async_create=lambda *a, **k: None
+    )
+    # Bare package for sunsynk_optimizer so relative imports (from .const import …)
+    # resolve to the submodules we register below — without running __init__.py
+    # (which would pull in the full coordinator/optimizer HA import chain).
+    pkg = _stub("sunsynk_optimizer")
+    pkg.__path__ = [str(_PKG)]
 
 
 def _load_module(filename: str, modname: str):
-    """Load a single integration source file in isolation (no package init)."""
-    spec = importlib.util.spec_from_file_location(modname, _PKG / filename)
+    """Load a single integration source file as sunsynk_optimizer.<modname>."""
+    spec = importlib.util.spec_from_file_location(f"sunsynk_optimizer.{modname}", _PKG / filename)
     module = importlib.util.module_from_spec(spec)
-    sys.modules[modname] = module
+    sys.modules[f"sunsynk_optimizer.{modname}"] = module
     spec.loader.exec_module(module)
     return module
 
 
 _install_ha_stubs()
-_data_logger = _load_module("data_logger.py", "sunsynk_data_logger")
+_load_module("const.py", "const")
+_load_module("flux_helpers.py", "flux_helpers")
+_data_logger = _load_module("data_logger.py", "data_logger")
+_dashboard = _load_module("dashboard_installer.py", "dashboard_installer")
 
 
 @pytest.fixture(scope="session")
 def DataLogger():
     """The DataLogger class, loaded without a running Home Assistant."""
     return _data_logger.DataLogger
+
+
+@pytest.fixture(scope="session")
+def safe_id():
+    """dashboard_installer._safe_id, loaded without a running Home Assistant."""
+    return _dashboard._safe_id
 
 
 @pytest.fixture

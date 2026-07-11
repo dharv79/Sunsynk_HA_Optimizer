@@ -25,6 +25,16 @@ from .flux_helpers import merge_entry_data
 _LOGGER = logging.getLogger(__name__)
 
 
+def _safe_id(value: object) -> str:
+    """Reduce a config value to a safe identifier charset (alphanumeric/_/-).
+
+    Used for the plant ID and inverter serial before they are interpolated into
+    Jinja-rendered dashboard markdown and entity IDs, so template/quote
+    characters can't inject.
+    """
+    return "".join(c for c in str(value).strip() if c.isalnum() or c in ("_", "-"))
+
+
 def _build_dashboard(config: dict) -> dict:
     """Build the full Lovelace dashboard as a Python dict.
 
@@ -33,8 +43,12 @@ def _build_dashboard(config: dict) -> dict:
     the local s() helper using inverter_serial so the dashboard is portable across
     installs with different serials.
     """
-    solar_entity_suffix = str(config[CONF_INVERTER_SERIAL]).strip()
-    api_plant_id = str(config[CONF_PLANT_ID]).strip()
+    # These free-text config values are interpolated into markdown cards that
+    # Home Assistant renders as Jinja templates, and into entity IDs. Strip to a
+    # safe charset so a value containing template/quote characters ({ } ' ") can't
+    # inject into the rendered card. Both are legitimately alphanumeric only.
+    solar_entity_suffix = _safe_id(config[CONF_INVERTER_SERIAL])
+    api_plant_id = _safe_id(config[CONF_PLANT_ID])
     forecast_sensor = config.get("solar_forecast_sensor", "sensor.energy_production_today")
     weather_entity = config.get("weather_entity", "weather.forecast_home")
     avg_consumption_kw = float(config.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
