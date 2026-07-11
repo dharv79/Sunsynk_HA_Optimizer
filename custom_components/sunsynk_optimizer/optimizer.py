@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import timedelta
 from typing import Any
 
@@ -442,6 +443,49 @@ class SunsynkOptimizer:
             ),
         )
 
+    def _synthetic_hourly_forecast(self, daily_kwh: float) -> dict[int, float] | None:
+        """Approximate an hourly {hour: kWh} profile from a daily total.
+
+        Distributes the day's kWh across daylight hours (sunrise→sunset from
+        sun.sun) as a sine bell — zero at sunrise/sunset, peak at solar noon.
+        This lets the solar-bridge walk model the morning ramp (solar rising
+        gradually to cover load) for users without a real hourly forecast
+        sensor, instead of the simple bridge's step assumption that solar covers
+        load fully the instant the sun is up. Returns None if sun.sun or the
+        daily total is unavailable, so callers fall back to the simple bridge.
+        """
+        if daily_kwh <= 0:
+            return None
+        sun_state = self.hass.states.get("sun.sun")
+        if not sun_state:
+            return None
+        rising_str = sun_state.attributes.get("next_rising")
+        setting_str = sun_state.attributes.get("next_setting")
+        if not rising_str or not setting_str:
+            return None
+        rising = dt_util.parse_datetime(rising_str)
+        setting = dt_util.parse_datetime(setting_str)
+        if not rising or not setting:
+            return None
+        rise = dt_util.as_local(rising)
+        sett = dt_util.as_local(setting)
+        sr = rise.hour + rise.minute / 60.0
+        ss = sett.hour + sett.minute / 60.0
+        if ss <= sr:
+            return None
+        daylight = ss - sr
+        shapes: dict[int, float] = {}
+        total = 0.0
+        for h in range(24):
+            frac = (h + 0.5 - sr) / daylight  # position of this hour's midpoint in the day
+            shape = math.sin(math.pi * frac) if 0.0 < frac < 1.0 else 0.0
+            shapes[h] = shape
+            total += shape
+        if total <= 0:
+            return None
+        scale = daily_kwh / total
+        return {h: shapes[h] * scale for h in range(24)}
+
     def _get_hourly_forecast_kwh(self) -> dict[int, float] | None:
         """Return hourly solar forecast as {hour: kWh}, or None if unavailable/unconfigured.
 
@@ -573,6 +617,7 @@ class SunsynkOptimizer:
         low_solar_forecast_kwh = min(raw_forecast_kwh, solar_forecast_kwh)
         hourly_forecast_kwh = self._get_hourly_forecast_kwh()
         hourly_forecast_used = False
+        synthetic_ramp = False
         bridge_hour: int | None = None
 
         # Compute solar start time from sun.sun entity (sunrise + configured offset).
@@ -627,11 +672,31 @@ class SunsynkOptimizer:
                 soc_reason = "solar_bridge_hourly"
                 hourly_forecast_used = True
             elif solar_start_time is not None:
-                # Charge only enough to bridge from charge window end (05:00) to when solar covers load.
+                # Simple bridge: charge to cover 05:00 → solar start at full load.
                 energy_to_cover = hours_to_solar * avg_consumption_kw
-                target_soc = int(20 + energy_to_cover / battery_capacity_kwh * 100)
-                target_soc = max(30, min(100, target_soc))
+                simple_bridge = max(30, min(100, int(20 + energy_to_cover / battery_capacity_kwh * 100)))
+                # Ramp safety net: the simple bridge assumes solar covers load the
+                # instant the sun is up. Synthesise the morning ramp from the RAW
+                # (pessimistic, uncorrected) daily forecast and walk it until solar
+                # covers load. This can only RAISE the target — on fast-ramp days it
+                # stays below the simple bridge and defers; on slow-ramp (lower
+                # forecast) mornings it tops up so the battery isn't left short.
+                target_soc = simple_bridge
                 soc_reason = "solar_bridge"
+                synth_profile = self._synthetic_hourly_forecast(raw_forecast_kwh)
+                if synth_profile is not None:
+                    ramp_gap = 0.0
+                    for h in range(5, 13):
+                        solar_h = synth_profile.get(h, 0.0)
+                        if solar_h >= avg_consumption_kw:
+                            bridge_hour = h
+                            break
+                        ramp_gap += max(0.0, avg_consumption_kw - solar_h)
+                    ramp_bridge = max(30, min(100, int(20 + ramp_gap / battery_capacity_kwh * 100)))
+                    if ramp_bridge > simple_bridge:
+                        target_soc = ramp_bridge
+                        soc_reason = "solar_bridge_ramp"
+                        synthetic_ramp = True
             else:
                 # sun.sun unavailable — fall back to band-based targets.
                 if forecast_band == "winter_like":
@@ -780,6 +845,7 @@ class SunsynkOptimizer:
             "battery_temp_c": battery_temp_c,
             "temp_deration_factor": temp_deration_factor,
             "hourly_forecast_used": hourly_forecast_used,
+            "synthetic_ramp": synthetic_ramp,
             "bridge_hour": bridge_hour,
         }
 
