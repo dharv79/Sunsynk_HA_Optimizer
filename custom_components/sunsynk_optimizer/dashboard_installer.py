@@ -263,6 +263,29 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                         "cards": [
                             {"type": "heading", "heading": "KPI summary", "heading_style": "title"},
                             {
+                                "type": "horizontal-stack",
+                                "cards": [
+                                    {
+                                        "type": "gauge",
+                                        "entity": s("battery_soc"),
+                                        "name": "Battery SOC now",
+                                        "min": 0,
+                                        "max": 100,
+                                        "needle": True,
+                                        # Red below the 20% shutdown reserve, amber mid, green healthy.
+                                        "severity": {"red": 0, "yellow": 20, "green": 50},
+                                    },
+                                    {
+                                        "type": "gauge",
+                                        "entity": "sensor.current_soc_target",
+                                        "name": "Tonight's target",
+                                        "min": 0,
+                                        "max": 100,
+                                        "needle": True,
+                                    },
+                                ],
+                            },
+                            {
                                 "type": "glance",
                                 "title": "Energy summary",
                                 "columns": 4,
@@ -417,10 +440,18 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                             },
                             {
                                 "type": "history-graph",
-                                "title": "Battery SOC and grid (48h)",
+                                "title": "SOC vs target (48h)",
                                 "hours_to_show": 48,
                                 "entities": [
                                     {"entity": s("battery_soc"), "name": "Battery SOC"},
+                                    {"entity": "sensor.current_soc_target", "name": "Target SOC"},
+                                ],
+                            },
+                            {
+                                "type": "history-graph",
+                                "title": "Grid power (48h)",
+                                "hours_to_show": 48,
+                                "entities": [
                                     {"entity": s("grid_pac"), "name": "Grid power"},
                                 ],
                             },
@@ -490,6 +521,7 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "raw_forecast_kwh", "name": "Raw solar forecast (kWh)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "forecast_correction_factor", "name": "Forecast correction ×"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "solar_forecast_kwh", "name": "Adjusted forecast (kWh)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "low_solar_forecast_kwh", "name": "Low-solar value used (kWh)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "forecast_band", "name": "Forecast band"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "target_soc_reason", "name": "SOC target reason"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "overnight_drain_adjustment", "name": "Drain compensation (%)"},
@@ -500,7 +532,11 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "flux1_end", "name": "Import end time"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "logic_branch", "name": "Logic branch"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "hourly_forecast_used", "name": "Hourly forecast used"},
-                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "bridge_hour", "name": "Solar bridge hour"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "synthetic_ramp", "name": "Synthetic ramp used"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "bridge_hour", "name": "Solar covers load at (hr)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "effective_charge_rate_kw", "name": "Effective charge rate (kW)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "used_charge_rate_kw", "name": "Charge rate used (kW)"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "charge_rate_from_cache", "name": "Rate reused from history"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "battery_temp_c", "name": "Battery temp (°C)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "temp_deration_factor", "name": "Charge rate deration ×"},
                                 ],
