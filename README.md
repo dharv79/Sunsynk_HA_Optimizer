@@ -2,7 +2,7 @@
 
 Smart Home Assistant integration to optimise Sunsynk inverter charging and export behaviour using solar forecast, battery SOC, time-of-use windows, and automated Flux control.
 
-Current release: **v1.0.8b35** (pre-release)
+Current release: **v1.0.8**
 
 ## Features
 
