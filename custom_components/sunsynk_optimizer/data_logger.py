@@ -189,6 +189,7 @@ class DataLogger:
                 "solar_forecast_kwh": plan.get("solar_forecast_kwh", 0.0),
                 "raw_forecast_kwh": plan.get("raw_forecast_kwh"),
                 "effective_charge_rate_kw": plan.get("effective_charge_rate_kw"),
+                "away": bool(plan.get("away", False)),
                 "actual_solar_kwh": actual.get("actual_solar_kwh", 0.0),
                 "forecast_band": plan.get("forecast_band"),
                 "target_soc": target_soc,
@@ -225,13 +226,15 @@ class DataLogger:
         return max(0.5, min(3.0, round(factor, 3)))
 
     def compute_soc_target_adjustment(
-        self, paired_days: list[dict[str, Any]], forecast_band: str
+        self, paired_days: list[dict[str, Any]], forecast_band: str, away: bool = False
     ) -> int:
         """Return +5, -5, or 0 to nudge overnight target SOC based on evening outcomes.
 
         Uses only non-full-charge days where export wasn't forcibly disabled,
         since those are the days where the import plan target is the sole driver.
-        Returns 0 until at least 5 matching days exist.
+        Filtered to the current occupancy regime (home vs away) so a low-load
+        holiday can't drag the home nudge, and vice versa. Returns 0 until at
+        least 5 matching days exist.
         """
         relevant = [
             d for d in paired_days
@@ -239,6 +242,7 @@ class DataLogger:
             and not d["is_full_day"]
             and not d["evening_export_disabled"]
             and d.get("actual_solar_kwh", 0) < self._HIGH_SOLAR_THRESHOLD_KWH
+            and bool(d.get("away", False)) == away
         ]
         if len(relevant) < self._MIN_DAYS_SOC_ADJUSTMENT:
             return 0
@@ -250,7 +254,7 @@ class DataLogger:
         return 0
 
     def compute_overnight_drain_adjustment(
-        self, paired_days: list[dict[str, Any]]
+        self, paired_days: list[dict[str, Any]], away: bool = False
     ) -> int:
         """Return extra % to add to target_soc to compensate for overnight battery drain.
 
@@ -276,7 +280,7 @@ class DataLogger:
         Returns _DEFAULT_DRAIN_ADJUSTMENT until at least 5 valid days exist,
         so target SOC never drops to the bare bridge base when history is thin.
         """
-        valid = [d for d in paired_days if self._is_drain_night(d)]
+        valid = [d for d in paired_days if self._is_drain_night(d, away)]
         if len(valid) < self._MIN_DAYS_SOC_ADJUSTMENT:
             return self._DEFAULT_DRAIN_ADJUSTMENT
         drains = [d["overnight_drain_pct"] for d in valid]
@@ -285,14 +289,15 @@ class DataLogger:
         return max(0, min(20, int(rounded)))  # cap at 20% to avoid overreacting to outlier nights
 
     @staticmethod
-    def _is_drain_night(d: dict[str, Any]) -> bool:
+    def _is_drain_night(d: dict[str, Any], away: bool = False) -> bool:
         """True if a paired day is a valid post-charge overnight-drain sample.
 
         Requires: a computed drain, negligible PV at 06:00 (so early solar isn't
-        masking the drain), a non-full-charge day, and — critically — that a real
-        overnight charge happened (initial SOC below target). A no-charge night
-        (initial >= target) discharges from a high start and is not a post-charge
-        drain measurement.
+        masking the drain), a non-full-charge day, that a real overnight charge
+        happened (initial SOC below target), and that the day matches the given
+        occupancy regime (home vs away) — so holiday nights are learned into the
+        away profile only. A no-charge night (initial >= target) discharges from
+        a high start and is not a post-charge drain measurement.
         """
         initial = d.get("initial_soc")
         target = d.get("target_soc")
@@ -304,6 +309,7 @@ class DataLogger:
             and initial is not None
             and target is not None
             and initial < target
+            and bool(d.get("away", False)) == away
         )
 
     @staticmethod
@@ -324,27 +330,29 @@ class DataLogger:
         """Return how many valid paired days exist toward the forecast correction threshold."""
         return len([d for d in paired_days if d["solar_forecast_kwh"] > 0.5])
 
-    def count_drain_adjustment_days(self, paired_days: list[dict[str, Any]]) -> int:
+    def count_drain_adjustment_days(self, paired_days: list[dict[str, Any]], away: bool = False) -> int:
         """Return how many valid drain-night samples exist toward the drain threshold.
 
         Uses the same _is_drain_night predicate as compute_overnight_drain_adjustment
-        so the progress counter always reflects the exact qualifying set.
+        (including the home/away regime) so the counter reflects the exact qualifying set.
         """
-        return len([d for d in paired_days if self._is_drain_night(d)])
+        return len([d for d in paired_days if self._is_drain_night(d, away)])
 
-    def count_soc_adjustment_days(self, paired_days: list[dict[str, Any]], forecast_band: str) -> int:
+    def count_soc_adjustment_days(self, paired_days: list[dict[str, Any]], forecast_band: str, away: bool = False) -> int:
         """Return how many in-band non-full-charge days exist toward the evening SOC nudge threshold.
 
         Intentionally does NOT apply the high-solar exclusion so the counter reflects real
         progress during summer. The nudge computation (compute_soc_target_adjustment) still
         filters out high-solar days to avoid a false "over-charged" signal; when all in-band
-        days are high-solar the nudge correctly returns 0 ("no adjustment needed").
+        days are high-solar the nudge correctly returns 0 ("no adjustment needed"). Filtered
+        to the current occupancy regime so it tracks the active (home vs away) profile.
         """
         return len([
             d for d in paired_days
             if d["forecast_band"] == forecast_band
             and not d["is_full_day"]
             and not d["evening_export_disabled"]
+            and bool(d.get("away", False)) == away
         ])
 
     @staticmethod
@@ -366,7 +374,10 @@ class DataLogger:
 
         Compares estimated SOC at charge-end (back-calculated from morning SOC
         and drain rate) against initial SOC to derive how fast the battery charged.
-        Returns None until 3+ valid calibration days exist.
+        Returns None until 3+ valid calibration days exist. The charge rate is a
+        physical property of the battery, so it is learned from HOME days only:
+        away days back-calculate through an atypically low drain and would bias
+        it. When away, the caller reuses this home-learned rate.
         """
         no_charge = [
             d for d in paired_days
@@ -376,6 +387,7 @@ class DataLogger:
             and d.get("morning_soc") is not None
             and d.get("morning_pv_power", 0) < 200
             and not d["is_full_day"]
+            and not d.get("away", False)
         ]
         if no_charge:
             drain_rate = max(
@@ -397,6 +409,7 @@ class DataLogger:
                 or target - initial < 10
                 or d.get("morning_pv_power", 0) >= 200
                 or d.get("is_full_day")
+                or d.get("away", False)
             ):
                 continue
             end_h = self._flux1_end_hours(flux1)
@@ -437,6 +450,7 @@ class DataLogger:
             and d.get("morning_soc") is not None
             and d.get("morning_pv_power", 0) < 200
             and not d.get("is_full_day")
+            and not d.get("away", False)
             and self._flux1_end_hours(d.get("flux1_end", "")) > 2.5
         ])
 

@@ -100,6 +100,7 @@ def make_day(**overrides):
         "is_full_day": False,
         "flux1_end": "02:30",
         "effective_charge_rate_kw": 1.2,
+        "away": False,
     }
     day.update(overrides)
     return day
