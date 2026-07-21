@@ -49,6 +49,10 @@ class OptimizerState:
     operation_mode: str = "auto"
     last_payload_hash: str | None = None
     last_morning_state: dict = field(default_factory=dict)
+    # User-set "away" flag (holiday). When on, plans use the away calibration
+    # profile and logged days are tagged away, so low-load holiday days don't
+    # skew the home (occupied) drain / evening-nudge learning, and vice versa.
+    away_mode: bool = False
     # Most recent successfully-calibrated charge rate (kW). Reused as the window-
     # sizing rate when calibration thins out (e.g. summer nights with charge gaps
     # < 10% never qualify), instead of snapping back to the optimistic nameplate

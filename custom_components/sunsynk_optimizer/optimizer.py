@@ -598,6 +598,11 @@ class SunsynkOptimizer:
             avg_consumption_kw = weekend_avg_consumption_kw
         solar_start_offset_hours = float(self.cfg.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS))
 
+        # Occupancy regime for this plan: home vs away (holiday). Drain and the
+        # evening-SOC nudge are learned per-regime so a low-load holiday can't skew
+        # the home profile; forecast correction stays global (load-independent).
+        away = bool(self.coordinator.state.away_mode)
+
         paired_days = await self.data_logger.async_load_paired_days(days=30)
         forecast_correction = self.data_logger.compute_forecast_correction(paired_days)
         # When the forecast sensor was unavailable we already used yesterday's raw
@@ -716,10 +721,10 @@ class SunsynkOptimizer:
             # headroom below 100%. This covers both regular nights and full-charge-day
             # solar-bridge plans. Skipped when target is already 100% (nothing to add).
             overnight_drain_adjustment = self.data_logger.compute_overnight_drain_adjustment(
-                paired_days
+                paired_days, away
             )
             soc_adjustment = self.data_logger.compute_soc_target_adjustment(
-                paired_days, forecast_band
+                paired_days, forecast_band, away
             )
             target_soc = max(20, min(100, target_soc + overnight_drain_adjustment + soc_adjustment))
             # Ensure estimated morning SOC (at 06:00) stays above safe minimum.
@@ -730,8 +735,8 @@ class SunsynkOptimizer:
                     target_soc = min(100, 25 + overnight_drain_adjustment)
 
         forecast_correction_days = self.data_logger.count_forecast_correction_days(paired_days)
-        overnight_drain_days = self.data_logger.count_drain_adjustment_days(paired_days)
-        soc_adjustment_days = self.data_logger.count_soc_adjustment_days(paired_days, forecast_band)
+        overnight_drain_days = self.data_logger.count_drain_adjustment_days(paired_days, away)
+        soc_adjustment_days = self.data_logger.count_soc_adjustment_days(paired_days, forecast_band, away)
 
         computed_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
             paired_days, battery_capacity_kwh, overnight_drain_adjustment
@@ -841,6 +846,7 @@ class SunsynkOptimizer:
             "api_ok": api_ok,
             "forecast_fallback": bool(forecast_fallback_note),
             "is_weekend": is_weekend,
+            "away": away,
             "avg_consumption_kw": avg_consumption_kw,
             "battery_temp_c": battery_temp_c,
             "temp_deration_factor": temp_deration_factor,

@@ -369,6 +369,13 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                         "cards": [
                             {"type": "heading", "heading": "Manual controls", "heading_style": "title"},
                             {
+                                "type": "entities",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "switch.away_mode", "name": "Away / holiday mode"},
+                                ],
+                            },
+                            {
                                 "type": "grid",
                                 "columns": 2,
                                 "square": False,
@@ -527,6 +534,7 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "overnight_drain_adjustment", "name": "Drain compensation (%)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "soc_adjustment", "name": "Evening SOC nudge (%)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "is_weekend", "name": "Weekend mode"},
+                                    {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "away", "name": "Away calibration"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "avg_consumption_kw", "name": "Consumption rate used (kW)"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "target_soc", "name": "Final target SOC"},
                                     {"entity": "sensor.import_plan_end", "type": "attribute", "attribute": "flux1_end", "name": "Import end time"},
