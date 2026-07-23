@@ -24,10 +24,18 @@ def test_drain_buffer_is_independent_per_regime(dl):
     assert dl.compute_overnight_drain_adjustment(days, away=True) == 0     # round(2/5)*5
 
 
-def test_away_regime_falls_back_when_no_away_history(dl):
-    # All history is home; the away profile has no samples -> safe default.
+def test_away_regime_falls_back_to_lower_away_default(dl):
+    # All history is home; the away profile has no samples -> the LOWER away
+    # default (holidays are known-low-drain), not the home default.
     home = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct=12, away=False) for _ in range(6)]
-    assert dl.compute_overnight_drain_adjustment(home, away=True) == dl._DEFAULT_DRAIN_ADJUSTMENT
+    assert dl.compute_overnight_drain_adjustment(home, away=True) == dl._DEFAULT_DRAIN_ADJUSTMENT_AWAY
+    assert dl._DEFAULT_DRAIN_ADJUSTMENT_AWAY < dl._DEFAULT_DRAIN_ADJUSTMENT
+
+
+def test_home_regime_still_uses_home_default(dl):
+    # Thin home history -> home default (unchanged).
+    away = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct=2, away=True) for _ in range(6)]
+    assert dl.compute_overnight_drain_adjustment(away, away=False) == dl._DEFAULT_DRAIN_ADJUSTMENT
 
 
 def test_drain_counter_matches_regime(dl):
