@@ -28,7 +28,8 @@ class DataLogger:
 
     _MIN_DAYS_FORECAST_CORRECTION = 7   # fewer paired days → too noisy to trust a ratio
     _MIN_DAYS_SOC_ADJUSTMENT = 5        # minimum for drain and evening-nudge corrections
-    _DEFAULT_DRAIN_ADJUSTMENT = 15      # fallback when fewer than 5 drain days exist — avoids cliff-edge drop to 0%
+    _DEFAULT_DRAIN_ADJUSTMENT = 15      # home fallback when fewer than 5 drain days exist — avoids cliff-edge drop to 0%
+    _DEFAULT_DRAIN_ADJUSTMENT_AWAY = 8  # away fallback: holidays are known-low-drain, so start lower than home
     _DRAIN_PERCENTILE = 75              # buffer sized to cover ~3 of 4 nights, not the average night
     _EVENING_SOC_LOW = 20.0             # below this at 22:00 → battery ran low; we under-charged
     _EVENING_SOC_HIGH = 35.0            # above this at 22:00 → battery still full; we over-charged
@@ -277,12 +278,13 @@ class DataLogger:
         targets make no-charge starts common).
 
         Rounds to nearest 5% and caps at 20% to avoid overreacting to outliers.
-        Returns _DEFAULT_DRAIN_ADJUSTMENT until at least 5 valid days exist,
-        so target SOC never drops to the bare bridge base when history is thin.
+        Until at least 5 valid days exist it returns the regime's default
+        (lower for away, since holidays are known-low-drain) so target SOC never
+        drops to the bare bridge base when history is thin.
         """
         valid = [d for d in paired_days if self._is_drain_night(d, away)]
         if len(valid) < self._MIN_DAYS_SOC_ADJUSTMENT:
-            return self._DEFAULT_DRAIN_ADJUSTMENT
+            return self._DEFAULT_DRAIN_ADJUSTMENT_AWAY if away else self._DEFAULT_DRAIN_ADJUSTMENT
         drains = [d["overnight_drain_pct"] for d in valid]
         buffer_drain = self._percentile(drains, self._DRAIN_PERCENTILE)
         rounded = round(buffer_drain / 5) * 5

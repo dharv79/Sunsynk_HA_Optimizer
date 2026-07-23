@@ -897,13 +897,14 @@ class SunsynkOptimizer:
         title = "🔋 Sunsynk: import plan set" if api_ok else "⚠️ Sunsynk: import plan NOT applied"
         api_note = "" if api_ok else " Inverter NOT updated; will retry next cycle."
         full_day_note = " — full-charge day" if is_full_day else ""
+        away_note = " (away)" if away else ""
         # "summer_like" → "summer-like": keep internal band names out of user text.
         season = forecast_band.replace("_", "-")
         fallback_logic_note = "" if logic_branch.startswith("adaptive") else " (fallback logic)."
         await self.async_notify(
             title,
             (
-                f"Today: {today}{full_day_note}. "
+                f"Today: {today}{full_day_note}{away_note}. "
                 f"SOC: {round(soc, 1)}%. "
                 f"Solar forecast: {round(solar_forecast_kwh, 1)} kWh{forecast_note}{forecast_fallback_note}. "
                 f"Import: 02:00 → {flux1_end} target {target_soc}%{adjustment_note}. "
