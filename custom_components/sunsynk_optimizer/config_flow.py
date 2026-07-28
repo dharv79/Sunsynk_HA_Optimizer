@@ -23,6 +23,7 @@ from .api import SunsynkApiClient
 from .const import (
     CONF_AVG_CONSUMPTION_KW,
     CONF_WEEKEND_AVG_CONSUMPTION_KW,
+    CONF_AWAY_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGES,
     CONF_CHARGE_RATE,
@@ -46,6 +47,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
+    DEFAULT_AWAY_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
     DEFAULT_CURRENCY,
@@ -132,6 +134,9 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
             vol.Optional(CONF_WEEKEND_AVG_CONSUMPTION_KW, default=values.get(CONF_WEEKEND_AVG_CONSUMPTION_KW, DEFAULT_WEEKEND_AVG_CONSUMPTION_KW)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
+            ),
+            vol.Optional(CONF_AWAY_AVG_CONSUMPTION_KW, default=values.get(CONF_AWAY_AVG_CONSUMPTION_KW, DEFAULT_AWAY_AVG_CONSUMPTION_KW)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
             vol.Required(CONF_SOLAR_START_OFFSET_HOURS, default=values.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS)): selector.NumberSelector(

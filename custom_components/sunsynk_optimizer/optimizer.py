@@ -28,6 +28,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_AVG_CONSUMPTION_KW,
     CONF_WEEKEND_AVG_CONSUMPTION_KW,
+    CONF_AWAY_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
     CONF_DATA_REPORT_TARGET,
@@ -46,6 +47,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
+    DEFAULT_AWAY_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
@@ -591,17 +593,22 @@ class SunsynkOptimizer:
 
         battery_capacity_kwh = max(0.1, float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
         charge_rate_kw = float(self.cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
-        avg_consumption_kw = float(self.cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
-        weekend_avg_consumption_kw = float(self.cfg.get(CONF_WEEKEND_AVG_CONSUMPTION_KW, DEFAULT_WEEKEND_AVG_CONSUMPTION_KW))
-        is_weekend = today in ("Saturday", "Sunday")
-        if is_weekend:
-            avg_consumption_kw = weekend_avg_consumption_kw
-        solar_start_offset_hours = float(self.cfg.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS))
-
         # Occupancy regime for this plan: home vs away (holiday). Drain and the
         # evening-SOC nudge are learned per-regime so a low-load holiday can't skew
         # the home profile; forecast correction stays global (load-independent).
         away = bool(self.coordinator.state.away_mode)
+
+        avg_consumption_kw = float(self.cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        weekend_avg_consumption_kw = float(self.cfg.get(CONF_WEEKEND_AVG_CONSUMPTION_KW, DEFAULT_WEEKEND_AVG_CONSUMPTION_KW))
+        away_avg_consumption_kw = float(self.cfg.get(CONF_AWAY_AVG_CONSUMPTION_KW, DEFAULT_AWAY_AVG_CONSUMPTION_KW))
+        is_weekend = today in ("Saturday", "Sunday")
+        # Away takes precedence over weekday/weekend: on holiday the house load is
+        # low regardless of the day, so the solar bridge sizes to the lower figure.
+        if away:
+            avg_consumption_kw = away_avg_consumption_kw
+        elif is_weekend:
+            avg_consumption_kw = weekend_avg_consumption_kw
+        solar_start_offset_hours = float(self.cfg.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS))
 
         paired_days = await self.data_logger.async_load_paired_days(days=30)
         forecast_correction = self.data_logger.compute_forecast_correction(paired_days)

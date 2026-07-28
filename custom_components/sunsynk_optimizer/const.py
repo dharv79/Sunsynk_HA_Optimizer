@@ -45,12 +45,14 @@ DEFAULT_BATTERY_CAPACITY = 10.0  # kWh — typical home battery system size
 DEFAULT_CHARGE_RATE = 3.0        # kW — 0.3C rate typical for LiFePO4 systems
 DEFAULT_AVG_CONSUMPTION_KW = 0.75        # kW — mid-range of typical 500–1000 W home load
 DEFAULT_WEEKEND_AVG_CONSUMPTION_KW = 0.9 # kW — slightly higher: people home during the day
+DEFAULT_AWAY_AVG_CONSUMPTION_KW = 0.3    # kW — holiday base load only (fridge, standby)
 DEFAULT_SOLAR_START_OFFSET_HOURS = 2.5  # hours after sunrise when solar covers home load
 
 CONF_BATTERY_CAPACITY = "battery_capacity_kwh"
 CONF_CHARGE_RATE = "charge_rate_kw"
 CONF_AVG_CONSUMPTION_KW = "avg_consumption_kw"
 CONF_WEEKEND_AVG_CONSUMPTION_KW = "weekend_avg_consumption_kw"
+CONF_AWAY_AVG_CONSUMPTION_KW = "away_avg_consumption_kw"
 CONF_SOLAR_START_OFFSET_HOURS = "solar_start_offset_hours"
 CONF_HOURLY_FORECAST_SENSOR = "hourly_forecast_sensor"
 CONF_HOURLY_FORECAST_ATTRIBUTE = "hourly_forecast_attribute"
