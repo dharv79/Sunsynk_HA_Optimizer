@@ -2,12 +2,13 @@
 
 Smart Home Assistant integration to optimise Sunsynk inverter charging and export behaviour using solar forecast, battery SOC, time-of-use windows, and automated Flux control.
 
-Current release: **v1.0.8**
+Current release: **v1.0.9**
 
 ## Features
 
 - Smart overnight import planning driven by solar forecast and battery SOC
 - Adaptive learning — self-corrects forecast bias, overnight battery drain, and evening SOC outcomes over time
+- Home/away calibration — an Away switch keeps a separate holiday profile (lower drain buffer and consumption) so a trip doesn't skew the everyday learning
 - Battery temperature deration — reduces charge rate automatically in cold weather
 - Weekend consumption mode — uses a higher consumption figure on Saturdays and Sundays
 - Dynamic Flux 2 export control with evening export disable when grid draw is high
@@ -177,10 +178,15 @@ Default: `1500`
 
 #### Average consumption (weekday / weekend)
 
-Average home load in kW, used for the solar bridge target calculation. Separate values for weekdays and weekends.
+Average home load in kW, used for the solar bridge target calculation. Separate values for weekdays, weekends, and away (holiday).
 
 Default weekday: `0.75` kW  
-Default weekend: `0.90` kW
+Default weekend: `0.90` kW  
+Default away: `0.30` kW (used only while the Away switch is on; takes precedence over weekday/weekend)
+
+#### Away mode
+
+A built-in **Away mode** switch (`switch.away_mode`, in the dashboard's Manual controls). Turn it on for holidays: the optimizer runs a separate away calibration (its own overnight-drain profile with a lower default buffer, and the away consumption above) so low-load holiday days don't skew the everyday home learning — and vice versa. Turn it off when home to resume the home profile, which is unaffected by the away days.
 
 #### Default full-charge day
 
