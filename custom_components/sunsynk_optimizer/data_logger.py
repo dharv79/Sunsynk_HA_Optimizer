@@ -103,8 +103,16 @@ class DataLogger:
         evening_soc: float,
         actual_solar_kwh: float,
         evening_export_disabled: bool,
+        day_load_kwh: float = 0.0,
+        day_grid_import_kwh: float = 0.0,
+        day_grid_export_kwh: float = 0.0,
     ) -> None:
-        """Log end-of-day actuals captured at 22:00."""
+        """Log end-of-day actuals captured at 22:00.
+
+        day_load_kwh is the SolarSynkV3 daily household load total — logged
+        directly so future consumption analysis doesn't have to infer load from
+        the SOC swing (which conflates load with solar availability).
+        """
         await self._async_append(
             {
                 "type": "day_actuals",
@@ -113,6 +121,9 @@ class DataLogger:
                 "evening_soc": round(evening_soc, 1),
                 "actual_solar_kwh": round(actual_solar_kwh, 2),
                 "evening_export_disabled": evening_export_disabled,
+                "day_load_kwh": round(day_load_kwh, 2),
+                "day_grid_import_kwh": round(day_grid_import_kwh, 2),
+                "day_grid_export_kwh": round(day_grid_export_kwh, 2),
             }
         )
 
@@ -199,6 +210,9 @@ class DataLogger:
                 "overnight_drain_pct": overnight_drain_pct,
                 "evening_soc": actual.get("evening_soc", 0.0),
                 "evening_export_disabled": actual.get("evening_export_disabled", False),
+                "day_load_kwh": actual.get("day_load_kwh"),
+                "day_grid_import_kwh": actual.get("day_grid_import_kwh"),
+                "day_grid_export_kwh": actual.get("day_grid_export_kwh"),
                 "is_full_day": plan.get("is_full_day", False),
                 "initial_soc": plan.get("soc"),
                 "flux1_end": plan.get("flux1_end", ""),
