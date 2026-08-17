@@ -58,6 +58,10 @@ class OptimizerState:
     # < 10% never qualify), instead of snapping back to the optimistic nameplate
     # config, which would under-size the window and under-charge.
     last_effective_charge_rate_kw: float | None = None
+    # Most recent 16:00-19:00 peak-window load/grid usage, captured by
+    # optimizer._async_track_peak_window_usage. Diagnostic only — surfaced in
+    # the 22:00 data-report notification alongside the plan/morning/actuals.
+    last_peak_window_usage: dict[str, Any] = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

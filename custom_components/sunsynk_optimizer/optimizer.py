@@ -71,6 +71,11 @@ class SunsynkOptimizer:
         self.unsubs: list[Any] = []
         self.last_trim_ts: float | None = None
         self.pending_full_trim_cancel = None
+        # Snapshot of load/grid meters at the start of the 16:00-19:00 peak
+        # window, used by _async_track_peak_window_usage. Not persisted: a
+        # restart mid-window loses that day's snapshot (same tradeoff as
+        # pending_full_trim_cancel above) — informational data only.
+        self._peak_window_start: dict[str, Any] | None = None
         self.data_logger = DataLogger(hass)
 
     @property
@@ -1132,6 +1137,55 @@ class SunsynkOptimizer:
     async def _async_periodic_flux2_check(self, _now) -> None:
         """30-minute interval callback."""
         await self._guarded(self.async_run_flux2_check, "Periodic Flux 2 check")
+        await self._guarded(self._async_track_peak_window_usage, "Peak-window usage tracking")
+
+    async def _async_track_peak_window_usage(self) -> None:
+        """Snapshot load/grid meters at the 16:00-19:00 window edges and log the delta.
+
+        Piggybacks on the 30-minute periodic callback rather than adding a new
+        scheduled listener — there's no existing capture point at exactly 16:00.
+        Captures a start snapshot the first time this fires with the hour in
+        [16, 19), then logs the delta the first time it fires with hour >= 19
+        (guarded so it only logs once per day). If HA restarts mid-window,
+        _peak_window_start is lost (not persisted) and that day is silently
+        skipped rather than logging a wrong/partial delta.
+        """
+        now_local = dt_util.now()
+        today = now_local.date().isoformat()
+        hour = now_local.hour
+
+        if 16 <= hour < 19:
+            if self._peak_window_start is None or self._peak_window_start.get("date") != today:
+                self._peak_window_start = {
+                    "date": today,
+                    "load": self._state_float(self.day_load_entity, 0),
+                    "grid_import": self._state_float(self.day_grid_import_entity, 0),
+                    "grid_export": self._state_float(self.day_grid_export_entity, 0),
+                }
+            return
+
+        if hour >= 19 and self._peak_window_start is not None and self._peak_window_start.get("date") == today:
+            start = self._peak_window_start
+            self._peak_window_start = None
+            peak_load_kwh = max(0.0, self._state_float(self.day_load_entity, 0) - start["load"])
+            peak_grid_import_kwh = max(0.0, self._state_float(self.day_grid_import_entity, 0) - start["grid_import"])
+            peak_grid_export_kwh = max(0.0, self._state_float(self.day_grid_export_entity, 0) - start["grid_export"])
+            await self.data_logger.async_log_peak_window_usage(
+                date=today,
+                peak_load_kwh=peak_load_kwh,
+                peak_grid_import_kwh=peak_grid_import_kwh,
+                peak_grid_export_kwh=peak_grid_export_kwh,
+            )
+            self.coordinator.update_state(
+                touch=False,
+                last_peak_window_usage={
+                    "type": "peak_window_usage",
+                    "date": today,
+                    "peak_load_kwh": round(peak_load_kwh, 2),
+                    "peak_grid_import_kwh": round(peak_grid_import_kwh, 2),
+                    "peak_grid_export_kwh": round(peak_grid_export_kwh, 2),
+                },
+            )
 
     async def _async_battery_soc_changed(self, event: Event) -> None:
         """Handle SOC threshold-based reactions."""
@@ -1204,17 +1258,24 @@ class SunsynkOptimizer:
             await self.async_run_flux2_check()
 
     async def _async_capture_morning_state(self, _now) -> None:
-        """Capture SOC and PV power at 06:00 to measure overnight battery drain."""
+        """Capture SOC and PV power at 06:00 to measure overnight battery drain.
+
+        Also captures the SolarSynkV3 daily load total, which at 06:00 equals
+        real 00:00-06:00 household consumption — a direct energy figure to
+        cross-check against the SOC-derived overnight_drain_pct.
+        """
         soc = self._state_float(self.battery_soc_entity, 0)
         pv_power = (
             self._state_float(self.pv_mppt0_entity, 0)
             + self._state_float(self.pv_mppt1_entity, 0)
         )
+        overnight_load_kwh = self._state_float(self.day_load_entity, 0)
         date = dt_util.now().date().isoformat()
         await self.data_logger.async_log_morning_state(
             date=date,
             morning_soc=soc,
             morning_pv_power=pv_power,
+            overnight_load_kwh=overnight_load_kwh,
         )
         self.coordinator.update_state(
             touch=False,
@@ -1223,6 +1284,7 @@ class SunsynkOptimizer:
                 "date": date,
                 "morning_soc": round(soc, 1),
                 "morning_pv_power": round(pv_power, 1),
+                "overnight_load_kwh": round(overnight_load_kwh, 2),
             },
         )
 
@@ -1265,9 +1327,15 @@ class SunsynkOptimizer:
                 "day_grid_import_kwh": round(day_grid_import_kwh, 2),
                 "day_grid_export_kwh": round(day_grid_export_kwh, 2),
             }
+            # Only include today's peak-window record — a stale prior-day value
+            # (e.g. the window was never captured today because of a restart)
+            # shouldn't be re-sent under today's date.
+            peak_rec = self.coordinator.state.last_peak_window_usage or {}
+            if peak_rec.get("date") != date:
+                peak_rec = {}
             lines = "\n".join(
                 _json.dumps(r)
-                for r in [plan_rec, morning_rec, actuals_rec]
+                for r in [plan_rec, morning_rec, actuals_rec, peak_rec]
                 if r
             )
             await self.async_notify(

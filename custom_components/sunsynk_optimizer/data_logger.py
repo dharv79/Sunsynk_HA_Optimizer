@@ -85,8 +85,16 @@ class DataLogger:
         date: str,
         morning_soc: float,
         morning_pv_power: float,
+        overnight_load_kwh: float = 0.0,
     ) -> None:
-        """Log SOC and PV power at 06:00 — just before solar typically starts."""
+        """Log SOC and PV power at 06:00 — just before solar typically starts.
+
+        overnight_load_kwh is the SolarSynkV3 daily load total read at 06:00
+        (i.e. 00:00-06:00 household consumption). It's a real energy figure
+        alongside the SOC-derived overnight_drain_pct (computed elsewhere from
+        target_soc - morning_soc), which is a useful cross-check since the
+        SOC-based figure inherits the inverter's own SOC-estimation noise.
+        """
         await self._async_append(
             {
                 "type": "morning_state",
@@ -94,6 +102,31 @@ class DataLogger:
                 "date": date,
                 "morning_soc": round(morning_soc, 1),
                 "morning_pv_power": round(morning_pv_power, 1),
+                "overnight_load_kwh": round(overnight_load_kwh, 2),
+            }
+        )
+
+    async def async_log_peak_window_usage(
+        self,
+        date: str,
+        peak_load_kwh: float,
+        peak_grid_import_kwh: float,
+        peak_grid_export_kwh: float,
+    ) -> None:
+        """Log household load and grid import/export during the 16:00-19:00 window.
+
+        Diagnostic only: nothing currently auto-tunes CONF_EXPORT_DISABLE_THRESHOLD
+        from this data. It exists so the cost of the peak-rate window can be
+        reviewed directly instead of inferred from point-in-time grid_pac samples.
+        """
+        await self._async_append(
+            {
+                "type": "peak_window_usage",
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+                "date": date,
+                "peak_load_kwh": round(peak_load_kwh, 2),
+                "peak_grid_import_kwh": round(peak_grid_import_kwh, 2),
+                "peak_grid_export_kwh": round(peak_grid_export_kwh, 2),
             }
         )
 
@@ -207,6 +240,7 @@ class DataLogger:
                 "target_soc": target_soc,
                 "morning_soc": morning_soc,
                 "morning_pv_power": morning_pv_power,
+                "overnight_load_kwh": morning.get("overnight_load_kwh"),
                 "overnight_drain_pct": overnight_drain_pct,
                 "evening_soc": actual.get("evening_soc", 0.0),
                 "evening_export_disabled": actual.get("evening_export_disabled", False),
@@ -509,7 +543,7 @@ class DataLogger:
     # Write helpers                                                        #
     # ------------------------------------------------------------------ #
 
-    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals")
+    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals", "peak_window_usage")
 
     async def _async_append(self, record: dict[str, Any]) -> None:
         """Offload the blocking file write to the executor so it doesn't block the event loop."""
