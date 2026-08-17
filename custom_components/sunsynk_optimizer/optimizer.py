@@ -113,6 +113,18 @@ class SunsynkOptimizer:
         return f"sensor.solarsynkv3_{self.inverter_serial}_battery_temperature"
 
     @property
+    def day_load_entity(self) -> str:
+        return f"sensor.solarsynkv3_{self.inverter_serial}_load_daily_used"
+
+    @property
+    def day_grid_import_entity(self) -> str:
+        return f"sensor.solarsynkv3_{self.inverter_serial}_grid_etoday_from"
+
+    @property
+    def day_grid_export_entity(self) -> str:
+        return f"sensor.solarsynkv3_{self.inverter_serial}_grid_etoday_to"
+
+    @property
     def selected_full_charge_day(self) -> str:
         """Return the active full-charge day, falling back to the config default if state is unset."""
         state_day = self.coordinator.state.selected_full_charge_day
@@ -1215,10 +1227,19 @@ class SunsynkOptimizer:
         )
 
     async def _async_capture_day_actuals(self, _now) -> None:
-        """Capture end-of-day actuals at 22:00 and log them."""
+        """Capture end-of-day actuals at 22:00 and log them.
+
+        Includes the SolarSynkV3 daily load/grid totals alongside SOC and solar,
+        so consumption analysis doesn't have to infer household load from the
+        SOC swing (which conflates load with solar availability) — the actual
+        daily load figure is logged directly.
+        """
         import json as _json
         soc = self._state_float(self.battery_soc_entity, 0)
         actual_solar_kwh = self._state_float(self.day_pv_energy_entity, 0)
+        day_load_kwh = self._state_float(self.day_load_entity, 0)
+        day_grid_import_kwh = self._state_float(self.day_grid_import_entity, 0)
+        day_grid_export_kwh = self._state_float(self.day_grid_export_entity, 0)
         date = dt_util.now().date().isoformat()
         evening_export_disabled = self.coordinator.state.evening_export_disabled
         await self.data_logger.async_log_day_actuals(
@@ -1226,6 +1247,9 @@ class SunsynkOptimizer:
             evening_soc=soc,
             actual_solar_kwh=actual_solar_kwh,
             evening_export_disabled=evening_export_disabled,
+            day_load_kwh=day_load_kwh,
+            day_grid_import_kwh=day_grid_import_kwh,
+            day_grid_export_kwh=day_grid_export_kwh,
         )
         data_report_target = str(self.cfg.get(CONF_DATA_REPORT_TARGET, "")).strip()
         if data_report_target:
@@ -1237,6 +1261,9 @@ class SunsynkOptimizer:
                 "evening_soc": round(soc, 1),
                 "actual_solar_kwh": round(actual_solar_kwh, 2),
                 "evening_export_disabled": evening_export_disabled,
+                "day_load_kwh": round(day_load_kwh, 2),
+                "day_grid_import_kwh": round(day_grid_import_kwh, 2),
+                "day_grid_export_kwh": round(day_grid_export_kwh, 2),
             }
             lines = "\n".join(
                 _json.dumps(r)
