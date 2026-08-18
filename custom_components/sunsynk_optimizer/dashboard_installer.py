@@ -422,6 +422,40 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                     {
                         "type": "grid",
                         "cards": [
+                            {"type": "heading", "heading": "Consumption", "heading_style": "title"},
+                            {
+                                "type": "entities",
+                                "title": "Overnight (00:00-06:00)",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "overnight_load_kwh", "name": "Household load (kWh)"},
+                                ],
+                            },
+                            {
+                                "type": "entities",
+                                "title": "Full day",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "day_load_kwh", "name": "Household load (kWh)"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "day_grid_import_kwh", "name": "Grid import (kWh)"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "day_grid_export_kwh", "name": "Grid export (kWh)"},
+                                ],
+                            },
+                            {
+                                "type": "entities",
+                                "title": "Peak window (16:00-19:00)",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "peak_load_kwh", "name": "Household load (kWh)"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "peak_grid_import_kwh", "name": "Grid import (kWh)"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "peak_grid_export_kwh", "name": "Grid export (kWh)"},
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "type": "grid",
+                        "cards": [
                             {"type": "heading", "heading": "Forecast and live values", "heading_style": "title"},
                             {
                                 "type": "entities",

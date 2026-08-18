@@ -63,6 +63,24 @@ def test_dashboard_has_soc_gauge(dashboard):
     assert "Battery SOC now" in blob
 
 
+def test_dashboard_has_consumption_section(dashboard):
+    # v1.0.10b3: the overnight/day/peak-window load+grid fields added in
+    # b1/b2 are read from sensor.consumption's attributes.
+    blob = json.dumps(dashboard)
+    assert "Consumption" in blob
+    for field in (
+        "overnight_load_kwh",
+        "day_load_kwh",
+        "day_grid_import_kwh",
+        "day_grid_export_kwh",
+        "peak_load_kwh",
+        "peak_grid_import_kwh",
+        "peak_grid_export_kwh",
+    ):
+        assert f'"attribute": "{field}"' in blob, f"{field} not wired into the dashboard"
+        assert '"entity": "sensor.consumption"' in blob
+
+
 def test_malicious_id_cannot_inject_template(dashboard):
     # A serial containing Jinja/quote chars is sanitised before interpolation.
     hostile = dict(_CONFIG, inverter_serial="1{{states('x')}}", plant_id="9'\"}{9")
