@@ -49,6 +49,11 @@ class OptimizerState:
     operation_mode: str = "auto"
     last_payload_hash: str | None = None
     last_morning_state: dict = field(default_factory=dict)
+    # Most recent 22:00 day-actuals capture (evening SOC, actual solar, and the
+    # v1.0.10 load/grid daily totals). Not previously persisted — captured only
+    # in the JSONL log and the optional Slack data report — so the dashboard's
+    # Consumption sensor has something to read.
+    last_day_actuals: dict[str, Any] = field(default_factory=dict)
     # User-set "away" flag (holiday). When on, plans use the away calibration
     # profile and logged days are tagged away, so low-load holiday days don't
     # skew the home (occupied) drain / evening-nudge learning, and vice versa.

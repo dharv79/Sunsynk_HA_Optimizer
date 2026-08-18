@@ -51,6 +51,7 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "overnight_drain_adjustment", "Overnight drain adjustment", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "evening_soc_adjustment", "Evening SOC adjustment", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate", entity_category=EntityCategory.DIAGNOSTIC),
+            SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
         ]
     )
 
@@ -111,6 +112,11 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 return plan.get("soc_adjustment", 0)
             if self._sensor_key == "effective_charge_rate":
                 return plan.get("effective_charge_rate_kw")
+
+        if self._sensor_key == "consumption":
+            day = state.last_day_actuals if isinstance(state.last_day_actuals, dict) else {}
+            load = day.get("day_load_kwh")
+            return f"{load} kWh today" if load is not None else None
 
         if self._sensor_key == "import_plan_end":
             plan = state.last_import_plan
@@ -178,6 +184,19 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 attrs["last_api_result"] = state.last_api_result
             if state.last_notification:
                 attrs["last_notification"] = state.last_notification
+            return attrs
+        if self._sensor_key == "consumption":
+            # Merges the three capture points (06:00 morning, 22:00 actuals,
+            # 16:00-19:00 peak window) into one attribute set — their field
+            # names don't collide (peak_* is already distinctly prefixed).
+            morning = state.last_morning_state if isinstance(state.last_morning_state, dict) else {}
+            day = state.last_day_actuals if isinstance(state.last_day_actuals, dict) else {}
+            peak = state.last_peak_window_usage if isinstance(state.last_peak_window_usage, dict) else {}
+            attrs = {}
+            if "overnight_load_kwh" in morning:
+                attrs["overnight_load_kwh"] = morning["overnight_load_kwh"]
+            attrs.update({k: v for k, v in day.items() if k not in ("type", "date")})
+            attrs.update({k: v for k, v in peak.items() if k not in ("type", "date")})
             return attrs
 
         # Adaptive learning sensors expose calibration progress so the user can

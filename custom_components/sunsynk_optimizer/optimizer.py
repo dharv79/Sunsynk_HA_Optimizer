@@ -1313,20 +1313,24 @@ class SunsynkOptimizer:
             day_grid_import_kwh=day_grid_import_kwh,
             day_grid_export_kwh=day_grid_export_kwh,
         )
+        actuals_rec = {
+            "type": "day_actuals",
+            "date": date,
+            "evening_soc": round(soc, 1),
+            "actual_solar_kwh": round(actual_solar_kwh, 2),
+            "evening_export_disabled": evening_export_disabled,
+            "day_load_kwh": round(day_load_kwh, 2),
+            "day_grid_import_kwh": round(day_grid_import_kwh, 2),
+            "day_grid_export_kwh": round(day_grid_export_kwh, 2),
+        }
+        # Persisted (not just logged/notified) so the dashboard's Consumption
+        # sensor has today's actuals to display, the same way last_morning_state
+        # and last_peak_window_usage are kept for their own dashboard fields.
+        self.coordinator.update_state(touch=False, last_day_actuals=actuals_rec)
         data_report_target = str(self.cfg.get(CONF_DATA_REPORT_TARGET, "")).strip()
         if data_report_target:
             plan_rec = self.coordinator.state.last_import_plan or {}
             morning_rec = self.coordinator.state.last_morning_state or {}
-            actuals_rec = {
-                "type": "day_actuals",
-                "date": date,
-                "evening_soc": round(soc, 1),
-                "actual_solar_kwh": round(actual_solar_kwh, 2),
-                "evening_export_disabled": evening_export_disabled,
-                "day_load_kwh": round(day_load_kwh, 2),
-                "day_grid_import_kwh": round(day_grid_import_kwh, 2),
-                "day_grid_export_kwh": round(day_grid_export_kwh, 2),
-            }
             # Only include today's peak-window record — a stale prior-day value
             # (e.g. the window was never captured today because of a restart)
             # shouldn't be re-sent under today's date.
