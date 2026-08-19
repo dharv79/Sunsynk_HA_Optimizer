@@ -2,7 +2,7 @@
 
 Smart Home Assistant integration to optimise Sunsynk inverter charging and export behaviour using solar forecast, battery SOC, time-of-use windows, and automated Flux control.
 
-Current release: **v1.0.9**
+Current release: **v1.0.10**
 
 ## Features
 
@@ -15,7 +15,7 @@ Current release: **v1.0.9**
 - SOC-based trim logic — trims to 82% when battery exceeds 85%, and trims after a 1-hour hold on full-charge days
 - Weekly best full-charge day selection scored from weather forecast
 - Monitor mode — observe decisions without writing to the Sunsynk API
-- Auto-generated Lovelace dashboard with adaptive learning, history graphs, and tuning assist sections
+- Auto-generated Lovelace dashboard with adaptive learning, history graphs, a Consumption section (overnight/daily/peak-window household load and grid import/export), and tuning assist sections
 - Optional push notifications via any HA notify service
 
 ## Requirements
@@ -163,7 +163,7 @@ Target channel or device for the notify service.
 
 #### Data report target (optional)
 
-A secondary notify target that receives a full JSON debug report at 22:00 each day, containing the import plan, morning state, and day actuals. Useful for logging to a Slack channel or similar.
+A secondary notify target that receives a full JSON debug report at 22:00 each day, containing the import plan, morning state (including overnight household load), day actuals (including daily household load and grid import/export), and the 16:00–19:00 peak-window usage. Useful for logging to a Slack channel or similar.
 
 #### Operation mode
 
