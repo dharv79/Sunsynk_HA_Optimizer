@@ -67,6 +67,14 @@ class OptimizerState:
     # optimizer._async_track_peak_window_usage. Diagnostic only — surfaced in
     # the 22:00 data-report notification alongside the plan/morning/actuals.
     last_peak_window_usage: dict[str, Any] = field(default_factory=dict)
+    # Most recent settled daily cost (electricity import/export + gas), read
+    # from the optional Octopus Energy sensors and captured at 06:00 tagged
+    # with the PRIOR day's date (their "previous accumulative cost" sensors
+    # only settle a few hours after midnight). Diagnostic only.
+    last_daily_cost: dict[str, Any] = field(default_factory=dict)
+    # Running year-to-date net cost (electricity + gas), recomputed daily
+    # alongside last_daily_cost from the full paired-day history.
+    last_year_to_date_cost: dict[str, Any] = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

@@ -44,6 +44,9 @@ from .const import (
     CONF_SOLAR_START_OFFSET_HOURS,
     CONF_HOURLY_FORECAST_SENSOR,
     CONF_HOURLY_FORECAST_ATTRIBUTE,
+    CONF_OCTOPUS_IMPORT_COST_SENSOR,
+    CONF_OCTOPUS_EXPORT_INCOME_SENSOR,
+    CONF_OCTOPUS_GAS_COST_SENSOR,
     CONF_WEATHER_ENTITY,
     DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
@@ -548,6 +551,28 @@ class SunsynkOptimizer:
                     continue
 
         return hourly if hourly else None
+
+    def _read_octopus_previous_day_cost(self) -> tuple[float | None, float | None, float | None]:
+        """Read the optional Octopus Energy "previous accumulative cost" sensors.
+
+        Returns (import_cost_gbp, export_income_gbp, gas_cost_gbp), each None
+        if its sensor is unconfigured (blank) or unavailable. These sensors
+        reflect the PRIOR calendar day and only settle a few hours after
+        midnight, so the caller reads this at 06:00 and tags the result with
+        yesterday's date, not today's — mirrors the graceful-degrade shape of
+        _get_hourly_forecast_kwh: blank config -> None, never raises.
+        """
+        def _read(conf_key: str) -> float | None:
+            sensor_id = str(self.cfg.get(conf_key, "")).strip()
+            if not sensor_id:
+                return None
+            return self._essential_state(sensor_id)
+
+        return (
+            _read(CONF_OCTOPUS_IMPORT_COST_SENSOR),
+            _read(CONF_OCTOPUS_EXPORT_INCOME_SENSOR),
+            _read(CONF_OCTOPUS_GAS_COST_SENSOR),
+        )
 
     async def async_run_import_plan(self, source: str = "automatic", dry_run: bool = False) -> None:
         """Calculate and push overnight import plan.
@@ -1287,6 +1312,65 @@ class SunsynkOptimizer:
                 "overnight_load_kwh": round(overnight_load_kwh, 2),
             },
         )
+        await self._async_capture_daily_cost()
+
+    async def _async_capture_daily_cost(self) -> None:
+        """Read the optional Octopus cost sensors and log yesterday's settled cost.
+
+        Runs as part of the 06:00 capture (not 22:00 — see
+        _read_octopus_previous_day_cost for why) and also recomputes the
+        running year-to-date net cost from the full paired-day history, so
+        that figure stays fresh without a dedicated scheduled listener.
+        """
+        import_cost, export_income, gas_cost = self._read_octopus_previous_day_cost()
+        if import_cost is None and export_income is None and gas_cost is None:
+            return  # No Octopus sensors configured/available — nothing to log.
+
+        yesterday = (dt_util.now() - timedelta(days=1)).date().isoformat()
+        await self.data_logger.async_log_daily_cost(
+            date=yesterday,
+            actual_import_cost_gbp=import_cost,
+            actual_export_income_gbp=export_income,
+            actual_gas_cost_gbp=gas_cost,
+        )
+        net_cost_gbp = (
+            round(import_cost - export_income + gas_cost, 2)
+            if import_cost is not None and export_income is not None and gas_cost is not None
+            else None
+        )
+        self.coordinator.update_state(
+            touch=False,
+            last_daily_cost={
+                "type": "daily_cost",
+                "date": yesterday,
+                "actual_import_cost_gbp": round(import_cost, 2) if import_cost is not None else None,
+                "actual_export_income_gbp": round(export_income, 2) if export_income is not None else None,
+                "actual_gas_cost_gbp": round(gas_cost, 2) if gas_cost is not None else None,
+                "net_cost_gbp": net_cost_gbp,
+            },
+        )
+
+        # Recompute year-to-date net cost from the full paired-day history.
+        # 366 days comfortably covers a rolling year within the 13-month
+        # retention window; filtering to the current calendar year below is
+        # what actually bounds it to "this year", not the day count.
+        current_year = dt_util.now().year
+        paired_days = await self.data_logger.async_load_paired_days(days=366)
+        year_days = [
+            d for d in paired_days
+            if d.get("net_cost_gbp") is not None and str(d.get("date", "")).startswith(str(current_year))
+        ]
+        if year_days:
+            ytd_net_cost = round(sum(d["net_cost_gbp"] for d in year_days), 2)
+            self.coordinator.update_state(
+                touch=False,
+                last_year_to_date_cost={
+                    "year": current_year,
+                    "net_cost_gbp": ytd_net_cost,
+                    "days_counted": len(year_days),
+                    "as_of_date": yesterday,
+                },
+            )
 
     async def _async_capture_day_actuals(self, _now) -> None:
         """Capture end-of-day actuals at 22:00 and log them.
@@ -1337,9 +1421,19 @@ class SunsynkOptimizer:
             peak_rec = self.coordinator.state.last_peak_window_usage or {}
             if peak_rec.get("date") != date:
                 peak_rec = {}
+            # daily_cost is captured this morning tagged with YESTERDAY's date
+            # (Octopus settlement lag — see _async_capture_daily_cost), so it's
+            # inherently a day behind `date` here, not equal to it. Include it
+            # as long as it isn't stale (older than yesterday), which would mean
+            # the Octopus sensors were unavailable for a stretch. Self-describing
+            # via its own `date` field so it's never confused with today's data.
+            cost_rec = self.coordinator.state.last_daily_cost or {}
+            yesterday_str = (dt_util.now() - timedelta(days=1)).date().isoformat()
+            if cost_rec.get("date") not in (date, yesterday_str):
+                cost_rec = {}
             lines = "\n".join(
                 _json.dumps(r)
-                for r in [plan_rec, morning_rec, actuals_rec, peak_rec]
+                for r in [plan_rec, morning_rec, actuals_rec, peak_rec, cost_rec]
                 if r
             )
             await self.async_notify(

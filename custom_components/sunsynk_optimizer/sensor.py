@@ -186,17 +186,30 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 attrs["last_notification"] = state.last_notification
             return attrs
         if self._sensor_key == "consumption":
-            # Merges the three capture points (06:00 morning, 22:00 actuals,
-            # 16:00-19:00 peak window) into one attribute set — their field
-            # names don't collide (peak_* is already distinctly prefixed).
+            # Merges the capture points (06:00 morning, 22:00 actuals,
+            # 16:00-19:00 peak window, 06:00 settled daily cost, and the
+            # running year-to-date cost) into one attribute set — their field
+            # names don't collide (peak_*/year_to_date_* are distinctly
+            # prefixed). daily_cost's own `date` is exposed separately since,
+            # unlike the others, it's inherently yesterday's data (Octopus
+            # settlement lag) rather than today's.
             morning = state.last_morning_state if isinstance(state.last_morning_state, dict) else {}
             day = state.last_day_actuals if isinstance(state.last_day_actuals, dict) else {}
             peak = state.last_peak_window_usage if isinstance(state.last_peak_window_usage, dict) else {}
+            cost = state.last_daily_cost if isinstance(state.last_daily_cost, dict) else {}
+            ytd = state.last_year_to_date_cost if isinstance(state.last_year_to_date_cost, dict) else {}
             attrs = {}
             if "overnight_load_kwh" in morning:
                 attrs["overnight_load_kwh"] = morning["overnight_load_kwh"]
             attrs.update({k: v for k, v in day.items() if k not in ("type", "date")})
             attrs.update({k: v for k, v in peak.items() if k not in ("type", "date")})
+            if cost:
+                attrs["daily_cost_date"] = cost.get("date")
+                attrs.update({k: v for k, v in cost.items() if k not in ("type", "date")})
+            if ytd:
+                attrs["year_to_date_net_cost_gbp"] = ytd.get("net_cost_gbp")
+                attrs["year_to_date_year"] = ytd.get("year")
+                attrs["year_to_date_days_counted"] = ytd.get("days_counted")
             return attrs
 
         # Adaptive learning sensors expose calibration progress so the user can

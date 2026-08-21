@@ -26,6 +26,9 @@
           "solar_start_offset_hours": "Hours after sunrise until solar covers load",
           "hourly_forecast_sensor": "Hourly forecast sensor (optional)",
           "hourly_forecast_attribute": "Hourly forecast attribute",
+          "octopus_import_cost_sensor": "Octopus import cost sensor (optional)",
+          "octopus_export_income_sensor": "Octopus export income sensor (optional)",
+          "octopus_gas_cost_sensor": "Octopus gas cost sensor (optional)",
           "data_report_target": "Daily data report notify target (optional, developer)"
         }
       }
@@ -66,6 +69,9 @@
           "solar_start_offset_hours": "Hours after sunrise until solar covers load",
           "hourly_forecast_sensor": "Hourly forecast sensor (optional)",
           "hourly_forecast_attribute": "Hourly forecast attribute",
+          "octopus_import_cost_sensor": "Octopus import cost sensor (optional)",
+          "octopus_export_income_sensor": "Octopus export income sensor (optional)",
+          "octopus_gas_cost_sensor": "Octopus gas cost sensor (optional)",
           "data_report_target": "Daily data report notify target (optional, developer)"
         }
       },

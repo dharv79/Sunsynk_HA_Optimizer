@@ -130,6 +130,37 @@ class DataLogger:
             }
         )
 
+    async def async_log_daily_cost(
+        self,
+        date: str,
+        actual_import_cost_gbp: float | None,
+        actual_export_income_gbp: float | None,
+        actual_gas_cost_gbp: float | None,
+    ) -> None:
+        """Log settled real cost for one calendar day, from the optional Octopus sensors.
+
+        `date` is the PRIOR day, not the day this runs on — Octopus's "previous
+        accumulative cost" sensors only settle a few hours after midnight, so
+        this is captured at 06:00 alongside morning_state, tagged with
+        yesterday's date. Any of the three inputs may be None (sensor not
+        configured or unavailable that morning); the record is only written
+        if at least one is present, and net_cost_gbp is computed in
+        _pair_records (not here) so a day with a missing input doesn't get a
+        misleadingly "complete" net figure baked into the raw log.
+        """
+        if actual_import_cost_gbp is None and actual_export_income_gbp is None and actual_gas_cost_gbp is None:
+            return
+        await self._async_append(
+            {
+                "type": "daily_cost",
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+                "date": date,
+                "actual_import_cost_gbp": round(actual_import_cost_gbp, 2) if actual_import_cost_gbp is not None else None,
+                "actual_export_income_gbp": round(actual_export_income_gbp, 2) if actual_export_income_gbp is not None else None,
+                "actual_gas_cost_gbp": round(actual_gas_cost_gbp, 2) if actual_gas_cost_gbp is not None else None,
+            }
+        )
+
     async def async_log_day_actuals(
         self,
         date: str,
@@ -200,7 +231,7 @@ class DataLogger:
         return records
 
     def _pair_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Join import_plan + day_actuals + morning_state records by date into unified dicts."""
+        """Join import_plan + day_actuals + morning_state + daily_cost records by date into unified dicts."""
         plans = {
             r["date"]: r
             for r in records
@@ -216,11 +247,25 @@ class DataLogger:
             for r in records
             if r.get("type") == "morning_state" and "date" in r
         }
+        costs = {
+            r["date"]: r
+            for r in records
+            if r.get("type") == "daily_cost" and "date" in r
+        }
         paired = []
         for date in set(plans) & set(actuals):
             plan = plans[date]
             actual = actuals[date]
             morning = mornings.get(date, {})
+            cost = costs.get(date, {})
+            import_cost = cost.get("actual_import_cost_gbp")
+            export_income = cost.get("actual_export_income_gbp")
+            gas_cost = cost.get("actual_gas_cost_gbp")
+            net_cost_gbp = (
+                round(import_cost - export_income + gas_cost, 2)
+                if import_cost is not None and export_income is not None and gas_cost is not None
+                else None
+            )
             morning_soc = morning.get("morning_soc")
             morning_pv_power = morning.get("morning_pv_power", 0.0)
             target_soc = plan.get("target_soc")
@@ -247,6 +292,10 @@ class DataLogger:
                 "day_load_kwh": actual.get("day_load_kwh"),
                 "day_grid_import_kwh": actual.get("day_grid_import_kwh"),
                 "day_grid_export_kwh": actual.get("day_grid_export_kwh"),
+                "actual_import_cost_gbp": import_cost,
+                "actual_export_income_gbp": export_income,
+                "actual_gas_cost_gbp": gas_cost,
+                "net_cost_gbp": net_cost_gbp,
                 "is_full_day": plan.get("is_full_day", False),
                 "initial_soc": plan.get("soc"),
                 "flux1_end": plan.get("flux1_end", ""),
@@ -543,7 +592,7 @@ class DataLogger:
     # Write helpers                                                        #
     # ------------------------------------------------------------------ #
 
-    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals", "peak_window_usage")
+    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals", "peak_window_usage", "daily_cost")
 
     async def _async_append(self, record: dict[str, Any]) -> None:
         """Offload the blocking file write to the executor so it doesn't block the event loop."""

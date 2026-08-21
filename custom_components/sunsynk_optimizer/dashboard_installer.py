@@ -451,6 +451,27 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": "sensor.consumption", "type": "attribute", "attribute": "peak_grid_export_kwh", "name": "Grid export (kWh)"},
                                 ],
                             },
+                            {
+                                "type": "entities",
+                                "title": "Cost — year to date",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "year_to_date_net_cost_gbp", "name": "Net cost this year (£)"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "year_to_date_days_counted", "name": "Days counted"},
+                                ],
+                            },
+                            {
+                                "type": "entities",
+                                "title": "Cost — last settled day (Octopus)",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "daily_cost_date", "name": "Date"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "actual_import_cost_gbp", "name": "Electricity import (£)"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "actual_export_income_gbp", "name": "Electricity export income (£)"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "actual_gas_cost_gbp", "name": "Gas (£)"},
+                                    {"entity": "sensor.consumption", "type": "attribute", "attribute": "net_cost_gbp", "name": "Net cost (£)"},
+                                ],
+                            },
                         ],
                     },
                     {
