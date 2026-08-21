@@ -15,7 +15,8 @@ Current release: **v1.0.10**
 - SOC-based trim logic — trims to 82% when battery exceeds 85%, and trims after a 1-hour hold on full-charge days
 - Weekly best full-charge day selection scored from weather forecast
 - Monitor mode — observe decisions without writing to the Sunsynk API
-- Auto-generated Lovelace dashboard with adaptive learning, history graphs, a Consumption section (overnight/daily/peak-window household load and grid import/export), and tuning assist sections
+- Auto-generated Lovelace dashboard with adaptive learning, history graphs, a Consumption section (overnight/daily/peak-window household load and grid import/export, plus real cost — see below), and tuning assist sections
+- Optional link to Home Assistant Octopus Energy for real electricity + gas cost, and a running year-to-date net-cost total
 - Optional push notifications via any HA notify service
 
 ## Requirements
@@ -163,7 +164,13 @@ Target channel or device for the notify service.
 
 #### Data report target (optional)
 
-A secondary notify target that receives a full JSON debug report at 22:00 each day, containing the import plan, morning state (including overnight household load), day actuals (including daily household load and grid import/export), and the 16:00–19:00 peak-window usage. Useful for logging to a Slack channel or similar.
+A secondary notify target that receives a full JSON debug report at 22:00 each day, containing the import plan, morning state (including overnight household load), day actuals (including daily household load and grid import/export), the 16:00–19:00 peak-window usage, and the settled daily cost (see Octopus Energy cost link below, tagged with the prior day's date). Useful for logging to a Slack channel or similar.
+
+#### Octopus Energy cost link (optional)
+
+Three free-text entity-ID fields — **Octopus import cost sensor**, **Octopus export income sensor**, **Octopus gas cost sensor** — let you point at the separately-installed [Home Assistant Octopus Energy](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy) integration's "previous accumulative cost" sensors. Find the exact entity IDs for your account in **Developer Tools → States** (filter `octopus`), since they include an account-specific MPAN/MPRN/serial suffix.
+
+All three are optional and independent — leave any blank to skip it. When set, the integration reads them each morning (these sensors settle to reflect the *prior* day a few hours after midnight) and logs the real cost, surfaced on the dashboard's Consumption section as both the last settled day's figures and a running **year-to-date net cost** (electricity import − electricity export income + gas), so you can track the actual annual bill the optimizer is working towards minimising.
 
 #### Operation mode
 

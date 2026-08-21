@@ -81,6 +81,22 @@ def test_dashboard_has_consumption_section(dashboard):
         assert '"entity": "sensor.consumption"' in blob
 
 
+def test_dashboard_has_cost_cards(dashboard):
+    # v1.0.11b1: Octopus daily/year-to-date cost fields, read from the same
+    # sensor.consumption entity as the other Consumption-section cards.
+    blob = json.dumps(dashboard)
+    for field in (
+        "year_to_date_net_cost_gbp",
+        "year_to_date_days_counted",
+        "daily_cost_date",
+        "actual_import_cost_gbp",
+        "actual_export_income_gbp",
+        "actual_gas_cost_gbp",
+        "net_cost_gbp",
+    ):
+        assert f'"attribute": "{field}"' in blob, f"{field} not wired into the dashboard"
+
+
 def test_malicious_id_cannot_inject_template(dashboard):
     # A serial containing Jinja/quote chars is sanitised before interpolation.
     hostile = dict(_CONFIG, inverter_serial="1{{states('x')}}", plant_id="9'\"}{9")

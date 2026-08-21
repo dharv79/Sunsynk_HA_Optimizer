@@ -63,6 +63,15 @@ OPERATION_MODE_OPTIONS = ["auto", "monitor"]
 
 CONF_DATA_REPORT_TARGET = "data_report_target"
 
+# Optional link to the separately-installed Home Assistant Octopus Energy
+# integration. Free text (not EntitySelector) because Octopus entity IDs carry
+# an unpredictable MPAN/MPRN/serial suffix the user must copy from their own
+# install. Point at the "previous accumulative cost" sensors, which settle to
+# reflect the prior calendar day a few hours after midnight.
+CONF_OCTOPUS_IMPORT_COST_SENSOR = "octopus_import_cost_sensor"
+CONF_OCTOPUS_EXPORT_INCOME_SENSOR = "octopus_export_income_sensor"
+CONF_OCTOPUS_GAS_COST_SENSOR = "octopus_gas_cost_sensor"
+
 SERVICE_RECALCULATE_FULL_CHARGE_DAY = "recalculate_full_charge_day"
 SERVICE_RUN_IMPORT_PLAN_NOW = "run_import_plan_now"
 SERVICE_RUN_FLUX2_CHECK_NOW = "run_flux2_check_now"
