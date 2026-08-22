@@ -30,6 +30,7 @@ from .const import (
     CONF_CURRENCY,
     CONF_DATA_REPORT_TARGET,
     CONF_DEFAULT_FULL_CHARGE_DAY,
+    CONF_ENABLE_AI_WEEKLY_INSIGHT,
     CONF_EXPORT_DISABLE_THRESHOLD,
     CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
     DEFAULT_CURRENCY,
+    DEFAULT_ENABLE_AI_WEEKLY_INSIGHT,
     DEFAULT_EXPORT_DISABLE_THRESHOLD,
     DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
@@ -171,6 +173,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 CONF_DATA_REPORT_TARGET,
                 default=values.get(CONF_DATA_REPORT_TARGET, ""),
             ): selector.TextSelector(),
+            vol.Required(
+                CONF_ENABLE_AI_WEEKLY_INSIGHT,
+                default=values.get(CONF_ENABLE_AI_WEEKLY_INSIGHT, DEFAULT_ENABLE_AI_WEEKLY_INSIGHT),
+            ): selector.BooleanSelector(),
         }
     )
     return vol.Schema(fields)

@@ -174,6 +174,12 @@ All three are optional and independent — leave any blank to skip it. When set,
 
 Every Sunday at 18:00, if a **data report target** is configured, a weekly cost summary — the last 7 days' import/export/gas costs, net cost, household load, solar generation, the current year-to-date figure, and the cost-aware export threshold's shadow-mode divergence tally (see below) — is sent as one more JSON line to that same debug stream.
 
+#### AI Task weekly insight (optional, off by default)
+
+**Enable AI Task weekly insight** turns on a Sunday 18:00 request to Home Assistant's built-in [AI Task](https://www.home-assistant.io/integrations/ai_task/) feature — it hands your tariff price bands and the week's actual cost/load/solar figures to whatever AI Task provider you have configured, and asks for a short plain-English insight (notable trends, one suggested config change if clearly justified). The result is sent as its own notification to your main **Notify target**, separate from the JSON debug stream.
+
+Off by default. If you turn it on but haven't configured an AI Task provider (Settings → Voice assistants), or your HA version predates AI Task (introduced in 2025.7), this silently does nothing — no error, just no weekly message. Since this calls out to whatever LLM you've configured as your AI Task provider, it may incur cost on that provider's side.
+
 #### Operation mode
 
 - `auto` — full optimizer behaviour, API writes enabled

@@ -34,6 +34,7 @@ from .const import (
     CONF_CHARGES,
     CONF_DATA_REPORT_TARGET,
     CONF_DEFAULT_FULL_CHARGE_DAY,
+    CONF_ENABLE_AI_WEEKLY_INSIGHT,
     CONF_EXPORT_DISABLE_THRESHOLD,
     CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_AWAY_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
+    DEFAULT_ENABLE_AI_WEEKLY_INSIGHT,
     DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
@@ -1228,6 +1230,7 @@ class SunsynkOptimizer:
         if dt_util.now().strftime("%A") == "Sunday":
             await self._guarded(self.async_choose_best_full_charge_day, "Full-charge-day selection")
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
+            await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
 
     async def _async_send_weekly_cost_summary(self) -> None:
         """Sunday 18:00: roll up the last 7 days of settled cost data and send it as JSON.
@@ -1282,6 +1285,81 @@ class SunsynkOptimizer:
             _json.dumps(summary),
             target=data_report_target,
         )
+
+    async def _async_send_ai_weekly_insight(self) -> None:
+        """Sunday 18:00: ask HA's AI Task feature for a plain-English weekly insight.
+
+        Off by default (CONF_ENABLE_AI_WEEKLY_INSIGHT) since it depends on the
+        user having an AI Task provider configured in this HA instance and may
+        incur cost on their own configured LLM. Graceful-degrade, same
+        principle as every other optional integration in this component: if
+        the toggle is off, or no ai_task service/entity is actually available
+        in this HA instance, this silently no-ops rather than erroring — an
+        unconfigured AI Task provider isn't a failure, just an unused optional
+        feature. Sends its own human-readable notification via the main
+        notify target (CONF_NOTIFY_TARGET), separate from the JSON debug
+        stream used by the weekly cost summary above — a generated narrative
+        doesn't belong alongside machine-readable lines.
+        """
+        if not bool(self.cfg.get(CONF_ENABLE_AI_WEEKLY_INSIGHT, DEFAULT_ENABLE_AI_WEEKLY_INSIGHT)):
+            return
+        if not self.hass.services.has_service("ai_task", "generate_data"):
+            return
+        if not self.hass.states.async_entity_ids("ai_task"):
+            return
+
+        charges = self.cfg.get(CONF_CHARGES, [])
+        import_bands = ", ".join(
+            f"{row['price']}p {row['startRange']}-{row['endRange']}"
+            for row in charges
+            if row.get("status") == "import"
+        )
+        export_bands = ", ".join(
+            f"{row['price']}p {row['startRange']}-{row['endRange']}"
+            for row in charges
+            if row.get("status") == "export"
+        )
+
+        paired_days = await self.data_logger.async_load_paired_days(days=7)
+
+        def _sum(key: str):
+            values = [d[key] for d in paired_days if d.get(key) is not None]
+            return round(sum(values), 2) if values else "unknown"
+
+        ytd = self.coordinator.state.last_year_to_date_cost or {}
+
+        context = (
+            f"Tariff (Octopus Flux) import p/kWh by window: {import_bands or 'unknown'}. "
+            f"Export p/kWh by window: {export_bands or 'unknown'}. "
+            f"Last 7 days: import cost £{_sum('actual_import_cost_gbp')}, "
+            f"export income £{_sum('actual_export_income_gbp')}, "
+            f"gas cost £{_sum('actual_gas_cost_gbp')}, "
+            f"household load {_sum('day_load_kwh')} kWh, "
+            f"solar generated {_sum('actual_solar_kwh')} kWh, "
+            f"solar forecast {_sum('solar_forecast_kwh')} kWh. "
+            f"Year-to-date net cost: £{ytd.get('net_cost_gbp', 'unknown')} over {ytd.get('days_counted', 0)} days."
+        )
+        instructions = (
+            "You are reviewing one week of data for a home battery/solar optimiser on the Octopus "
+            "Flux tariff. The goal is the lowest possible combined annual electricity + gas bill. "
+            "Given the tariff price bands and this week's actual costs/loads/solar below, write a "
+            "short (3-5 sentence) plain-English insight: note anything notable (e.g. cost trending "
+            "up or down, solar underperforming forecast, high load during an expensive window), and "
+            "suggest at most one concrete config change if one is clearly justified — otherwise say "
+            f"things look on track. Data: {context}"
+        )
+
+        response = await self.hass.services.async_call(
+            "ai_task",
+            "generate_data",
+            {"task_name": "Sunsynk weekly insight", "instructions": instructions},
+            blocking=True,
+            return_response=True,
+        )
+        insight = (response or {}).get("data")
+        if not insight:
+            return
+        await self.async_notify("🔋 Sunsynk: weekly insight", str(insight))
 
     async def _async_run_import_plan(self, _now) -> None:
         """Time-change callback at 01:55 daily."""

@@ -84,6 +84,14 @@ CONF_COST_AWARE_EXPORT_SHADOW_MODE = "cost_aware_export_shadow_mode"
 DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR = 58.32
 DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE = True
 
+# Optional HA AI Task-generated weekly insight (v1.0.11 Part 4). Off by
+# default: depends on the user having an AI Task provider configured in this
+# HA instance (Settings -> Voice assistants), which may incur cost on their
+# own configured LLM. Graceful-degrade like every other optional integration
+# in this component — checked at call time, not assumed from this toggle alone.
+CONF_ENABLE_AI_WEEKLY_INSIGHT = "enable_ai_weekly_insight"
+DEFAULT_ENABLE_AI_WEEKLY_INSIGHT = False
+
 SERVICE_RECALCULATE_FULL_CHARGE_DAY = "recalculate_full_charge_day"
 SERVICE_RUN_IMPORT_PLAN_NOW = "run_import_plan_now"
 SERVICE_RUN_FLUX2_CHECK_NOW = "run_flux2_check_now"
