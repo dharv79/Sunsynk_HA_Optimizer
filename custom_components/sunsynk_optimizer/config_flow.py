@@ -31,6 +31,8 @@ from .const import (
     CONF_DATA_REPORT_TARGET,
     CONF_DEFAULT_FULL_CHARGE_DAY,
     CONF_EXPORT_DISABLE_THRESHOLD,
+    CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+    CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_FLUX_PRODUCTS,
     CONF_INVEST,
     CONF_INVERTER_SERIAL,
@@ -55,6 +57,8 @@ from .const import (
     DEFAULT_CHARGE_RATE,
     DEFAULT_CURRENCY,
     DEFAULT_EXPORT_DISABLE_THRESHOLD,
+    DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+    DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_FULL_CHARGE_DAY,
     DEFAULT_INVEST,
     DEFAULT_NOTIFY_SERVICE,
@@ -121,6 +125,19 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=100, max=10000, step=100, mode=selector.NumberSelectorMode.BOX)
             ),
+            vol.Required(
+                CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+                default=values.get(
+                    CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+                    DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=500, step=0.01, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="p/h")
+            ),
+            vol.Required(
+                CONF_COST_AWARE_EXPORT_SHADOW_MODE,
+                default=values.get(CONF_COST_AWARE_EXPORT_SHADOW_MODE, DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE),
+            ): selector.BooleanSelector(),
             vol.Required(
                 CONF_DEFAULT_FULL_CHARGE_DAY,
                 default=values.get(CONF_DEFAULT_FULL_CHARGE_DAY, DEFAULT_FULL_CHARGE_DAY),

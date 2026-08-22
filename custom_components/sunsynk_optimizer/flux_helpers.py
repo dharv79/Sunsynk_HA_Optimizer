@@ -54,6 +54,53 @@ def default_flux_products() -> list[dict[str, Any]]:
     ]
 
 
+def _parse_minutes(hhmm: str) -> int:
+    hours, minutes = hhmm.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def _range_midpoint_minutes(start: str, end: str) -> int:
+    start_min, end_min = _parse_minutes(start), _parse_minutes(end)
+    if end_min <= start_min:  # range wraps past midnight
+        end_min += 24 * 60
+    return (start_min + end_min) // 2 % (24 * 60)
+
+
+def _minutes_in_range(minutes: int, start: str | None, end: str | None) -> bool:
+    if not start or not end:
+        return False
+    start_min, end_min = _parse_minutes(start), _parse_minutes(end)
+    if end_min <= start_min:  # range wraps past midnight
+        return minutes >= start_min or minutes < end_min
+    return start_min <= minutes < end_min
+
+
+def peak_import_price_pence_per_kwh(
+    charges: list[dict[str, Any]],
+    window_start: str = "16:00",
+    window_end: str = "19:00",
+) -> float | None:
+    """Find the import price (pence/kWh) that applies to the given time window.
+
+    Prefers an exact `status == "import"` row matching window_start/window_end;
+    if none matches exactly (e.g. the user has edited their charges to a
+    different window shape), falls back to the import row whose range contains
+    the window's midpoint. Returns None if no import row matches either way —
+    callers must treat that as "can't compute a cost trigger right now", not
+    as a price of zero.
+    """
+    import_rows = [row for row in charges if row.get("status") == "import"]
+    for row in import_rows:
+        if row.get("startRange") == window_start and row.get("endRange") == window_end:
+            return float(row["price"])
+
+    midpoint = _range_midpoint_minutes(window_start, window_end)
+    for row in import_rows:
+        if _minutes_in_range(midpoint, row.get("startRange"), row.get("endRange")):
+            return float(row["price"])
+    return None
+
+
 def merge_entry_data(data: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     """Merge config-entry data and options, with options overriding.
 

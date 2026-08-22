@@ -172,7 +172,7 @@ Three free-text entity-ID fields — **Octopus import cost sensor**, **Octopus e
 
 All three are optional and independent — leave any blank to skip it. When set, the integration reads them each morning (these sensors settle to reflect the *prior* day a few hours after midnight) and logs the real cost, surfaced on the dashboard's Consumption section as both the last settled day's figures and a running **year-to-date net cost** (electricity import − electricity export income + gas), so you can track the actual annual bill the optimizer is working towards minimising.
 
-Every Sunday at 18:00, if a **data report target** is configured, a weekly cost summary — the last 7 days' import/export/gas costs, net cost, household load, solar generation, and the current year-to-date figure — is sent as one more JSON line to that same debug stream.
+Every Sunday at 18:00, if a **data report target** is configured, a weekly cost summary — the last 7 days' import/export/gas costs, net cost, household load, solar generation, the current year-to-date figure, and the cost-aware export threshold's shadow-mode divergence tally (see below) — is sent as one more JSON line to that same debug stream.
 
 #### Operation mode
 
@@ -184,6 +184,13 @@ Every Sunday at 18:00, if a **data report target** is configured, a weekly cost 
 Grid/load power above this wattage between 16:00–19:00 disables Flux 2 export by setting target SOC to 100%.
 
 Default: `1500`
+
+#### Cost-aware export threshold (optional, shadow mode by default)
+
+Two additional fields let the export-disable decision above be driven by real cost instead of a flat Watt number:
+
+- **Evening export disable cost threshold (p/hour)** — disable export when `grid draw (kW) × your configured 16:00–19:00 import price (p/kWh)` exceeds this. Default `58.32` p/h, back-computed from the default Watt threshold (1500 W) at the default Flux peak price (38.88 p/kWh) — a fresh install behaves identically to before.
+- **Cost-aware export threshold — observe only** — **on by default**. While on, the cost trigger is computed and tallied every 30 minutes but never acts; the Watt threshold above stays in full control. Every disagreement between the two is included in the weekly cost digest (see below) so you can review a few weeks of real divergence data before switching this off and letting the cost trigger take over.
 
 #### Average consumption (weekday / weekend)
 

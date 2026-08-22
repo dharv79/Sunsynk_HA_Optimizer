@@ -31,9 +31,12 @@ from .const import (
     CONF_AWAY_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
+    CONF_CHARGES,
     CONF_DATA_REPORT_TARGET,
     CONF_DEFAULT_FULL_CHARGE_DAY,
     CONF_EXPORT_DISABLE_THRESHOLD,
+    CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+    CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_FLUX_PRODUCTS,
     CONF_INVERTER_SERIAL,
     CONF_NOTIFY_SERVICE,
@@ -53,13 +56,15 @@ from .const import (
     DEFAULT_AWAY_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
+    DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+    DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
     FULL_CHARGE_DAY_OPTIONS,
 )
 from .data_logger import DataLogger
-from .flux_helpers import apply_flux_override, build_payload, merge_entry_data
+from .flux_helpers import apply_flux_override, build_payload, merge_entry_data, peak_import_price_pence_per_kwh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +84,13 @@ class SunsynkOptimizer:
         # restart mid-window loses that day's snapshot (same tradeoff as
         # pending_full_trim_cancel above) — informational data only.
         self._peak_window_start: dict[str, Any] | None = None
+        # Cost-aware export-disable shadow-mode tally (v1.0.11 Part 3). Counts
+        # how many 30-minute checks the cost trigger disagreed with the live
+        # Watt trigger, and a rough £ estimate of the exposure. Not persisted —
+        # same tradeoff as _peak_window_start — read and reset weekly by
+        # _async_send_weekly_cost_summary, so a restart just loses a partial
+        # week's tally rather than corrupting it.
+        self._shadow_export_stats: dict[str, float] = {"divergent_checks": 0, "estimated_gbp_delta": 0.0}
         self.data_logger = DataLogger(hass)
 
     @property
@@ -1010,10 +1022,42 @@ class SunsynkOptimizer:
         evening_export_disabled = False
 
         export_threshold = float(self.cfg[CONF_EXPORT_DISABLE_THRESHOLD])
-        if (
-            16 <= now_local.hour < 19
-            and grid_pac > export_threshold
-        ):
+        in_peak_window = 16 <= now_local.hour < 19
+        watt_trigger = in_peak_window and grid_pac > export_threshold
+
+        # Cost-aware trigger (v1.0.11 Part 3): the same decision, computed from
+        # the user's own configured 16:00-19:00 import price instead of a flat
+        # Watt number. cost_trigger stays None outside the window or when the
+        # charges config has no matching import row — never a false 0p price.
+        cost_threshold = float(
+            self.cfg.get(
+                CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+                DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
+            )
+        )
+        peak_price_pence_per_kwh = None
+        cost_trigger = None
+        if in_peak_window:
+            peak_price_pence_per_kwh = peak_import_price_pence_per_kwh(self.cfg.get(CONF_CHARGES, []))
+            if peak_price_pence_per_kwh is not None:
+                cost_trigger = (grid_pac / 1000) * peak_price_pence_per_kwh > cost_threshold
+
+        if in_peak_window and cost_trigger is not None and cost_trigger != watt_trigger:
+            self._tally_shadow_export_divergence(grid_pac, peak_price_pence_per_kwh, cost_threshold, cost_trigger)
+
+        shadow_mode = bool(
+            self.cfg.get(CONF_COST_AWARE_EXPORT_SHADOW_MODE, DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE)
+        )
+        if shadow_mode or cost_trigger is None:
+            trigger_disable = watt_trigger
+            trigger_reason = f"grid_pac_{round(grid_pac)}W_exceeds_{round(export_threshold)}W"
+        else:
+            trigger_disable = cost_trigger
+            trigger_reason = (
+                f"cost_{round((grid_pac / 1000) * peak_price_pence_per_kwh, 1)}p/h_exceeds_{round(cost_threshold, 1)}p/h"
+            )
+
+        if trigger_disable:
             # Idempotency: SOC changes can fire this check every ~30s for the whole
             # 16:00–19:00 window. If export is already paused, don't re-push the
             # identical payload to the API or re-notify on every tick.
@@ -1051,7 +1095,7 @@ class SunsynkOptimizer:
                 "payload": payload,
                 "notified": True,
                 "source": source,
-                "reason": f"grid_pac_{round(grid_pac)}W_exceeds_{round(export_threshold)}W",
+                "reason": trigger_reason,
                 "api_ok": api_ok,
             }
 
@@ -1065,10 +1109,17 @@ class SunsynkOptimizer:
 
             title = "🔋 Sunsynk: evening export paused" if api_ok else "⚠️ Sunsynk: export pause NOT applied"
             api_note = "" if api_ok else " (inverter NOT updated)"
+            if trigger_disable is cost_trigger and not shadow_mode:
+                trigger_desc = (
+                    f"Cost is {round((grid_pac / 1000) * peak_price_pence_per_kwh, 1)}p/h "
+                    f"during the 16:00–19:00 export window"
+                )
+            else:
+                trigger_desc = f"Grid draw is {round(grid_pac)} W during the 16:00–19:00 export window"
             await self.async_notify(
                 title,
                 (
-                    f"Grid draw is {round(grid_pac)} W during the 16:00–19:00 export window. "
+                    f"{trigger_desc}. "
                     f"Export paused by holding target SOC at 100%; it re-enables automatically.{api_note}"
                 ),
             )
@@ -1122,6 +1173,28 @@ class SunsynkOptimizer:
             operation_mode=self.operation_mode,
         )
 
+    def _tally_shadow_export_divergence(
+        self,
+        grid_pac: float,
+        peak_price_pence_per_kwh: float,
+        cost_threshold: float,
+        cost_trigger: bool,
+    ) -> None:
+        """Record one 30-minute check where the cost trigger disagreed with the Watt trigger.
+
+        estimated_gbp_delta is a rough indicator, not a precise financial
+        claim: it only accumulates when the cost trigger would pause export
+        but the Watt trigger didn't, valuing the half-hour of exposure above
+        the cost threshold at the configured peak import price. The reverse
+        case (Watt paused, cost trigger says it's fine) carries no cost risk —
+        export was already disabled, so nothing is added for it, only the
+        check count.
+        """
+        self._shadow_export_stats["divergent_checks"] += 1
+        if cost_trigger:
+            excess_pence_per_hour = (grid_pac / 1000) * peak_price_pence_per_kwh - cost_threshold
+            self._shadow_export_stats["estimated_gbp_delta"] += round(excess_pence_per_hour * 0.5 / 100, 4)
+
     async def _guarded(self, coro_factory, label: str) -> None:
         """Run a scheduled coroutine, surfacing any exception via last_error.
 
@@ -1169,6 +1242,17 @@ class SunsynkOptimizer:
         if not data_report_target:
             return
 
+        # Read and reset the cost-aware export-disable shadow-mode tally
+        # (v1.0.11 Part 3) — how many 30-minute checks this week the cost
+        # trigger disagreed with the live Watt trigger, and the rough £
+        # exposure estimate. Reset here so each week's digest reports only
+        # that week's divergence, not a running total.
+        shadow_mode_tally = dict(self._shadow_export_stats)
+        shadow_mode_tally["shadow_mode"] = bool(
+            self.cfg.get(CONF_COST_AWARE_EXPORT_SHADOW_MODE, DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE)
+        )
+        self._shadow_export_stats = {"divergent_checks": 0, "estimated_gbp_delta": 0.0}
+
         paired_days = await self.data_logger.async_load_paired_days(days=7)
         cost_days = [d for d in paired_days if d.get("net_cost_gbp") is not None]
 
@@ -1188,6 +1272,7 @@ class SunsynkOptimizer:
             "week_load_kwh": _sum("day_load_kwh"),
             "week_solar_kwh": _sum("actual_solar_kwh"),
             "year_to_date": self.coordinator.state.last_year_to_date_cost or {},
+            "cost_aware_export_shadow_tally": shadow_mode_tally,
         }
 
         import json as _json
