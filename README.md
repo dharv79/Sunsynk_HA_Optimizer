@@ -172,6 +172,8 @@ Three free-text entity-ID fields — **Octopus import cost sensor**, **Octopus e
 
 All three are optional and independent — leave any blank to skip it. When set, the integration reads them each morning (these sensors settle to reflect the *prior* day a few hours after midnight) and logs the real cost, surfaced on the dashboard's Consumption section as both the last settled day's figures and a running **year-to-date net cost** (electricity import − electricity export income + gas), so you can track the actual annual bill the optimizer is working towards minimising.
 
+Every Sunday at 18:00, if a **data report target** is configured, a weekly cost summary — the last 7 days' import/export/gas costs, net cost, household load, solar generation, and the current year-to-date figure — is sent as one more JSON line to that same debug stream.
+
 #### Operation mode
 
 - `auto` — full optimizer behaviour, API writes enabled

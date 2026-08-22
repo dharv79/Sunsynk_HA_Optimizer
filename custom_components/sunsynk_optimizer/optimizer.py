@@ -1154,6 +1154,49 @@ class SunsynkOptimizer:
         """Time-change callback at 18:00 daily — only acts on Sundays."""
         if dt_util.now().strftime("%A") == "Sunday":
             await self._guarded(self.async_choose_best_full_charge_day, "Full-charge-day selection")
+            await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
+
+    async def _async_send_weekly_cost_summary(self) -> None:
+        """Sunday 18:00: roll up the last 7 days of settled cost data and send it as JSON.
+
+        Reuses the existing data_report_target debug stream rather than adding
+        a new notify target — this is a second machine-readable line, not a
+        human-facing message. Days without a daily_cost record (Octopus
+        unconfigured/unavailable that day) simply don't contribute to the
+        sums, same graceful-degrade shape as the rest of the Octopus link.
+        """
+        data_report_target = str(self.cfg.get(CONF_DATA_REPORT_TARGET, "")).strip()
+        if not data_report_target:
+            return
+
+        paired_days = await self.data_logger.async_load_paired_days(days=7)
+        cost_days = [d for d in paired_days if d.get("net_cost_gbp") is not None]
+
+        def _sum(key: str) -> float | None:
+            values = [d[key] for d in paired_days if d.get(key) is not None]
+            return round(sum(values), 2) if values else None
+
+        summary = {
+            "type": "weekly_cost_summary",
+            "date": dt_util.now().date().isoformat(),
+            "days_in_period": len(paired_days),
+            "days_with_cost_data": len(cost_days),
+            "week_import_cost_gbp": _sum("actual_import_cost_gbp"),
+            "week_export_income_gbp": _sum("actual_export_income_gbp"),
+            "week_gas_cost_gbp": _sum("actual_gas_cost_gbp"),
+            "week_net_cost_gbp": round(sum(d["net_cost_gbp"] for d in cost_days), 2) if cost_days else None,
+            "week_load_kwh": _sum("day_load_kwh"),
+            "week_solar_kwh": _sum("actual_solar_kwh"),
+            "year_to_date": self.coordinator.state.last_year_to_date_cost or {},
+        }
+
+        import json as _json
+
+        await self.async_notify(
+            "Sunsynk Weekly Cost Summary",
+            _json.dumps(summary),
+            target=data_report_target,
+        )
 
     async def _async_run_import_plan(self, _now) -> None:
         """Time-change callback at 01:55 daily."""
