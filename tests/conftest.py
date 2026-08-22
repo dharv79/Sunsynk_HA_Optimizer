@@ -55,7 +55,7 @@ def _load_module(filename: str, modname: str):
 
 _install_ha_stubs()
 _load_module("const.py", "const")
-_load_module("flux_helpers.py", "flux_helpers")
+_flux_helpers = _load_module("flux_helpers.py", "flux_helpers")
 _data_logger = _load_module("data_logger.py", "data_logger")
 _dashboard = _load_module("dashboard_installer.py", "dashboard_installer")
 
@@ -64,6 +64,12 @@ _dashboard = _load_module("dashboard_installer.py", "dashboard_installer")
 def DataLogger():
     """The DataLogger class, loaded without a running Home Assistant."""
     return _data_logger.DataLogger
+
+
+@pytest.fixture(scope="session")
+def flux_helpers():
+    """The flux_helpers module, loaded without a running Home Assistant."""
+    return _flux_helpers
 
 
 @pytest.fixture(scope="session")

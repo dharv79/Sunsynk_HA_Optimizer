@@ -72,6 +72,18 @@ CONF_OCTOPUS_IMPORT_COST_SENSOR = "octopus_import_cost_sensor"
 CONF_OCTOPUS_EXPORT_INCOME_SENSOR = "octopus_export_income_sensor"
 CONF_OCTOPUS_GAS_COST_SENSOR = "octopus_gas_cost_sensor"
 
+# Cost-aware export-disable threshold (v1.0.11 Part 3). Ships in shadow mode
+# by default — the cost trigger is computed and logged alongside the existing
+# Watt trigger, but the real decision keeps using the Watt trigger until the
+# user explicitly turns shadow mode off after reviewing a few weeks of data.
+CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR = "export_disable_cost_threshold_pence_per_hour"
+CONF_COST_AWARE_EXPORT_SHADOW_MODE = "cost_aware_export_shadow_mode"
+# = 1.5 kW (DEFAULT_EXPORT_DISABLE_THRESHOLD) x 38.88 p/kWh (default 16:00-19:00
+# import price) — back-computed so a fresh upgrade is behaviour-neutral even if
+# shadow mode is later turned off without the user changing this default.
+DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR = 58.32
+DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE = True
+
 SERVICE_RECALCULATE_FULL_CHARGE_DAY = "recalculate_full_charge_day"
 SERVICE_RUN_IMPORT_PLAN_NOW = "run_import_plan_now"
 SERVICE_RUN_FLUX2_CHECK_NOW = "run_flux2_check_now"
