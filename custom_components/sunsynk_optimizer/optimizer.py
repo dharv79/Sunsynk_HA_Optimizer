@@ -570,17 +570,40 @@ class SunsynkOptimizer:
         """Read the optional Octopus Energy "previous accumulative cost" sensors.
 
         Returns (import_cost_gbp, export_income_gbp, gas_cost_gbp), each None
-        if its sensor is unconfigured (blank) or unavailable. These sensors
-        reflect the PRIOR calendar day and only settle a few hours after
-        midnight, so the caller reads this at 06:00 and tags the result with
-        yesterday's date, not today's — mirrors the graceful-degrade shape of
-        _get_hourly_forecast_kwh: blank config -> None, never raises.
+        if its sensor is unconfigured (blank), unavailable, or stale (see
+        below). These sensors reflect the PRIOR calendar day and only settle
+        a few hours after midnight, so the caller reads this at 06:00 and
+        tags the result with yesterday's date, not today's — mirrors the
+        graceful-degrade shape of _get_hourly_forecast_kwh: blank config ->
+        None, never raises.
+
+        Octopus's own billing settlement can lag multiple days behind (seen
+        in practice around a UK bank holiday) even while the HA integration
+        itself keeps refreshing successfully — the sensor's *value* changes
+        but still reflects an older day than "yesterday". Silently trusting
+        it would mislabel that older day's cost as yesterday's. Each sensor
+        exposes a `last_reset` attribute marking the start of the period it's
+        actually reporting; if that doesn't match yesterday's date, treat the
+        reading as unavailable rather than log it under the wrong date.
         """
+        expected_date = (dt_util.now() - timedelta(days=1)).date()
+
         def _read(conf_key: str) -> float | None:
             sensor_id = str(self.cfg.get(conf_key, "")).strip()
             if not sensor_id:
                 return None
-            return self._essential_state(sensor_id)
+            state = self.hass.states.get(sensor_id)
+            if state is None or state.state in ("unknown", "unavailable", "none", ""):
+                return None
+            last_reset_raw = state.attributes.get("last_reset")
+            if last_reset_raw:
+                last_reset = dt_util.parse_datetime(str(last_reset_raw))
+                if last_reset is not None and dt_util.as_local(last_reset).date() != expected_date:
+                    return None
+            try:
+                return float(state.state)
+            except (ValueError, TypeError):
+                return None
 
         return (
             _read(CONF_OCTOPUS_IMPORT_COST_SENSOR),
