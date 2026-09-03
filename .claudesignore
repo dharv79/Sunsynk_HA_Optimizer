@@ -1,0 +1,58 @@
+# Version control internals
+.git/
+
+# Python bytecode / interpreter cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Test / lint / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging / build output
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Lockfiles (regenerable, noisy in diffs)
+poetry.lock
+Pipfile.lock
+uv.lock
+requirements*.lock
+
+# Home Assistant runtime data this component writes at runtime —
+# personal energy/SOC history, not source, already excluded from git
+data/actuals/*.csv
+data/actuals/*.json
+data/forecasts/*.csv
+data/forecasts/*.json
+data/analysis/*.csv
+data/analysis/*.json
+sunsynk_optimizer_data/
+.storage/
+
+# Logs
+*.log
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+[Dd]esktop.ini
+.idea/
+.vscode/
