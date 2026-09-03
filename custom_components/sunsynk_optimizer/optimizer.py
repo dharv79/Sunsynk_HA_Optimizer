@@ -70,6 +70,11 @@ from .flux_helpers import apply_flux_override, build_payload, merge_entry_data, 
 
 _LOGGER = logging.getLogger(__name__)
 
+# How many days back an Octopus "previous accumulative cost" reading is still
+# accepted when its settlement is running behind schedule (see
+# SunsynkOptimizer._read_octopus_previous_day_cost).
+_OCTOPUS_CATCH_UP_DAYS = 5
+
 
 class SunsynkOptimizer:
     """Implements optimizer behaviour."""
@@ -566,27 +571,55 @@ class SunsynkOptimizer:
 
         return hourly if hourly else None
 
-    def _read_octopus_previous_day_cost(self) -> tuple[float | None, float | None, float | None]:
+    def _read_octopus_previous_day_cost(self) -> tuple[float | None, float | None, float | None, str]:
         """Read the optional Octopus Energy "previous accumulative cost" sensors.
 
-        Returns (import_cost_gbp, export_income_gbp, gas_cost_gbp), each None
-        if its sensor is unconfigured (blank), unavailable, or stale (see
-        below). These sensors reflect the PRIOR calendar day and only settle
-        a few hours after midnight, so the caller reads this at 06:00 and
-        tags the result with yesterday's date, not today's — mirrors the
-        graceful-degrade shape of _get_hourly_forecast_kwh: blank config ->
+        Returns (import_cost_gbp, export_income_gbp, gas_cost_gbp, settled_date_iso).
+        The cost fields are each None if their sensor is unconfigured (blank),
+        unavailable, or doesn't match the settled date (see below) — mirrors
+        the graceful-degrade shape of _get_hourly_forecast_kwh: blank config ->
         None, never raises.
 
-        Octopus's own billing settlement can lag multiple days behind (seen
-        in practice around a UK bank holiday) even while the HA integration
-        itself keeps refreshing successfully — the sensor's *value* changes
-        but still reflects an older day than "yesterday". Silently trusting
-        it would mislabel that older day's cost as yesterday's. Each sensor
-        exposes a `last_reset` attribute marking the start of the period it's
-        actually reporting; if that doesn't match yesterday's date, treat the
-        reading as unavailable rather than log it under the wrong date.
+        These sensors reflect a PRIOR calendar day and only settle a few
+        hours after midnight, so the caller reads this at 06:00 expecting
+        yesterday's figure. But Octopus's own billing settlement can lag
+        multiple days behind (seen in practice around a UK bank holiday)
+        even while the HA integration itself keeps refreshing successfully —
+        the sensor's *value* changes but still reflects an older day than
+        "yesterday". Each sensor exposes a `last_reset` attribute marking the
+        start of the period it's actually reporting, so rather than requiring
+        an exact match to yesterday (which would silently discard every
+        reading for as long as the lag lasts), the import sensor's own
+        `last_reset` sets the "settled date" for this read as long as it
+        falls within the last `_OCTOPUS_CATCH_UP_DAYS` days — catching the
+        data up under its real date once Octopus finally delivers it, rather
+        than losing it. Falls back to yesterday when the import sensor is
+        unconfigured/unavailable or reports something outside that window.
+        Export and gas are then each independently checked against that same
+        settled date and treated as unavailable (None) if their own
+        `last_reset` disagrees, so a value is never logged under the wrong
+        date even if the sensors settle out of step with each other.
         """
-        expected_date = (dt_util.now() - timedelta(days=1)).date()
+        yesterday = (dt_util.now() - timedelta(days=1)).date()
+        oldest_allowed = yesterday - timedelta(days=_OCTOPUS_CATCH_UP_DAYS - 1)
+
+        def _sensor_last_reset_date(conf_key: str) -> Any | None:
+            sensor_id = str(self.cfg.get(conf_key, "")).strip()
+            if not sensor_id:
+                return None
+            state = self.hass.states.get(sensor_id)
+            if state is None or state.state in ("unknown", "unavailable", "none", ""):
+                return None
+            last_reset_raw = state.attributes.get("last_reset")
+            if not last_reset_raw:
+                return None
+            last_reset = dt_util.parse_datetime(str(last_reset_raw))
+            return dt_util.as_local(last_reset).date() if last_reset is not None else None
+
+        settled_date = yesterday
+        import_last_reset_date = _sensor_last_reset_date(CONF_OCTOPUS_IMPORT_COST_SENSOR)
+        if import_last_reset_date is not None and oldest_allowed <= import_last_reset_date <= yesterday:
+            settled_date = import_last_reset_date
 
         def _read(conf_key: str) -> float | None:
             sensor_id = str(self.cfg.get(conf_key, "")).strip()
@@ -598,7 +631,7 @@ class SunsynkOptimizer:
             last_reset_raw = state.attributes.get("last_reset")
             if last_reset_raw:
                 last_reset = dt_util.parse_datetime(str(last_reset_raw))
-                if last_reset is not None and dt_util.as_local(last_reset).date() != expected_date:
+                if last_reset is not None and dt_util.as_local(last_reset).date() != settled_date:
                     return None
             try:
                 return float(state.state)
@@ -609,6 +642,7 @@ class SunsynkOptimizer:
             _read(CONF_OCTOPUS_IMPORT_COST_SENSOR),
             _read(CONF_OCTOPUS_EXPORT_INCOME_SENSOR),
             _read(CONF_OCTOPUS_GAS_COST_SENSOR),
+            settled_date.isoformat(),
         )
 
     async def async_run_import_plan(self, source: str = "automatic", dry_run: bool = False) -> None:
@@ -1544,20 +1578,26 @@ class SunsynkOptimizer:
         await self._async_capture_daily_cost()
 
     async def _async_capture_daily_cost(self) -> None:
-        """Read the optional Octopus cost sensors and log yesterday's settled cost.
+        """Read the optional Octopus cost sensors and log the settled day's cost.
 
         Runs as part of the 06:00 capture (not 22:00 — see
         _read_octopus_previous_day_cost for why) and also recomputes the
         running year-to-date net cost from the full paired-day history, so
         that figure stays fresh without a dedicated scheduled listener.
+
+        Normally logs yesterday's cost, but when Octopus's settlement is
+        running late, _read_octopus_previous_day_cost reports whichever
+        earlier date is actually settled (up to _OCTOPUS_CATCH_UP_DAYS back)
+        so that data still lands under its correct date once it arrives
+        instead of being discarded. Per-day dedup in data_logger means a
+        date already logged is simply skipped on a later re-read.
         """
-        import_cost, export_income, gas_cost = self._read_octopus_previous_day_cost()
+        import_cost, export_income, gas_cost, settled_date = self._read_octopus_previous_day_cost()
         if import_cost is None and export_income is None and gas_cost is None:
             return  # No Octopus sensors configured/available — nothing to log.
 
-        yesterday = (dt_util.now() - timedelta(days=1)).date().isoformat()
         await self.data_logger.async_log_daily_cost(
-            date=yesterday,
+            date=settled_date,
             actual_import_cost_gbp=import_cost,
             actual_export_income_gbp=export_income,
             actual_gas_cost_gbp=gas_cost,
@@ -1571,7 +1611,7 @@ class SunsynkOptimizer:
             touch=False,
             last_daily_cost={
                 "type": "daily_cost",
-                "date": yesterday,
+                "date": settled_date,
                 "actual_import_cost_gbp": round(import_cost, 2) if import_cost is not None else None,
                 "actual_export_income_gbp": round(export_income, 2) if export_income is not None else None,
                 "actual_gas_cost_gbp": round(gas_cost, 2) if gas_cost is not None else None,
@@ -1597,7 +1637,7 @@ class SunsynkOptimizer:
                     "year": current_year,
                     "net_cost_gbp": ytd_net_cost,
                     "days_counted": len(year_days),
-                    "as_of_date": yesterday,
+                    "as_of_date": (dt_util.now() - timedelta(days=1)).date().isoformat(),
                 },
             )
 
