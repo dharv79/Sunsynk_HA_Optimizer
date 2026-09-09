@@ -580,10 +580,11 @@ class SunsynkOptimizer:
         the graceful-degrade shape of _get_hourly_forecast_kwh: blank config ->
         None, never raises.
 
-        These sensors reflect a PRIOR calendar day and only settle a few
-        hours after midnight, so the caller reads this at 06:00 expecting
-        yesterday's figure. But Octopus's own billing settlement can lag
-        multiple days behind (seen in practice around a UK bank holiday)
+        These sensors reflect a PRIOR calendar day. On most accounts they
+        settle a few hours after midnight, but some don't settle until late
+        in the following evening, so the caller reads this at both 06:00
+        and 22:00 to catch either case. But Octopus's own billing settlement
+        can also lag multiple days behind (seen in practice around a UK bank holiday)
         even while the HA integration itself keeps refreshing successfully —
         the sensor's *value* changes but still reflects an older day than
         "yesterday". Each sensor exposes a `last_reset` attribute marking the
@@ -1580,17 +1581,23 @@ class SunsynkOptimizer:
     async def _async_capture_daily_cost(self) -> None:
         """Read the optional Octopus cost sensors and log the settled day's cost.
 
-        Runs as part of the 06:00 capture (not 22:00 — see
-        _read_octopus_previous_day_cost for why) and also recomputes the
-        running year-to-date net cost from the full paired-day history, so
-        that figure stays fresh without a dedicated scheduled listener.
+        Runs as part of both the 06:00 and 22:00 captures, since Octopus's
+        "previous accumulative cost" sensor doesn't reliably settle a few
+        hours after midnight on every account — some settle as late as
+        ~22:00 the following day (observed in practice). The 06:00 attempt
+        catches accounts that settle overnight; the 22:00 attempt catches
+        the late-settling ones in time for the same evening's debug bundle.
+        Also recomputes the running year-to-date net cost from the full
+        paired-day history, so that figure stays fresh without a dedicated
+        scheduled listener.
 
         Normally logs yesterday's cost, but when Octopus's settlement is
         running late, _read_octopus_previous_day_cost reports whichever
         earlier date is actually settled (up to _OCTOPUS_CATCH_UP_DAYS back)
         so that data still lands under its correct date once it arrives
         instead of being discarded. Per-day dedup in data_logger means a
-        date already logged is simply skipped on a later re-read.
+        date already logged is simply skipped on a later re-read, so calling
+        this twice a day is safe.
         """
         import_cost, export_income, gas_cost, settled_date = self._read_octopus_previous_day_cost()
         if import_cost is None and export_income is None and gas_cost is None:
@@ -1650,6 +1657,7 @@ class SunsynkOptimizer:
         daily load figure is logged directly.
         """
         import json as _json
+        await self._async_capture_daily_cost()
         soc = self._state_float(self.battery_soc_entity, 0)
         actual_solar_kwh = self._state_float(self.day_pv_energy_entity, 0)
         day_load_kwh = self._state_float(self.day_load_entity, 0)
