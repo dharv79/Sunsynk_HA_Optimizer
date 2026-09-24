@@ -18,9 +18,38 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from .planning import net_cost_gbp, round_or_none
+
 _LOGGER = logging.getLogger(__name__)
 
 DATA_DIR_NAME = "sunsynk_optimizer_data"
+
+# import_plan fields persisted to the JSONL log. `away` and
+# `effective_charge_rate_kw` are read back by _pair_records for the home/away
+# calibration split and the last-known charge-rate fallback respectively.
+_IMPORT_PLAN_FIELDS = (
+    "date",
+    "soc",
+    "raw_forecast_kwh",
+    "forecast_correction_factor",
+    "solar_forecast_kwh",
+    "forecast_band",
+    "target_soc",
+    "target_soc_reason",
+    "soc_adjustment",
+    "overnight_drain_adjustment",
+    "flux1_end",
+    "logic_branch",
+    "is_full_day",
+    "selected_full_charge_day",
+    "away",
+    "effective_charge_rate_kw",
+)
+
+
+def _record(record_type: str, **fields: Any) -> dict[str, Any]:
+    """Build a log record with its type and a UTC recorded_at timestamp."""
+    return {"type": record_type, "recorded_at": datetime.now(timezone.utc).isoformat(), **fields}
 
 
 class DataLogger:
@@ -43,42 +72,15 @@ class DataLogger:
 
     async def async_log_import_plan(self, plan: dict[str, Any]) -> None:
         """Log the overnight import plan decision made at 01:55."""
-        record: dict[str, Any] = {
-            "type": "import_plan",
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
-        }
-        for key in (
-            "date",
-            "soc",
-            "raw_forecast_kwh",
-            "forecast_correction_factor",
-            "solar_forecast_kwh",
-            "forecast_band",
-            "target_soc",
-            "target_soc_reason",
-            "soc_adjustment",
-            "overnight_drain_adjustment",
-            "flux1_end",
-            "logic_branch",
-            "is_full_day",
-            "selected_full_charge_day",
-        ):
-            if key in plan:
-                record[key] = plan[key]
-        await self._async_append(record)
+        await self._async_append(
+            _record("import_plan", **{key: plan[key] for key in _IMPORT_PLAN_FIELDS if key in plan})
+        )
 
     async def async_log_full_charge_scores(
         self, scores: dict[str, float], chosen_day: str
     ) -> None:
         """Log the weekly full-charge day selection and its weather scores."""
-        await self._async_append(
-            {
-                "type": "full_charge_day",
-                "recorded_at": datetime.now(timezone.utc).isoformat(),
-                "chosen_day": chosen_day,
-                "scores": scores,
-            }
-        )
+        await self._async_append(_record("full_charge_day", chosen_day=chosen_day, scores=scores))
 
     async def async_log_morning_state(
         self,
@@ -96,14 +98,13 @@ class DataLogger:
         SOC-based figure inherits the inverter's own SOC-estimation noise.
         """
         await self._async_append(
-            {
-                "type": "morning_state",
-                "recorded_at": datetime.now(timezone.utc).isoformat(),
-                "date": date,
-                "morning_soc": round(morning_soc, 1),
-                "morning_pv_power": round(morning_pv_power, 1),
-                "overnight_load_kwh": round(overnight_load_kwh, 2),
-            }
+            _record(
+                "morning_state",
+                date=date,
+                morning_soc=round(morning_soc, 1),
+                morning_pv_power=round(morning_pv_power, 1),
+                overnight_load_kwh=round(overnight_load_kwh, 2),
+            )
         )
 
     async def async_log_peak_window_usage(
@@ -120,14 +121,13 @@ class DataLogger:
         reviewed directly instead of inferred from point-in-time grid_pac samples.
         """
         await self._async_append(
-            {
-                "type": "peak_window_usage",
-                "recorded_at": datetime.now(timezone.utc).isoformat(),
-                "date": date,
-                "peak_load_kwh": round(peak_load_kwh, 2),
-                "peak_grid_import_kwh": round(peak_grid_import_kwh, 2),
-                "peak_grid_export_kwh": round(peak_grid_export_kwh, 2),
-            }
+            _record(
+                "peak_window_usage",
+                date=date,
+                peak_load_kwh=round(peak_load_kwh, 2),
+                peak_grid_import_kwh=round(peak_grid_import_kwh, 2),
+                peak_grid_export_kwh=round(peak_grid_export_kwh, 2),
+            )
         )
 
     async def async_log_daily_cost(
@@ -151,14 +151,13 @@ class DataLogger:
         if actual_import_cost_gbp is None and actual_export_income_gbp is None and actual_gas_cost_gbp is None:
             return
         await self._async_append(
-            {
-                "type": "daily_cost",
-                "recorded_at": datetime.now(timezone.utc).isoformat(),
-                "date": date,
-                "actual_import_cost_gbp": round(actual_import_cost_gbp, 2) if actual_import_cost_gbp is not None else None,
-                "actual_export_income_gbp": round(actual_export_income_gbp, 2) if actual_export_income_gbp is not None else None,
-                "actual_gas_cost_gbp": round(actual_gas_cost_gbp, 2) if actual_gas_cost_gbp is not None else None,
-            }
+            _record(
+                "daily_cost",
+                date=date,
+                actual_import_cost_gbp=round_or_none(actual_import_cost_gbp),
+                actual_export_income_gbp=round_or_none(actual_export_income_gbp),
+                actual_gas_cost_gbp=round_or_none(actual_gas_cost_gbp),
+            )
         )
 
     async def async_log_day_actuals(
@@ -178,17 +177,16 @@ class DataLogger:
         the SOC swing (which conflates load with solar availability).
         """
         await self._async_append(
-            {
-                "type": "day_actuals",
-                "recorded_at": datetime.now(timezone.utc).isoformat(),
-                "date": date,
-                "evening_soc": round(evening_soc, 1),
-                "actual_solar_kwh": round(actual_solar_kwh, 2),
-                "evening_export_disabled": evening_export_disabled,
-                "day_load_kwh": round(day_load_kwh, 2),
-                "day_grid_import_kwh": round(day_grid_import_kwh, 2),
-                "day_grid_export_kwh": round(day_grid_export_kwh, 2),
-            }
+            _record(
+                "day_actuals",
+                date=date,
+                evening_soc=round(evening_soc, 1),
+                actual_solar_kwh=round(actual_solar_kwh, 2),
+                evening_export_disabled=evening_export_disabled,
+                day_load_kwh=round(day_load_kwh, 2),
+                day_grid_import_kwh=round(day_grid_import_kwh, 2),
+                day_grid_export_kwh=round(day_grid_export_kwh, 2),
+            )
         )
 
     # ------------------------------------------------------------------ #
@@ -202,56 +200,60 @@ class DataLogger:
 
     def _read_recent(self, days: int) -> list[dict[str, Any]]:
         """Read all JSONL records from the relevant monthly files within the last `days` days."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        months: set[str] = set()
         now = datetime.now(timezone.utc)
-        for offset in range(days + 1):
-            months.add((now - timedelta(days=offset)).strftime("%Y-%m"))
-
+        cutoff = now - timedelta(days=days)
         records: list[dict[str, Any]] = []
-        for month in months:
-            path = os.path.join(self._data_dir, f"{month}.jsonl")
-            if not os.path.exists(path):
-                continue
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                            ts = rec.get("recorded_at", "")
-                            if ts and datetime.fromisoformat(ts) >= cutoff:
-                                records.append(rec)
-                        except (json.JSONDecodeError, ValueError):
-                            continue
-            except OSError:
-                continue
+        for month in self._months_between(cutoff, now):
+            for rec in self._iter_jsonl(os.path.join(self._data_dir, f"{month}.jsonl")):
+                ts = rec.get("recorded_at", "")
+                try:
+                    if ts and datetime.fromisoformat(ts) >= cutoff:
+                        records.append(rec)
+                except (TypeError, ValueError):
+                    continue
         return records
+
+    @staticmethod
+    def _months_between(start: datetime, end: datetime) -> list[str]:
+        """'YYYY-MM' labels for every month from start to end inclusive."""
+        months = []
+        year, month = start.year, start.month
+        while (year, month) <= (end.year, end.month):
+            months.append(f"{year:04d}-{month:02d}")
+            year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+        return months
+
+    @staticmethod
+    def _iter_jsonl(path: str):
+        """Yield each parseable JSON object in a JSONL file; missing/unreadable file yields nothing."""
+        try:
+            with open(path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(rec, dict):
+                        yield rec
+        except OSError:
+            return
 
     def _pair_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Join import_plan + day_actuals + morning_state + daily_cost records by date into unified dicts."""
-        plans = {
-            r["date"]: r
-            for r in records
-            if r.get("type") == "import_plan" and "date" in r
+        by_type: dict[str, dict[str, dict[str, Any]]] = {
+            "import_plan": {}, "day_actuals": {}, "morning_state": {}, "daily_cost": {},
         }
-        actuals = {
-            r["date"]: r
-            for r in records
-            if r.get("type") == "day_actuals" and "date" in r
-        }
-        mornings = {
-            r["date"]: r
-            for r in records
-            if r.get("type") == "morning_state" and "date" in r
-        }
-        costs = {
-            r["date"]: r
-            for r in records
-            if r.get("type") == "daily_cost" and "date" in r
-        }
+        for r in records:
+            bucket = by_type.get(r.get("type"))
+            if bucket is not None and "date" in r:
+                bucket[r["date"]] = r
+        plans = by_type["import_plan"]
+        actuals = by_type["day_actuals"]
+        mornings = by_type["morning_state"]
+        costs = by_type["daily_cost"]
         paired = []
         for date in set(plans) & set(actuals):
             plan = plans[date]
@@ -261,11 +263,6 @@ class DataLogger:
             import_cost = cost.get("actual_import_cost_gbp")
             export_income = cost.get("actual_export_income_gbp")
             gas_cost = cost.get("actual_gas_cost_gbp")
-            net_cost_gbp = (
-                round(import_cost - export_income + gas_cost, 2)
-                if import_cost is not None and export_income is not None and gas_cost is not None
-                else None
-            )
             morning_soc = morning.get("morning_soc")
             morning_pv_power = morning.get("morning_pv_power", 0.0)
             target_soc = plan.get("target_soc")
@@ -295,7 +292,7 @@ class DataLogger:
                 "actual_import_cost_gbp": import_cost,
                 "actual_export_income_gbp": export_income,
                 "actual_gas_cost_gbp": gas_cost,
-                "net_cost_gbp": net_cost_gbp,
+                "net_cost_gbp": net_cost_gbp(import_cost, export_income, gas_cost),
                 "is_full_day": plan.get("is_full_day", False),
                 "initial_soc": plan.get("soc"),
                 "flux1_end": plan.get("flux1_end", ""),
@@ -632,20 +629,7 @@ class DataLogger:
     @staticmethod
     def _record_exists(path: str, record_type: str, date: str) -> bool:
         """Return True if a record with the given type and date already exists in the file."""
-        if not os.path.exists(path):
-            return False
-        try:
-            with open(path, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except (json.JSONDecodeError, ValueError):
-                        continue
-                    if rec.get("type") == record_type and rec.get("date") == date:
-                        return True
-        except OSError:
-            return False
-        return False
+        return any(
+            rec.get("type") == record_type and rec.get("date") == date
+            for rec in DataLogger._iter_jsonl(path)
+        )

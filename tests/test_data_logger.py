@@ -160,3 +160,31 @@ def test_effective_charge_rate_positive_with_enough_days(dl):
     ]
     rate = dl.compute_effective_charge_rate_kw(days, 10.0, 15)
     assert rate is not None and rate > 0
+
+
+def test_import_plan_log_keeps_fields_read_back_by_pairing(DataLogger):
+    """`away` and `effective_charge_rate_kw` must survive the log round trip.
+
+    _pair_records reads both back (home/away split, last-known charge-rate
+    fallback); if the import_plan log drops them, every day reads as home and
+    the history seed is always None.
+    """
+    import asyncio
+
+    written = []
+    logger = object.__new__(DataLogger)
+
+    async def _capture(record):
+        written.append(record)
+
+    logger._async_append = _capture
+    plan = {"date": "2026-09-01", "target_soc": 50, "away": True, "effective_charge_rate_kw": 2.4, "payload": {}}
+    asyncio.run(logger.async_log_import_plan(plan))
+    rec = written[0]
+    assert rec["away"] is True and rec["effective_charge_rate_kw"] == 2.4
+    assert "payload" not in rec
+
+    actuals = {"type": "day_actuals", "date": "2026-09-01", "evening_soc": 30.0, "actual_solar_kwh": 10.0}
+    paired = logger._pair_records([rec, actuals])
+    assert paired[0]["away"] is True
+    assert DataLogger.last_known_charge_rate_kw(paired) == 2.4

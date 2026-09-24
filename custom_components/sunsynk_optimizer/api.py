@@ -23,6 +23,8 @@ BASE_WEB = "https://www.sunsynk.net"
 BASE_API = "https://api.sunsynk.net"
 SOURCE = "sunsynk"      # required literal value in all Sunsynk API requests
 CLIENT_ID = "csp-web"  # required OAuth client identifier for the web portal flow
+_BASE_HEADERS = {"accept": "application/json", "origin": BASE_WEB, "referer": f"{BASE_WEB}/"}
+_JSON_HEADERS = {**_BASE_HEADERS, "content-type": "application/json;charset=UTF-8"}
 
 
 class SunsynkApiError(Exception):
@@ -48,6 +50,12 @@ class SunsynkApiClient:
         """Return lowercase MD5 hex digest — used to sign API nonces."""
         return hashlib.md5(value.encode("utf-8")).hexdigest()
 
+    @classmethod
+    def _signed_nonce(cls, secret: str) -> tuple[int, str]:
+        """Return (millisecond nonce, MD5 signature of 'nonce=…&source=…' + secret)."""
+        nonce = int(time.time() * 1000)
+        return nonce, cls._md5_hex(f"nonce={nonce}&source={SOURCE}{secret}")
+
     async def _json_or_raise(self, response: aiohttp.ClientResponse) -> dict[str, Any]:
         """Raise on HTTP error or non-zero Sunsynk API code, otherwise return parsed JSON."""
         response.raise_for_status()
@@ -62,13 +70,11 @@ class SunsynkApiClient:
         The endpoint requires a millisecond-precision nonce signed with MD5 using the
         literal string 'POWER_VIEW' as the signing secret.
         """
-        nonce = int(time.time() * 1000)
-        raw = f"nonce={nonce}&source={SOURCE}"
-        sign = self._md5_hex(raw + "POWER_VIEW")
+        nonce, sign = self._signed_nonce("POWER_VIEW")
         async with self._session.get(
             f"{BASE_API}/anonymous/publicKey",
             params={"nonce": nonce, "source": SOURCE, "sign": sign},
-            headers={"accept": "application/json", "origin": BASE_WEB, "referer": f"{BASE_WEB}/"},
+            headers=_BASE_HEADERS,
         ) as response:
             body = await self._json_or_raise(response)
             public_key = body.get("data")
@@ -99,9 +105,7 @@ class SunsynkApiClient:
         as the secret — this is the signing contract the Sunsynk web portal uses.
         """
         public_key = await self._get_public_key()
-        nonce = int(time.time() * 1000)
-        raw = f"nonce={nonce}&source={SOURCE}"
-        sign = self._md5_hex(raw + public_key[:10])  # first 10 chars of key = login signing secret
+        nonce, sign = self._signed_nonce(public_key[:10])  # first 10 chars of key = login signing secret
         encrypted_password = await self._encrypt_password(self._password, public_key)
         payload = {
             "sign": sign,
@@ -115,12 +119,7 @@ class SunsynkApiClient:
         async with self._session.post(
             f"{BASE_API}/oauth/token/new",
             json=payload,
-            headers={
-                "accept": "application/json",
-                "content-type": "application/json;charset=UTF-8",
-                "origin": BASE_WEB,
-                "referer": f"{BASE_WEB}/",
-            },
+            headers=_JSON_HEADERS,
         ) as response:
             body = await self._json_or_raise(response)
             data = body.get("data")
@@ -141,23 +140,16 @@ class SunsynkApiClient:
         which handles session expiry without requiring the caller to manage tokens.
         """
         await self._ensure_login()
-        headers = {
-            "Authorization": f"Bearer {self._token}",
-            "accept": "application/json",
-            "content-type": "application/json;charset=UTF-8",
-            "origin": BASE_WEB,
-            "referer": f"{BASE_WEB}/",
-        }
-        async with self._session.post(
-            f"{BASE_API}/api/v1/plant/{plant_id}/income", json=payload, headers=headers
-        ) as response:
-            if response.status == 401:
-                # Token expired mid-session — re-authenticate and retry once.
-                self._token = None
-                await self.async_login()
-                headers["Authorization"] = f"Bearer {self._token}"
-                async with self._session.post(
-                    f"{BASE_API}/api/v1/plant/{plant_id}/income", json=payload, headers=headers
-                ) as retry_response:
-                    return await self._json_or_raise(retry_response)
-            return await self._json_or_raise(response)
+        url = f"{BASE_API}/api/v1/plant/{plant_id}/income"
+
+        def _headers() -> dict[str, str]:
+            return {**_JSON_HEADERS, "Authorization": f"Bearer {self._token}"}
+
+        async with self._session.post(url, json=payload, headers=_headers()) as response:
+            if response.status != 401:
+                return await self._json_or_raise(response)
+        # Token expired mid-session — re-authenticate and retry once.
+        self._token = None
+        await self.async_login()
+        async with self._session.post(url, json=payload, headers=_headers()) as retry_response:
+            return await self._json_or_raise(retry_response)

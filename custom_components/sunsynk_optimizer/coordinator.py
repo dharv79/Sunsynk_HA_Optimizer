@@ -22,7 +22,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import SunsynkApiClient
-from .const import DOMAIN, STORAGE_KEY, STORAGE_VERSION, CONF_PASSWORD, CONF_USERNAME
+from .const import STORAGE_KEY, STORAGE_VERSION, CONF_PASSWORD, CONF_USERNAME
 from .flux_helpers import merge_entry_data
 from .optimizer import SunsynkOptimizer
 

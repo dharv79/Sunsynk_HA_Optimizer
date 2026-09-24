@@ -29,6 +29,27 @@ _ADAPTIVE_THRESHOLDS = {
     "effective_charge_rate": 3,       # min for compute_effective_charge_rate_kw
 }
 
+# Adaptive sensor → (last_import_plan value key, default, progress-count key).
+_ADAPTIVE_PLAN_KEYS = {
+    "forecast_correction": ("forecast_correction_factor", 1.0, "forecast_correction_days"),
+    "overnight_drain_adjustment": ("overnight_drain_adjustment", 0, "overnight_drain_days"),
+    "evening_soc_adjustment": ("soc_adjustment", 0, "soc_adjustment_days"),
+    "effective_charge_rate": ("effective_charge_rate_kw", None, "charge_rate_calibration_days"),
+}
+
+# Sensors that expose one OptimizerState field directly.
+_DIRECT_FIELDS = {
+    "selected_full_charge_day": "selected_full_charge_day",
+    "operation_mode": "operation_mode",
+    "current_soc_target": "current_soc_target",
+    "next_import_window": "next_import_window",
+    "last_updated": "updated_at",
+}
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -82,40 +103,19 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         """
         state = self.coordinator.state
 
-        if self._sensor_key == "selected_full_charge_day":
-            return state.selected_full_charge_day
-        if self._sensor_key == "operation_mode":
-            return state.operation_mode
-        if self._sensor_key == "current_soc_target":
-            return state.current_soc_target
-        if self._sensor_key == "next_import_window":
-            return state.next_import_window
+        if self._sensor_key in _DIRECT_FIELDS:
+            return getattr(state, _DIRECT_FIELDS[self._sensor_key])
         if self._sensor_key == "last_error":
             return state.last_error or "OK"
-        if self._sensor_key == "last_updated":
-            return state.updated_at
 
         # Adaptive learning sensors — read from last_import_plan attributes.
         # Default values keep history continuous even before the first plan runs.
-        if self._sensor_key in (
-            "forecast_correction",
-            "overnight_drain_adjustment",
-            "evening_soc_adjustment",
-            "effective_charge_rate",
-        ):
-            plan = state.last_import_plan if isinstance(state.last_import_plan, dict) else {}
-            if self._sensor_key == "forecast_correction":
-                return plan.get("forecast_correction_factor", 1.0)
-            if self._sensor_key == "overnight_drain_adjustment":
-                return plan.get("overnight_drain_adjustment", 0)
-            if self._sensor_key == "evening_soc_adjustment":
-                return plan.get("soc_adjustment", 0)
-            if self._sensor_key == "effective_charge_rate":
-                return plan.get("effective_charge_rate_kw")
+        if self._sensor_key in _ADAPTIVE_PLAN_KEYS:
+            key, default, _ = _ADAPTIVE_PLAN_KEYS[self._sensor_key]
+            return _as_dict(state.last_import_plan).get(key, default)
 
         if self._sensor_key == "consumption":
-            day = state.last_day_actuals if isinstance(state.last_day_actuals, dict) else {}
-            load = day.get("day_load_kwh")
+            load = _as_dict(state.last_day_actuals).get("day_load_kwh")
             return f"{load} kWh today" if load is not None else None
 
         if self._sensor_key == "import_plan_end":
@@ -193,11 +193,11 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             # prefixed). daily_cost's own `date` is exposed separately since,
             # unlike the others, it's inherently yesterday's data (Octopus
             # settlement lag) rather than today's.
-            morning = state.last_morning_state if isinstance(state.last_morning_state, dict) else {}
-            day = state.last_day_actuals if isinstance(state.last_day_actuals, dict) else {}
-            peak = state.last_peak_window_usage if isinstance(state.last_peak_window_usage, dict) else {}
-            cost = state.last_daily_cost if isinstance(state.last_daily_cost, dict) else {}
-            ytd = state.last_year_to_date_cost if isinstance(state.last_year_to_date_cost, dict) else {}
+            morning = _as_dict(state.last_morning_state)
+            day = _as_dict(state.last_day_actuals)
+            peak = _as_dict(state.last_peak_window_usage)
+            cost = _as_dict(state.last_daily_cost)
+            ytd = _as_dict(state.last_year_to_date_cost)
             attrs = {}
             if "overnight_load_kwh" in morning:
                 attrs["overnight_load_kwh"] = morning["overnight_load_kwh"]
@@ -215,15 +215,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         # Adaptive learning sensors expose calibration progress so the user can
         # see when a correction will activate (days_collected vs days_required).
         if self._sensor_key in _ADAPTIVE_THRESHOLDS:
-            plan = state.last_import_plan if isinstance(state.last_import_plan, dict) else {}
             days_required = _ADAPTIVE_THRESHOLDS[self._sensor_key]
-            days_key = {
-                "forecast_correction": "forecast_correction_days",
-                "overnight_drain_adjustment": "overnight_drain_days",
-                "evening_soc_adjustment": "soc_adjustment_days",
-                "effective_charge_rate": "charge_rate_calibration_days",
-            }[self._sensor_key]
-            days_collected = plan.get(days_key, 0) or 0
+            days_key = _ADAPTIVE_PLAN_KEYS[self._sensor_key][2]
+            days_collected = _as_dict(state.last_import_plan).get(days_key, 0) or 0
             return {
                 "days_collected": days_collected,
                 "days_required": days_required,
