@@ -52,6 +52,25 @@ def _record(record_type: str, **fields: Any) -> dict[str, Any]:
     return {"type": record_type, "recorded_at": datetime.now(timezone.utc).isoformat(), **fields}
 
 
+DAILY_COST_FIELDS = ("actual_import_cost_gbp", "actual_export_income_gbp", "actual_gas_cost_gbp")
+
+
+def merge_daily_cost_fields(existing: dict[str, Any], new: dict[str, float | None]) -> dict[str, float | None] | None:
+    """Fill unset daily_cost fields of `existing` from `new`; None if that adds nothing.
+
+    Already-logged values always win, so a later re-read can complete a
+    partial day but never rewrite one.
+    """
+    merged = {f: existing.get(f) for f in DAILY_COST_FIELDS}
+    added = False
+    for field_name in DAILY_COST_FIELDS:
+        value = new.get(field_name)
+        if merged[field_name] is None and value is not None:
+            merged[field_name] = round_or_none(value)
+            added = True
+    return merged if added else None
+
+
 class DataLogger:
     """Appends JSONL records and analyses history for adaptive corrections."""
 
@@ -130,35 +149,39 @@ class DataLogger:
             )
         )
 
-    async def async_log_daily_cost(
-        self,
-        date: str,
-        actual_import_cost_gbp: float | None,
-        actual_export_income_gbp: float | None,
-        actual_gas_cost_gbp: float | None,
-    ) -> None:
-        """Log settled real cost for one calendar day, from the optional Octopus sensors.
+    async def async_merge_daily_cost(self, date: str, values: dict[str, float | None]) -> dict[str, Any] | None:
+        """Merge settled Octopus cost fields into the daily_cost record for `date`.
 
-        `date` is the PRIOR day, not the day this runs on — Octopus's "previous
-        accumulative cost" sensors only settle a few hours after midnight, so
-        this is captured at 06:00 alongside morning_state, tagged with
-        yesterday's date. Any of the three inputs may be None (sensor not
-        configured or unavailable that morning); the record is only written
-        if at least one is present, and net_cost_gbp is computed in
-        _pair_records (not here) so a day with a missing input doesn't get a
-        misleadingly "complete" net figure baked into the raw log.
+        The import, export and gas sensors settle on independent schedules
+        (gas meters commonly report a day behind electricity), so one day's
+        record is assembled across several reads. Only fields still unset
+        on the existing record are filled — a logged value is never
+        overwritten. When something new was added, a complete superseding
+        record is appended (_pair_records keeps the last record per date);
+        returns that record, or None when nothing changed. net_cost_gbp is
+        left to _pair_records so a partial day never carries a "complete"
+        net figure in the raw log.
         """
-        if actual_import_cost_gbp is None and actual_export_income_gbp is None and actual_gas_cost_gbp is None:
-            return
-        await self._async_append(
-            _record(
-                "daily_cost",
-                date=date,
-                actual_import_cost_gbp=round_or_none(actual_import_cost_gbp),
-                actual_export_income_gbp=round_or_none(actual_export_income_gbp),
-                actual_gas_cost_gbp=round_or_none(actual_gas_cost_gbp),
-            )
-        )
+        return await self.hass.async_add_executor_job(self._merge_daily_cost, date, values)
+
+    def _merge_daily_cost(self, date: str, values: dict[str, float | None]) -> dict[str, Any] | None:
+        now = datetime.now(timezone.utc)
+        try:
+            start = datetime.fromisoformat(date).replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+        # A late catch-up can land in a later month's file than the date's own.
+        existing: dict[str, Any] = {}
+        for month in self._months_between(min(start, now), now):
+            for rec in self._iter_jsonl(os.path.join(self._data_dir, f"{month}.jsonl")):
+                if rec.get("type") == "daily_cost" and rec.get("date") == date:
+                    existing = rec
+        merged = merge_daily_cost_fields(existing, values)
+        if merged is None:
+            return None
+        record = _record("daily_cost", date=date, **merged)
+        self._append_line(self._current_month_file(), record)
+        return record
 
     async def async_log_day_actuals(
         self,
@@ -589,7 +612,8 @@ class DataLogger:
     # Write helpers                                                        #
     # ------------------------------------------------------------------ #
 
-    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals", "peak_window_usage", "daily_cost")
+    # daily_cost is not deduped here — it merges via async_merge_daily_cost.
+    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals", "peak_window_usage")
 
     async def _async_append(self, record: dict[str, Any]) -> None:
         """Offload the blocking file write to the executor so it doesn't block the event loop."""
@@ -605,11 +629,7 @@ class DataLogger:
         cross a scheduled-event boundary (e.g. restart at 05:55 → second
         morning_state at 06:00).
         """
-        os.makedirs(self._data_dir, exist_ok=True)
-        month_file = os.path.join(
-            self._data_dir,
-            f"{datetime.now(timezone.utc).strftime('%Y-%m')}.jsonl",
-        )
+        month_file = self._current_month_file()
         if (
             record.get("type") in self._DEDUP_TYPES
             and record.get("date")
@@ -620,11 +640,18 @@ class DataLogger:
                 record["type"], record["date"], os.path.basename(month_file),
             )
             return
+        self._append_line(month_file, record)
+
+    def _current_month_file(self) -> str:
+        return os.path.join(self._data_dir, f"{datetime.now(timezone.utc).strftime('%Y-%m')}.jsonl")
+
+    def _append_line(self, path: str, record: dict[str, Any]) -> None:
         try:
-            with open(month_file, "a", encoding="utf-8") as fh:
+            os.makedirs(self._data_dir, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record) + "\n")
         except OSError:
-            _LOGGER.exception("Failed to write data log to %s", month_file)
+            _LOGGER.exception("Failed to write data log to %s", path)
 
     @staticmethod
     def _record_exists(path: str, record_type: str, date: str) -> bool:

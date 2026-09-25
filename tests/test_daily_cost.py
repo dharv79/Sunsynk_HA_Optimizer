@@ -11,6 +11,7 @@ is missing so a partially-configured install doesn't get a misleading total.
 from __future__ import annotations
 
 import json
+import os
 
 from conftest import _data_logger
 
@@ -88,18 +89,53 @@ def _read_jsonl(tmp_path):
     return [json.loads(line) for line in files[0].read_text().splitlines() if line.strip()]
 
 
-def test_daily_cost_dedups_same_day(tmp_path):
-    # daily_cost is in _DEDUP_TYPES: a second same-day write must not duplicate.
+_FULL = {"actual_import_cost_gbp": 3.20, "actual_export_income_gbp": 1.10, "actual_gas_cost_gbp": 2.50}
+
+
+def test_merge_fields_fills_only_unset():
+    existing = {"actual_import_cost_gbp": 3.20, "actual_export_income_gbp": 1.10, "actual_gas_cost_gbp": None}
+    merged = _data_logger.merge_daily_cost_fields(existing, {"actual_import_cost_gbp": 99.0, "actual_gas_cost_gbp": 2.5})
+    assert merged == _FULL  # gas filled, logged import never overwritten
+
+
+def test_merge_fields_returns_none_when_nothing_new():
+    assert _data_logger.merge_daily_cost_fields(_FULL, {"actual_gas_cost_gbp": 9.0}) is None
+    assert _data_logger.merge_daily_cost_fields({}, {}) is None
+
+
+def test_merge_daily_cost_same_values_does_not_duplicate(tmp_path):
     dl = _make_dl(tmp_path)
-    record = {
-        "type": "daily_cost",
-        "date": "2026-08-18",
-        "actual_import_cost_gbp": 3.20,
-        "actual_export_income_gbp": 1.10,
-        "actual_gas_cost_gbp": 2.50,
-    }
-    dl._write_record(record)
-    dl._write_record(dict(record, actual_import_cost_gbp=99.0))
+    assert dl._merge_daily_cost("2026-08-18", _FULL) is not None
+    assert dl._merge_daily_cost("2026-08-18", dict(_FULL, actual_import_cost_gbp=99.0)) is None
     records = _read_jsonl(tmp_path)
     assert len(records) == 1
-    assert records[0]["actual_import_cost_gbp"] == 3.20  # first write wins
+    assert records[0]["actual_import_cost_gbp"] == 3.20  # first value wins
+
+
+def test_gas_settling_a_day_late_completes_the_day(tmp_path):
+    # Electricity for the 18th arrives first; gas for the 18th only on the
+    # next read. The superseding record must pair as a complete day.
+    dl = _make_dl(tmp_path)
+    dl._merge_daily_cost("2026-08-18", {"actual_import_cost_gbp": 3.20, "actual_export_income_gbp": 1.10})
+    record = dl._merge_daily_cost("2026-08-18", {"actual_gas_cost_gbp": 2.50})
+    assert record["actual_import_cost_gbp"] == 3.20 and record["actual_gas_cost_gbp"] == 2.50
+    paired = dl._pair_records(_base_records("2026-08-18") + _read_jsonl(tmp_path))
+    assert paired[0]["net_cost_gbp"] == 4.60
+
+
+def test_merge_finds_record_in_previous_month_file(tmp_path):
+    # A catch-up written early in a new month must see the partial record
+    # already sitting in the previous month's file.
+    from datetime import datetime, timedelta, timezone
+
+    dl = _make_dl(tmp_path)
+    last_of_prev = datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)
+    date = last_of_prev.date().isoformat()
+    (tmp_path / f"{last_of_prev:%Y-%m}.jsonl").write_text(json.dumps(
+        {"type": "daily_cost", "date": date, "actual_import_cost_gbp": 3.2,
+         "actual_export_income_gbp": 1.1, "actual_gas_cost_gbp": None}
+    ) + "\n")
+    record = dl._merge_daily_cost(date, {"actual_import_cost_gbp": 99.0, "actual_gas_cost_gbp": 2.5})
+    assert record["actual_import_cost_gbp"] == 3.2
+    assert record["actual_gas_cost_gbp"] == 2.5
+    assert os.path.exists(dl._current_month_file())
