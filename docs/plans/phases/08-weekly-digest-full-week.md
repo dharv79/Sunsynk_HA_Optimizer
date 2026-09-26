@@ -1,6 +1,6 @@
 # Phase 8 — Weekly digest covers a full 7 days
 
-**Status:** In progress (PR open). **Size:** XS, ~15-25k.
+**Status:** Done, merged (6f45de0, PR #19). **Size:** XS, ~15-25k est.; ~15k actual. Verify: next Sunday digest shows `days_in_period: 7` with `period_start`/`period_end`.
 
 ## Scope
 
