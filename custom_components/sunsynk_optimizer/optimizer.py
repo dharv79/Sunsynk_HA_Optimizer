@@ -69,7 +69,9 @@ from .data_logger import DAILY_COST_FIELDS, DataLogger
 from .flux_helpers import apply_flux_override, build_payload, merge_entry_data, peak_import_price_pence_per_kwh
 from .planning import (
     LOW_SOLAR_THRESHOLD_KWH,
+    WEEK_HISTORY_DAYS,
     apply_soc_adjustments,
+    days_in_period,
     flux1_end_minutes,
     forecast_band,
     minutes_to_hhmm,
@@ -79,6 +81,7 @@ from .planning import (
     select_target_soc,
     sum_field,
     synthetic_hourly_profile,
+    trailing_week,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -997,7 +1000,7 @@ class SunsynkOptimizer:
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
 
     async def _async_send_weekly_cost_summary(self) -> None:
-        """Sunday 18:00: roll up the last 7 days of settled cost data and send it as JSON.
+        """Sunday 18:00: roll up the 7 complete days ending yesterday (Sun–Sat) and send it as JSON.
 
         Reuses the existing data_report_target debug stream rather than adding
         a new notify target — this is a second machine-readable line, not a
@@ -1020,7 +1023,10 @@ class SunsynkOptimizer:
         )
         self._shadow_export_stats = {"divergent_checks": 0, "estimated_gbp_delta": 0.0}
 
-        paired_days = await self.data_logger.async_load_paired_days(days=7)
+        period_start, period_end = trailing_week(dt_util.now().date())
+        paired_days = days_in_period(
+            await self.data_logger.async_load_paired_days(days=WEEK_HISTORY_DAYS), period_start, period_end
+        )
         cost_days = [d for d in paired_days if d.get("net_cost_gbp") is not None]
 
         def _sum(key: str) -> float | None:
@@ -1029,6 +1035,8 @@ class SunsynkOptimizer:
         summary = {
             "type": "weekly_cost_summary",
             "date": dt_util.now().date().isoformat(),
+            "period_start": period_start,
+            "period_end": period_end,
             "days_in_period": len(paired_days),
             "days_with_cost_data": len(cost_days),
             "week_import_cost_gbp": _sum("actual_import_cost_gbp"),
@@ -1081,7 +1089,10 @@ class SunsynkOptimizer:
         import_bands = _bands("import")
         export_bands = _bands("export")
 
-        paired_days = await self.data_logger.async_load_paired_days(days=7)
+        paired_days = days_in_period(
+            await self.data_logger.async_load_paired_days(days=WEEK_HISTORY_DAYS),
+            *trailing_week(dt_util.now().date()),
+        )
 
         def _sum(key: str):
             total = sum_field(paired_days, key)
@@ -1092,7 +1103,7 @@ class SunsynkOptimizer:
         context = (
             f"Tariff (Octopus Flux) import p/kWh by window: {import_bands or 'unknown'}. "
             f"Export p/kWh by window: {export_bands or 'unknown'}. "
-            f"Last 7 days: import cost £{_sum('actual_import_cost_gbp')}, "
+            f"Last 7 complete days: import cost £{_sum('actual_import_cost_gbp')}, "
             f"export income £{_sum('actual_export_income_gbp')}, "
             f"gas cost £{_sum('actual_gas_cost_gbp')}, "
             f"household load {_sum('day_load_kwh')} kWh, "

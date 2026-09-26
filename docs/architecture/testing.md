@@ -38,7 +38,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_away_mode.py` | Home/away calibration split |
 | `tests/test_day_actuals.py` | day_actuals / peak_window_usage logging and dedup |
 | `tests/test_daily_cost.py` | daily_cost pairing, net cost, fill-only merge, month-boundary catch-up |
-| `tests/test_planning.py` | `planning.py` target-SOC tree, bridge/ramp, charge rate, Flux 1 window, scoring |
+| `tests/test_planning.py` | `planning.py` target-SOC tree, bridge/ramp, charge rate, Flux 1 window, scoring, weekly period window |
 | `tests/test_flux_helpers_cost.py` | `peak_import_price_pence_per_kwh` cost-trigger helper |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |

@@ -134,3 +134,25 @@ def test_net_cost_and_sum_field(planning):
     days = [{"x": 1.111}, {"x": None}, {}, {"x": 2.0}]
     assert planning.sum_field(days, "x") == 3.11
     assert planning.sum_field([{}], "x") is None
+
+
+# --------------------------------------------------------------------------- #
+# Weekly digest period                                                        #
+# --------------------------------------------------------------------------- #
+
+def test_trailing_week_is_seven_days_ending_yesterday(planning):
+    from datetime import date
+
+    # Sunday 2026-09-20 digest covers Sun 13th .. Sat 19th.
+    assert planning.trailing_week(date(2026, 9, 20)) == ("2026-09-13", "2026-09-19")
+
+
+def test_days_in_period_keeps_full_week_and_drops_today(planning):
+    days = [{"date": f"2026-09-{d:02d}"} for d in range(12, 21)]  # 12th..20th
+    kept = planning.days_in_period(days, "2026-09-13", "2026-09-19")
+    assert [d["date"] for d in kept] == [f"2026-09-{d:02d}" for d in range(13, 20)]
+
+
+def test_week_history_covers_oldest_plan_record(planning):
+    # Oldest day's 01:55 import_plan is ~7 d 16 h before the Sunday 18:00 digest.
+    assert planning.WEEK_HISTORY_DAYS * 24 > 7 * 24 + 16
