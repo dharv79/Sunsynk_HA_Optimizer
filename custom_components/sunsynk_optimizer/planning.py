@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any
 
 # Below this (pessimistic) daily forecast the plan switches to max import:
@@ -242,6 +243,25 @@ def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cos
 
 def round_or_none(value: float | None, digits: int = 2) -> float | None:
     return round(value, digits) if value is not None else None
+
+
+# Paired-day history to load for a trailing week: the oldest day's 01:55
+# import_plan is ~7 d 16 h old at the Sunday 18:00 digest, and
+# load_paired_days filters by recorded_at, so 7 would drop it.
+WEEK_HISTORY_DAYS = 9
+
+
+def trailing_week(today: date) -> tuple[str, str]:
+    """ISO (start, end) of the 7 complete days ending yesterday.
+
+    Today is excluded because its day_actuals isn't logged until 22:00.
+    """
+    return (today - timedelta(days=7)).isoformat(), (today - timedelta(days=1)).isoformat()
+
+
+def days_in_period(days: list[dict[str, Any]], start: str, end: str) -> list[dict[str, Any]]:
+    """Paired days whose ISO `date` falls within [start, end]."""
+    return [d for d in days if start <= str(d.get("date", "")) <= end]
 
 
 def sum_field(days: list[dict[str, Any]], key: str) -> float | None:

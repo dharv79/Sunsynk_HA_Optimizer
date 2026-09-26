@@ -1,6 +1,6 @@
 # Phase 8 — Weekly digest covers a full 7 days
 
-**Status:** Planned, not built. **Size:** XS, ~15-25k.
+**Status:** In progress (PR open). **Size:** XS, ~15-25k.
 
 ## Scope
 

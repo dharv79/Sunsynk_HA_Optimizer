@@ -15,7 +15,7 @@ Sunsynk HA Optimizer is on the 1.0.11 beta line (Octopus cost link, weekly diges
 | 5. Octopus late-settlement handling (1.0.11b5–b7) | Done, merged (763a8c0, PRs #12–#15) | S, actual not recorded |
 | 6. Planning refactor + import_plan field fix (1.0.11b8) | Done, merged (889e6a8, PR #16) | L, actual not recorded |
 | 7. Gas cost per-sensor dating fix (1.0.11b9) | Done, merged (2eb679c, PR #17) | S, actual not recorded |
-| 8. Weekly digest covers a full 7 days | Planned, not built | XS, ~15-25k |
+| 8. Weekly digest covers a full 7 days | In progress | XS, ~15-25k |
 | 9. Cost-aware export go-live decision | Planned, not built | S, ~20-40k |
 
 Token actuals were not metered before this index existed; record them from phase 8 on.
