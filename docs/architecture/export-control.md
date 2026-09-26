@@ -1,0 +1,9 @@
+# Export control
+
+16:00–19:00 export-disable: watt vs cost trigger, shadow mode, weekly tally.
+
+Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
+
+### Cost-aware export-disable threshold (v1.0.11 Part 3, shadow mode)
+
+`async_run_flux2_check` computes two independent triggers for the 16:00–19:00 export-disable decision: `watt_trigger` (the original `grid_pac > CONF_EXPORT_DISABLE_THRESHOLD` check) and `cost_trigger` (`(grid_pac_kw × peak_import_price_pence_per_kwh) > CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR`, using `flux_helpers.peak_import_price_pence_per_kwh()` against the user's own configured `charges` — a pure helper, unit-tested without HA). `cost_trigger` is `None` outside the window or when `charges` has no matching import row for it — never coerced to a false 0p price. `CONF_COST_AWARE_EXPORT_SHADOW_MODE` (default `True`) gates which trigger actually drives the real decision: shadow mode on → `watt_trigger` always wins (zero behaviour change from pre-Part-3); shadow mode off → `cost_trigger` wins, falling back to `watt_trigger` if `cost_trigger` is `None`. Every check where the two triggers disagree is tallied on `self._shadow_export_stats` (unpersisted, same transient-state pattern as `_peak_window_start`) via `_tally_shadow_export_divergence` — `estimated_gbp_delta` only accumulates for the "cost says pause, watt didn't" direction, since the reverse carries no cost risk (export was already disabled). `_async_send_weekly_cost_summary` (Part 2) reads and resets this tally each Sunday, folding it into the weekly digest as `cost_aware_export_shadow_tally` so divergence is visible without a dedicated sensor. Default cost threshold (`DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR = 58.32`) is back-computed from the default Watt threshold (1.5 kW) × the default 16:00–19:00 import price (38.88 p/kWh), so a fresh upgrade stays behaviour-neutral even before the user touches the new config fields.

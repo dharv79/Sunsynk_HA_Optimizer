@@ -1,133 +1,91 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Maintaining this file
 
-## What this is
+- This file loads in full on every turn: keep it an **index**, under ~1,000 lines. Only durable, load-bearing facts: summary, file map, do-not-break rules, conventions, how to run/test.
+- Never add bug write-ups, diagnosis narratives, old-vs-new code, per-commit reasoning or feature history — those go in git history and `docs/`.
+- Before adding a paragraph ask: "Does every future turn need this?" If only turns touching one area do, put it in that area's `docs/architecture/<topic>.md` and at most add a row to the topic table.
+- When a feature ships, add a dated section ("Feature X (DD/MM/YYYY)") with design, root cause and verification to the relevant topic file. New test file → row in `testing.md`.
+- Re-audit every few phases; move anything historical out to `docs/`.
 
-A Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's charging and export behaviour using solar forecasts, battery SOC, and time-of-use tariff windows. It is pure Python with no build step — the `custom_components/sunsynk_optimizer/` directory is deployed directly into a running Home Assistant instance.
+## Project
 
-## Development workflow
+Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's overnight charging and evening export using solar forecasts, battery SOC and time-of-use (Octopus Flux) tariff windows. Pure Python, no build step: `custom_components/sunsynk_optimizer/` is deployed directly into HA. Talks to the Sunsynk cloud API; reads SolarSynkV3 and optional Octopus Energy sensors.
 
-### Tests
+## File map (`custom_components/sunsynk_optimizer/`)
 
-The pure adaptive-learning logic in `data_logger.py` and the pure planning maths in `planning.py` have unit tests under `tests/` that run **without** a Home Assistant install — `tests/conftest.py` stubs `homeassistant.core` and loads `data_logger.py` directly by file path (bypassing the package `__init__.py` and its coordinator/optimizer import chain). Run them with:
+| File | Role |
+|---|---|
+| `__init__.py` | Entry setup: builds coordinator → optimizer, forwards platforms |
+| `coordinator.py` | `OptimizerState` (single source of truth), `Store` persistence, `update_state`, 13-month log pruning |
+| `optimizer.py` | Business logic + HA listeners (01:55, 06:00, 18:00 Sun, 22:00, 30-min, SOC change) |
+| `planning.py` | HA-free planning maths (target SOC tree, charge rate, Flux 1 window, scoring, cost helpers) |
+| `data_logger.py` | Monthly JSONL logging, pairing, adaptive `compute_*` corrections |
+| `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST |
+| `flux_helpers.py` | `fluxProducts` payload, `merge_entry_data`, peak-price helper |
+| `sensor.py` / `binary_sensor.py` / `button.py` / `switch.py` | Entities (event-driven, no polling) |
+| `dashboard_installer.py` | Generates Lovelace YAML |
+| `config_flow.py` / `const.py` | Multi-step config/options flow; constants and defaults |
+
+## Do-not-break (reasoning: `docs/architecture/do-not-break.md`)
+
+1. Read config only via `merge_entry_data(dict(entry.data), dict(entry.options))` — `flux_helpers.py`.
+2. `plant_id` (API) and `inverter_serial` (entity IDs) are different; never swap — `api.py`, `dashboard_installer.s()`.
+3. Flux index 0 = import (`direction=1`), index 1 = export (`direction=0`) — `flux_helpers.apply_flux_override`.
+4. Mutate state only via `coordinator.update_state` — `coordinator.py`.
+5. Push only via `_async_post_with_status`; gate notification text on its bool — `optimizer.py`.
+6. Scheduled callbacks run through `_guarded` — `optimizer.py`.
+7. Reload one-shot skipped 16:00–19:00 while `evening_export_disabled` — `optimizer.py`.
+8. Low-solar decisions use `min(raw, corrected)` forecast — `planning.select_target_soc`.
+9. Drain nights require `initial_soc < target_soc` — `data_logger._is_drain_night`.
+10. Plan fields read back by `_pair_records` must be in `_IMPORT_PLAN_FIELDS` — `data_logger.py`.
+11. Missing cost is `None`, never 0 — `planning.net_cost_gbp`.
+12. `daily_cost` is dated per sensor and merged fill-only; never overwrite or misdate — `data_logger.merge_daily_cost_fields`, `optimizer._read_octopus_previous_day_cost`.
+13. Other per-day record types dedup at write — `data_logger._write_record` / `_DEDUP_TYPES`.
+14. `cost_trigger` stays `None` when no price applies, never 0p — `flux_helpers.peak_import_price_pence_per_kwh`.
+15. Shadow mode defaults on (watt trigger drives export-disable) — `CONF_COST_AWARE_EXPORT_SHADOW_MODE`.
+16. Monitor mode makes no API writes — `optimizer.py` early returns.
+17. Test plan button is a pure dry run (no push, log or state) — `async_run_import_plan(dry_run=True)`.
+18. Away days filtered by regime for drain/nudge; excluded from charge rate — `data_logger.py`.
+19. New decision logic goes in `planning.py` with a test.
+
+## Conventions
+
+- Optional sensors degrade gracefully: blank config → `None`, never raise.
+- Notification titles: `🔋 Sunsynk: <sentence case>`; failed push → "⚠️ Sunsynk: … NOT applied".
+- Machine-readable JSON lines go to `CONF_DATA_REPORT_TARGET` (debug stream, Slack `#sunsynkdebug`); human text to `CONF_NOTIFY_TARGET`.
+- Blocking file I/O via `hass.async_add_executor_job`.
+- Transient per-window state (`_peak_window_start`, `_shadow_export_stats`) is unpersisted by design.
+- Version lives in `manifest.json`; release = push `release/<version>` branch (tag containing `bN` → prerelease), via `.github/workflows/release.yml`.
+
+## Run / test
 
 ```bash
-pip install pytest && python3 -m pytest
+pip install pytest && python3 -m pytest                          # HA-free unit tests
+python3 -m py_compile custom_components/sunsynk_optimizer/*.py  # syntax check (CI runs both)
 ```
+Real behaviour needs an HA instance; use the **Test plan (dry run)** button. Details: `docs/architecture/testing.md`.
 
-`tests/conftest.py` exposes a `planning` fixture (the `planning` module), a `dl` fixture (a bare `DataLogger` instance for calling its pure methods) and a `make_day(**overrides)` helper for building paired-day dicts. When you change any `compute_*` / `count_*` / `_is_drain_night` / `_percentile` logic, or anything in `planning.py`, add or update a test that pins the new behaviour. The `.github/workflows/tests.yml` workflow runs `py_compile` + `pytest` on every push to `main` and every PR. Testing code that imports HA more deeply (optimizer, coordinator) requires mocking `hass`; prefer extracting pure helpers so they can be tested directly.
+## Topic docs (read only when changing that area)
 
-### Home Assistant iteration
+| Topic | File | Covers |
+|---|---|---|
+| Code map | `docs/architecture/code-map.md` | Per-module responsibilities, listeners, data flow |
+| Data logging | `docs/architecture/data-logging.md` | Record types, dedup, pairing, `compute_*` corrections, home/away split |
+| Octopus cost | `docs/architecture/octopus-cost.md` | Octopus sensors, per-sensor dating, daily_cost merge, year-to-date |
+| Import plan | `docs/architecture/import-plan.md` | 01:55 plan, target SOC selection, Flux 1 sizing, full-charge-day scoring |
+| Export control | `docs/architecture/export-control.md` | 16:00–19:00 export-disable, watt vs cost trigger, shadow mode |
+| Weekly reports | `docs/architecture/weekly-reports.md` | Sunday cost digest, AI Task insight |
+| Entities & dashboard | `docs/architecture/entities-dashboard.md` | Sensors, buttons, binary sensors, Lovelace generator |
+| Config | `docs/architecture/config.md` | Entry data/options split, ID distinction, options flow, operation modes |
+| Testing | `docs/architecture/testing.md` | Test setup, HA iteration, test-file table |
+| Do-not-break | `docs/architecture/do-not-break.md` | Reasoning behind each rule above |
+| Logic reference | `docs/logic.md` | End-to-end user-facing logic walkthrough |
+| Plans | `docs/plans/README.md` | Phase status, locked decisions, binding process; phases in `docs/plans/phases/` |
 
-Beyond the unit tests, development requires a real or dev Home Assistant instance:
+## Session and reporting rules
 
-1. Copy `custom_components/sunsynk_optimizer/` into the HA instance's `custom_components/` directory.
-2. Restart Home Assistant or reload the integration via **Settings → Devices & Services**.
-3. Check **Settings → System → Logs** for errors from the `custom_components.sunsynk_optimizer` logger.
-
-When iterating on logic, the **Test plan (dry run)** button is the primary way to test without waiting for scheduled events: it recomputes the full import plan and posts the complete plan JSON to the HA app notification, with no inverter push, no data-log write, and no state change. The other manual buttons are **Reset baseline** (restore configured Flux windows) and **Update dashboard** (regenerate the Lovelace YAML).
-
-To validate Python syntax without a running HA instance:
-```bash
-python3 -m py_compile custom_components/sunsynk_optimizer/*.py
-```
-
-## Architecture
-
-### Entry points and data flow
-
-`__init__.py` → `SunsynkOptimizerCoordinator` → `SunsynkOptimizer`
-
-- **`coordinator.py`** owns the `OptimizerState` dataclass (the single source of truth for all runtime state) and persists it via HA's `Store` helper at `.storage/sunsynk_optimizer_state_{entry_id}`. All state mutations go through `coordinator.update_state(**kwargs)`, which also triggers entity refreshes via `async_set_updated_data`. Storage saves are non-blocking (`hass.async_create_task`) via `_async_save_state()`, which catches errors and surfaces them in `last_error`.
-- **`optimizer.py`** contains all business logic: import plan calculation, Flux 2 export/trim control, full-charge day scoring. It registers six HA listeners on startup (time-change at 01:55, 06:00, 18:00, and 22:00 daily; 30-minute interval; battery SOC state change). The 18:00 listener is gated to Sundays inside the handler, and on Sundays runs two guarded sub-calls: full-charge-day selection, then `_async_send_weekly_cost_summary` (rolls up the last 7 days of paired-day cost/load/solar data plus the current year-to-date figure into one JSON line sent to `CONF_DATA_REPORT_TARGET`, mirroring the daily debug-stream pattern; no-ops if that target is unset). It also schedules a one-shot `async_call_later` 60 seconds after setup to run an initial import plan — this fires on every integration reload, not just first boot (the 60-second delay lets notify services register first). That one-shot is **skipped** if a reload lands between 16:00–19:00 while `evening_export_disabled` is set, so it can't re-push Flux 2 and re-enable export mid-pause. The scheduled callbacks (`_async_run_import_plan`, `_async_periodic_flux2_check`, `_async_choose_best_full_charge_day`) run through the `_guarded` wrapper, which catches exceptions and surfaces them in `last_error` rather than letting them escape into the event loop (a silent nightly failure). `_essential_state(entity_id)` returns `float | None` and is used as a pre-flight check for battery SOC and forecast sensor availability before running plans. `_async_post_with_status(payload)` wraps all API pushes and returns a bool; callers gate notification text on it. The 30-minute callback also drives `_async_track_peak_window_usage`, which snapshots the SolarSynkV3 load/grid daily totals at the first firing with the hour in `[16, 19)` and logs the delta at the first firing with hour `>= 19` (`self._peak_window_start`, an unpersisted instance dict — a restart mid-window loses that day's snapshot rather than logging a wrong delta).
-- **`planning.py`** holds the HA-free planning maths the optimizer calls into: `select_target_soc` (the full target-SOC branch tree, returning a `TargetDecision`), `apply_soc_adjustments`, bridge/ramp helpers, `resolve_used_charge_rate` (learned-rate + temperature deration), `flux1_end_minutes`, `score_full_charge_day`, and the shared `net_cost_gbp` / `sum_field` / `round_or_none` helpers (also used by `data_logger.py`). New decision logic belongs here, not inline in `optimizer.py`, so it stays unit-testable.
-- **`data_logger.py`** records decisions and actuals to monthly JSONL files at `{config_dir}/sunsynk_optimizer_data/YYYY-MM.jsonl`. Six record types: `import_plan` (at 01:55), `morning_state` (at 06:00 — SOC, PV power, and `overnight_load_kwh` before solar starts), `day_actuals` (at 22:00 — evening SOC, actual solar kWh, plus `day_load_kwh`/`day_grid_import_kwh`/`day_grid_export_kwh` from the SolarSynkV3 daily totals), `peak_window_usage` (16:00–19:00 load/grid delta, logged by the optimizer's peak-window tracker above), `daily_cost` (settled real cost from the optional Octopus Energy sensors — see below), and `full_charge_day` (weekly scores). The load/grid fields exist so consumption review doesn't have to infer household load from the evening-SOC swing, which conflates load with solar availability — `day_load_kwh`/`overnight_load_kwh` are real energy totals, not SOC-derived. They're carried into the paired-day dict by `_pair_records` (read as `None` on history that predates each field) but no `compute_*` method consumes them yet — currently informational/for manual review only (`peak_window_usage` in particular: nothing auto-tunes `CONF_EXPORT_DISABLE_THRESHOLD` from it). Per-day record types (including `peak_window_usage` and `daily_cost`) are deduplicated at write time (`_write_record` calls `_record_exists` before appending) to prevent double entries on HA restarts that cross a scheduled-event boundary. Provides four analysis methods used by `optimizer.py` to apply adaptive corrections:
-  - `compute_forecast_correction` — **median** (not mean) of actual/forecast ratios over 30 days, capped 0.5–3.0, requires 7+ days. Median so one anomalous day (tiny forecast, huge actual → unbounded ratio) can't jolt the factor. The denominator is the stored *corrected* forecast, which makes the update self-damping: at equilibrium the factor settles at sqrt(true raw bias) — deliberate under-correction, the safe direction (planner expects less solar than arrives → charges more).
-  - `compute_soc_target_adjustment` — ±5% nudge based on evening SOC outcomes, requires 5+ matching non-high-solar days.
-  - `compute_overnight_drain_adjustment` — p75 (`_DRAIN_PERCENTILE`) of overnight drain, extra % to target SOC to compensate battery drain before 06:00, requires 5+ valid days, 15% fallback below that. Qualifying nights are defined by the shared `_is_drain_night` predicate, which requires a **real overnight charge** (`initial_soc < target_soc`) — no-charge nights (battery already above target, just discharging from a high start) are excluded so they can't be mistaken for post-charge drain.
-  - `compute_effective_charge_rate_kw` — kW from historical charge sessions (needs a night with `target − initial ≥ 10%`), requires 3+ days, else `None`. When it returns `None`, `optimizer.py` reuses the last learned rate instead of the nameplate config: fallback chain is fresh computation → persisted `OptimizerState.last_effective_charge_rate_kw` → `last_known_charge_rate_kw(paired_days)` (most recent non-null rate in history, seeds the persisted value on first run). Summer high-SOC nights rarely reach the 10% gap, so this fallback is the normal path much of the year.
-
-  `count_*` progress counters mirror their compute predicates (drain uses the same `_is_drain_night`), except `count_soc_adjustment_days`, which intentionally counts all in-band days regardless of solar level while the nudge computation still filters out high-solar days (`_HIGH_SOLAR_THRESHOLD_KWH = 15.0`). Files older than 13 months are pruned on startup via `coordinator.py`.
-
-  **Home/away calibration split.** Each plan runs in an occupancy regime — `away = coordinator.state.away_mode` (toggled by the built-in **Away mode** switch, `switch.py`, persisted in `OptimizerState`). The drain (`compute_overnight_drain_adjustment` / `_is_drain_night`) and evening-nudge (`compute_soc_target_adjustment`) computations and their counters take an `away` parameter and filter to days whose logged `away` flag matches, so a low-load holiday learns its own profile and can't skew the home one (and vice versa). Charge-rate calibration excludes away days entirely (the rate is physical; away nights back-calculate through an atypical drain), so when away it reuses the home-learned rate via the normal fallback chain. Forecast correction stays global (load-independent). Each `import_plan` record is tagged with `away` (the persisted field list is `_IMPORT_PLAN_FIELDS` in `data_logger.py` — any plan field `_pair_records` reads back must be listed there); `_pair_records` carries it into the paired dict (default `False`, so all pre-1.0.9 history reads as home). The solar-bridge consumption figure is also regime-aware: `avg_consumption_kw` becomes `CONF_AWAY_AVG_CONSUMPTION_KW` (default 0.3 kW) when away — away takes precedence over the weekday/weekend split — so the bridge and synthetic-ramp targets size to the low holiday load. The away drain buffer also has its own lower default (`_DEFAULT_DRAIN_ADJUSTMENT_AWAY = 8` vs home 15) until 5 away nights accumulate.
-- **`api.py`** handles Sunsynk cloud API calls: RSA-encrypted login (fetches public key → encrypts password with PKCS1v15), bearer token management with automatic re-login on 401, and posting to the `/api/v1/plant/{plant_id}/income` endpoint. Uses the `cryptography` library (not declared in `manifest.json` because it is bundled with Home Assistant itself).
-- **`flux_helpers.py`** builds and mutates the `fluxProducts` payload. The two Flux windows are always index 0 (Flux 1, import, `direction=1`) and index 1 (Flux 2, export, `direction=0`). `apply_flux_override()` deep-copies and patches these; `build_payload()` assembles the full income POST body. `merge_entry_data()` is the canonical way to read config — it merges `entry.data` + `entry.options` with options winning, and fills defaults for `charges` and `fluxProducts` if absent.
-
-### Config entry split
-
-Credentials (`username`, `password`, `plant_id`, `inverter_serial`) live in `entry.data`. All other settings (`charges`, `flux_products`, thresholds, forecast entity, etc.) may live in either `entry.data` (initial setup) or `entry.options` (reconfiguration). Always call `merge_entry_data(dict(entry.data), dict(entry.options))` to read config — never read `entry.data` or `entry.options` directly in logic code.
-
-### Key ID distinction
-
-`plant_id` — numeric Sunsynk API plant/station ID used in all API calls.  
-`inverter_serial` — alphanumeric serial used to build SolarSynkV3 sensor entity IDs like `sensor.solarsynkv3_{inverter_serial}_battery_soc`.  
-These are different values and must never be swapped.
-
-### Options flow
-
-The options flow is multi-step: `init` → `charges_1` (import tariff rows 1–4) → `charges_2` (export tariff rows 5–8) → `flux` (baseline Flux windows). State is accumulated in `self._working` dict across steps before being saved on the final step.
-
-### Entities
-
-All entities extend `CoordinatorEntity` and read state from `coordinator.state` in their property methods. They receive updates only when the coordinator calls `async_set_updated_data`. No polling interval is set on the coordinator — updates are entirely event-driven.
-
-- **Sensors** (`sensor.py`): expose `OptimizerState` fields; `import_plan_end` and `flux2_action` have rich `extra_state_attributes` exposing the full plan/action dicts. Four dedicated adaptive learning sensors read from `last_import_plan`: `forecast_correction`, `overnight_drain_adjustment`, `evening_soc_adjustment`, `effective_charge_rate` — each exposes `days_collected`, `days_required`, and `active` in `extra_state_attributes`. Thresholds are defined in `_ADAPTIVE_THRESHOLDS`. The `consumption` sensor (native value `"{day_load_kwh} kWh today"`) merges `last_morning_state`, `last_day_actuals`, `last_peak_window_usage`, `last_daily_cost`, and `last_year_to_date_cost` into one `extra_state_attributes` dict for the dashboard's Consumption section — field names don't collide (`peak_*`/`year_to_date_*` are distinctly prefixed) so it's a plain merge, except `last_daily_cost`'s own `date` is exposed separately as `daily_cost_date` since it's inherently a day behind the others (see below). `last_day_actuals` exists solely to give this sensor something to read; before v1.0.10b3 the 22:00 day-actuals capture was logged/notified but never persisted to `OptimizerState`.
-
-  **Octopus Energy cost link (optional, v1.0.11+).** Three free-text config fields — `CONF_OCTOPUS_IMPORT_COST_SENSOR`, `CONF_OCTOPUS_EXPORT_INCOME_SENSOR`, `CONF_OCTOPUS_GAS_COST_SENSOR` — point at the separately-installed Home Assistant Octopus Energy integration's "previous accumulative cost" sensors (blank = disabled, same graceful-degrade shape as `CONF_HOURLY_FORECAST_SENSOR`; see `optimizer._read_octopus_previous_day_cost`). Those sensors reflect a *prior* calendar day. Settlement timing varies by account — some settle a few hours after midnight, others (observed: a Flux-tariff account whose smart-meter DCC data doesn't land until late the following evening) not until almost 22:00 the next day — so `optimizer._async_capture_daily_cost` runs at **both** the 06:00 and 22:00 listeners to catch either case. The three sensors settle independently (gas meters commonly report a day behind electricity; Octopus billing can also lag several days), so `_read_octopus_previous_day_cost` dates **each sensor by its own `last_reset`** (accepted within `_OCTOPUS_CATCH_UP_DAYS = 5`; missing `last_reset` → yesterday; outside the window → skipped, never logged under the wrong date) and returns `{date: {field: value}}`. `daily_cost` is **not** in `_DEDUP_TYPES`: `data_logger.async_merge_daily_cost` fills only still-unset fields of that date's record (scanning from the date's month to now) and appends a complete superseding record when something was added — `_pair_records` keeps the last record per date, and a logged value is never overwritten (pure helper `merge_daily_cost_fields`, unit-tested). `last_daily_cost` is only replaced by a newer date or a fuller copy of the shown date, so an older-day catch-up can't displace it. The same call recomputes a running year-to-date net cost (`OptimizerState.last_year_to_date_cost`) by summing `net_cost_gbp` across the current calendar year's paired days (`data_logger.async_load_paired_days(days=366)`, filtered by year). `net_cost_gbp = import_cost − export_income + gas_cost`, computed in both `_pair_records` and the live capture; it's `None` whenever any of the three inputs is missing, rather than silently treating a missing sensor as zero cost.
-- **Buttons** (`button.py`): call `optimizer` methods directly on press. `test_plan` calls `async_run_import_plan(source="test_button", dry_run=True)` — recomputes the full plan and notifies the JSON, but does not push to the inverter, log, or mutate state. Also `choose_best_day`, `reset_baseline`, `install_dashboard` (labelled "Update dashboard"). The old `run_import`/`run_flux2` push buttons were removed — pressing them mid-day pushed a daytime SOC reading to the inverter; the dry-run test replaces them. The `async_run_import_plan` / `async_run_flux2_check` methods still exist for the scheduled listeners.
-- **Binary sensors** (`binary_sensor.py`): `evening_export_disabled` and `monitor_only` (derived from `operation_mode == "monitor"`).
-
-### Dashboard
-
-`dashboard_installer.py` generates a Lovelace YAML file by building a Python dict and serialising it with `json.dumps`. All SolarSynkV3 entity IDs are constructed from `inverter_serial` via the local `s()` helper. The file is written to `{hass.config.config_dir}/sunsynk_optimizer_{entry_id}.yaml` via `async_add_executor_job` (to avoid blocking the event loop), and a persistent HA notification shows the `configuration.yaml` snippet to add.
-
-### Operation modes
-
-`auto` — full optimizer behaviour, API writes enabled.  
-`monitor` — all three main logic paths (`async_run_import_plan`, `async_run_flux2_check`, `async_choose_best_full_charge_day`) return early without making API calls.
-
-### Scoring logic (full-charge day)
-
-Scores Monday–Friday from weather forecast: base score `100 - cloud_coverage - (rain_prob * 0.7)`, adjusted by condition string (+25 sunny/clear, +10 partly cloudy, −10 cloudy/fog, −25 rain/snow), temperature (±3), and day-of-week penalty (Thursday −5, Friday −15). Highest score wins.
-
-### Import plan logic
-
-Runs nightly at 01:55. Begins with a pre-flight check: battery SOC and forecast sensor must be available. If either is unavailable the plan is skipped and `last_error` is set. The forecast sensor has a fallback: if unavailable but a prior `raw_forecast_kwh` exists in `last_import_plan`, it is reused (with no correction factor applied).
-
-Before calculating targets, four adaptive corrections are fetched from `data_logger.py` (each returns a neutral value until enough history exists):
-
-1. **Forecast correction factor** — raw forecast kWh × the median actual/forecast ratio from the last 30 days (see `compute_forecast_correction` above).
-2. **Overnight drain adjustment** — p75 extra % added to `target_soc` to compensate for battery drain between charge end and 06:00, measured only on real-charge nights.
-3. **Evening SOC adjustment** — ±5% nudge to `target_soc` based on whether the battery has been ending the day too full or too empty (high-solar days excluded from the nudge direction but counted toward the progress threshold).
-4. **Effective charge rate** — calibrated (or last-known, see above) kW rate used to size the Flux 1 window precisely.
-
-**`low_solar_forecast_kwh` = min(raw, corrected).** All low-solar decisions (the `< 7 kWh` target override, the full-charge-day bridge-vs-grid choice, and the extend-window-to-05:00 rule) key on this pessimistic value, not the corrected forecast. The learned uplift is derived mostly from good days; on a genuinely bad day the raw forecast is already right, and multiplying it above 7 kWh would skip the max-import override and leave the battery short. If either forecast says a bad day, believe it.
-
-**SOC target selection:**
-- **Full charge day** (selected weekly best day): if `low_solar_forecast_kwh ≥ 7` and `sun.sun` is available, uses solar bridge target (same as regular days) so solar charges the battery to 100% during the day for free. Falls back to grid-to-100% if forecast is poor.
-- **Low solar (`low_solar_forecast_kwh < 7`)**: winter_like → 100%, other bands → 95%.
-- **Solar bridge** (normal path when `sun.sun` available): `target = 20 + (hours_to_solar × avg_consumption / battery_capacity) × 100`, clamped 30–100%.
-- **Band fallback** (no `sun.sun`): summer_like → 80%, shoulder → 85%, winter_like → 95%.
-
-Drain and evening-nudge adjustments are applied whenever `target_soc < 100` (covers both regular nights and full-charge-day solar bridge plans). Skipped when target is already 100%.
-
-Import window (Flux 1) is physics-based: `minutes = (energy_needed_kwh / used_charge_rate) × 60`, rounded up to the next 15-minute slot, clamped 02:15–05:00. Extended to 05:00 when `low_solar_forecast_kwh < 7`. `used_charge_rate = min(config charge rate, effective_charge_rate)`, then multiplied by a battery-temperature deration factor.
-
-All API pushes go through `_async_post_with_status()` which returns a bool. On failure the notification title switches to a "⚠️ Sunsynk: … NOT applied" variant. On a successful push the import plan clears any stale `last_error`. The plan state dict always includes `api_ok`, `source`, `forecast_fallback`, `low_solar_forecast_kwh`, and `charge_rate_from_cache` fields. Notification titles follow a `🔋 Sunsynk: <sentence case>` convention.
-
-### Cost-aware export-disable threshold (v1.0.11 Part 3, shadow mode)
-
-`async_run_flux2_check` computes two independent triggers for the 16:00–19:00 export-disable decision: `watt_trigger` (the original `grid_pac > CONF_EXPORT_DISABLE_THRESHOLD` check) and `cost_trigger` (`(grid_pac_kw × peak_import_price_pence_per_kwh) > CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR`, using `flux_helpers.peak_import_price_pence_per_kwh()` against the user's own configured `charges` — a pure helper, unit-tested without HA). `cost_trigger` is `None` outside the window or when `charges` has no matching import row for it — never coerced to a false 0p price. `CONF_COST_AWARE_EXPORT_SHADOW_MODE` (default `True`) gates which trigger actually drives the real decision: shadow mode on → `watt_trigger` always wins (zero behaviour change from pre-Part-3); shadow mode off → `cost_trigger` wins, falling back to `watt_trigger` if `cost_trigger` is `None`. Every check where the two triggers disagree is tallied on `self._shadow_export_stats` (unpersisted, same transient-state pattern as `_peak_window_start`) via `_tally_shadow_export_divergence` — `estimated_gbp_delta` only accumulates for the "cost says pause, watt didn't" direction, since the reverse carries no cost risk (export was already disabled). `_async_send_weekly_cost_summary` (Part 2) reads and resets this tally each Sunday, folding it into the weekly digest as `cost_aware_export_shadow_tally` so divergence is visible without a dedicated sensor. Default cost threshold (`DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR = 58.32`) is back-computed from the default Watt threshold (1.5 kW) × the default 16:00–19:00 import price (38.88 p/kWh), so a fresh upgrade stays behaviour-neutral even before the user touches the new config fields.
-
-### AI Task weekly insight (v1.0.11 Part 4, optional, off by default)
-
-A third guarded sub-call from the Sunday 18:00 listener, `_async_send_ai_weekly_insight`, gated by `CONF_ENABLE_AI_WEEKLY_INSIGHT` (default `False`). Graceful-degrade in two layers: the config toggle, then a runtime check (`hass.services.has_service("ai_task", "generate_data")` and `hass.states.async_entity_ids("ai_task")` non-empty) — an HA instance with no AI Task provider configured is a silent no-op, not an error. When both checks pass it builds a compact context string (the user's `charges` price bands, the same 7-day cost/load/solar sums as the weekly cost summary) and calls `ai_task.generate_data` with freeform `instructions` (no `structure` — the response is meant to be a short plain-English paragraph, not structured data) via `hass.services.async_call(..., blocking=True, return_response=True)`. No `entity_id` is passed, so HA routes it to the user's configured preferred AI Task entity. The generated insight is sent through `async_notify` with **no `target` override**, so it goes to the main `CONF_NOTIFY_TARGET` — deliberately separate from the JSON debug stream (`CONF_DATA_REPORT_TARGET`) the weekly cost summary and shadow-mode tally use, since a generated narrative doesn't belong alongside machine-readable lines.
-
-## Code Output & Efficiency Directives
-
-- Output only modified functions or specific blocks; never rewrite entire files unless fundamentally restructuring them.
-- Do not echo back code, errors, or logs provided in the prompt.
-- Omit boilerplate, import statements, and setup code unless they are being modified.
-- Provide code edits directly without introductory or concluding explanations.
-- Workflow Requirement: Whenever a complex task is completed or before starting a completely new substantive task in this session, explicitly remind me to run the `/compact` command to compress the chat history.
+- Output only modified functions or blocks; no echoing code/logs/errors, no boilerplate, no intro/outro around edits.
+- Don't re-derive established facts or re-open locked decisions (`docs/plans/README.md`).
+- Remind the user to run `/compact` after a complex task or before a new substantive one.
+- At every stop (phase merged and verified, or "what's left"): show **Remaining phases** — table `Phase | Status | Size / tokens` in index order, not-done rows only (all rows, titled **Phase status**, only when asked). Status ∈ "Planned, not built" / "In progress" / "On hold" / "Done, merged (<sha>, PR #N)" / "Superseded by …". Size bands: XS <~30k, S ~15-50k, M ~40-90k, L ~90-175k, XL 250k+; estimate for not-built, actual for done. Then: planned build order (one sentence, if any); one line of out-of-plan open items; tokens remaining in the context window; ask which phase next; remind `/compact`. Stop — don't start the next phase until told.
