@@ -2,7 +2,7 @@
 
 ## Context
 
-Sunsynk HA Optimizer is on the 1.0.11 beta line (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight). Latest prerelease: 1.0.11b11. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
+Sunsynk HA Optimizer is on the 1.0.11 beta line (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight). Latest prerelease: 1.0.11b12. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
 
 ## Phase status
 
