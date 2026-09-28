@@ -28,7 +28,7 @@ jobs:
           fi
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
-            --target "main" \
+            --target "${{ github.sha }}" \
             --title "$TAG" \
             $NOTES_FLAG \
             $PRERELEASE_FLAG
