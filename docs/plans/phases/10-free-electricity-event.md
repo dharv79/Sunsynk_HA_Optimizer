@@ -1,6 +1,11 @@
 # Phase 10 — Free electricity event (sell before, refill during)
 
-**Status:** Planned, not built. **Size:** M, ~60-90k est.
+**Status:** In progress. **Size:** M, ~60-90k est.
+
+## Progress
+
+- `plan_free_event` (planner, `planning.py`, unit-tested) — done, merged (a7fb3ee, PR #23).
+- Coordinator state, config options, execution listeners, entities/dashboard, Octopus auto-detection, notifications, logging, docs — not started.
 
 ## Scope
 
