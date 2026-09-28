@@ -17,7 +17,7 @@ Sunsynk HA Optimizer is on the 1.0.11 beta line (Octopus cost link, weekly diges
 | 7. Gas cost per-sensor dating fix (1.0.11b9) | Done, merged (2eb679c, PR #17) | S, actual not recorded |
 | 8. Weekly digest covers a full 7 days | Done, merged (6f45de0, PR #19) | XS, ~15k actual |
 | 9. Cost-aware export go-live decision | Planned, not built | S, ~20-40k |
-| 10. Free electricity event (sell before, refill during) | In progress — planner done (a7fb3ee, PR #23); manual entry built, not yet merged | M, ~60-90k |
+| 10. Free electricity event (sell before, refill during) | In progress — planner done (a7fb3ee, PR #23); manual entry done and merged (cbee324, PR #25; in 1.0.11b13); Octopus auto-detect not started | M, ~60-90k |
 
 Token actuals were not metered before this index existed; record them from phase 8 on.
 
