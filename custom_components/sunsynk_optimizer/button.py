@@ -33,6 +33,7 @@ async def async_setup_entry(
             SunsynkOptimizerButton(coordinator, entry, "test_plan", "Test plan"),
             SunsynkOptimizerButton(coordinator, entry, "reset_baseline", "Reset to baseline"),
             SunsynkOptimizerButton(coordinator, entry, "install_dashboard", "Update dashboard"),
+            SunsynkOptimizerButton(coordinator, entry, "cancel_free_event", "Cancel free event"),
         ]
     )
 
@@ -57,3 +58,5 @@ class SunsynkOptimizerButton(CoordinatorEntity, ButtonEntity):
             await self.coordinator.optimizer.async_reset_flux_baseline()
         elif self._key == "install_dashboard":
             await async_install_dashboard(self.coordinator.hass, self._entry)
+        elif self._key == "cancel_free_event":
+            await self.coordinator.optimizer.async_cancel_free_event()

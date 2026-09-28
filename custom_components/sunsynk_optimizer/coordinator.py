@@ -75,6 +75,15 @@ class OptimizerState:
     # Running year-to-date net cost (electricity + gas), recomputed daily
     # alongside last_daily_cost from the full paired-day history.
     last_year_to_date_cost: dict[str, Any] = field(default_factory=dict)
+    # Free electricity event (phase 10): source, times, floor, expected kWh and
+    # phase (scheduled / selling / charging / done / cancelled). Persisted so a
+    # restart mid-event resumes correctly — see SunsynkOptimizer._arm_free_event_timers.
+    free_event: dict[str, Any] = field(default_factory=dict)
+    # Pending manual start/end entered via the dashboard datetime entities, held
+    # here (not just on the entities) so a restart doesn't lose a not-yet-paired
+    # value. Cleared once the event finishes or is cancelled.
+    free_event_manual_start: str | None = None
+    free_event_manual_end: str | None = None
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

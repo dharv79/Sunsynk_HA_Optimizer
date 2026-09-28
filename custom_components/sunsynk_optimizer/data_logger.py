@@ -212,6 +212,15 @@ class DataLogger:
             )
         )
 
+    async def async_log_free_event(self, event: dict[str, Any]) -> None:
+        """Log a free-electricity-event lifecycle point (scheduled / done / cancelled).
+
+        Tagged only for now — not read back by any adaptive learning; filter it
+        out of the overnight-drain/evening-nudge history later if it turns out
+        to skew results (see phases/10-free-electricity-event.md).
+        """
+        await self._async_append(_record("free_event", **event))
+
     # ------------------------------------------------------------------ #
     # History analysis                                                     #
     # ------------------------------------------------------------------ #

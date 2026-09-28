@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -39,6 +39,8 @@ from .const import (
     CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_FLUX_PRODUCTS,
+    CONF_FREE_EVENT_CHARGE_RATE_KW,
+    CONF_FREE_EVENT_EXPORT_RATE_KW,
     CONF_INVERTER_SERIAL,
     CONF_NOTIFY_SERVICE,
     CONF_NOTIFY_TARGET,
@@ -76,6 +78,7 @@ from .planning import (
     forecast_band,
     minutes_to_hhmm,
     net_cost_gbp,
+    plan_free_event,
     resolve_used_charge_rate,
     score_full_charge_day,
     select_target_soc,
@@ -120,6 +123,10 @@ class SunsynkOptimizer:
         # _async_send_weekly_cost_summary, so a restart just loses a partial
         # week's tally rather than corrupting it.
         self._shadow_export_stats: dict[str, float] = {"divergent_checks": 0, "estimated_gbp_delta": 0.0}
+        # Free electricity event (phase 10) point-in-time callback handles. Not
+        # persisted — restart resumption re-arms them from coordinator.state.free_event
+        # via _arm_free_event_timers, same tradeoff as pending_full_trim_cancel above.
+        self._free_event_unsubs: list[Any] = []
         self.data_logger = DataLogger(hass)
 
     @property
@@ -190,10 +197,14 @@ class SunsynkOptimizer:
         self.coordinator.update_state(operation_mode=self.operation_mode)
         self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
 
+        if self._free_event_active():
+            self._arm_free_event_timers(self.coordinator.state.free_event)
+
     async def async_shutdown(self) -> None:
         for unsub in self.unsubs:
             unsub()
         self.unsubs.clear()
+        self._clear_free_event_timers()
         if self.pending_full_trim_cancel:
             self.pending_full_trim_cancel()
             self.pending_full_trim_cancel = None
@@ -655,7 +666,11 @@ class SunsynkOptimizer:
             "flux_1": {"startTime": "02:00", "endTime": flux1_end, "targetSoc": target_soc},
             "flux_2": {"startTime": "16:00", "endTime": "16:15", "targetSoc": 85},
         }
-        api_ok = None if dry_run else await self.async_push_flux_override(payload)
+        # A free event holds Flux 1/2 for its own sell/refill windows; the plan
+        # is still computed and logged so it's ready to push the moment the
+        # event ends (_async_restore_normal_plan reads it back).
+        held_by_free_event = not dry_run and self._free_event_active()
+        api_ok = None if (dry_run or held_by_free_event) else await self.async_push_flux_override(payload)
 
         plan_state = {
             "date": now.date().isoformat(),
@@ -687,6 +702,7 @@ class SunsynkOptimizer:
             "payload": payload,
             "source": source,
             "api_ok": api_ok,
+            "held_by_free_event": held_by_free_event,
             "forecast_fallback": forecast_fallback,
             "is_weekend": is_weekend,
             "away": away,
@@ -760,8 +776,12 @@ class SunsynkOptimizer:
             adjustment_parts.append(f"eve {plan['soc_adjustment']:+d}%")
         adjustment_note = f" ({', '.join(adjustment_parts)})" if adjustment_parts else ""
         api_ok = plan["api_ok"]
-        title = "🔋 Sunsynk: import plan set" if api_ok else "⚠️ Sunsynk: import plan NOT applied"
-        api_note = "" if api_ok else " Inverter NOT updated; will retry next cycle."
+        if plan.get("held_by_free_event"):
+            title = "🔋 Sunsynk: import plan computed (held for free event)"
+            api_note = " A free event holds the Flux slots; this plan pushes when it ends."
+        else:
+            title = "🔋 Sunsynk: import plan set" if api_ok else "⚠️ Sunsynk: import plan NOT applied"
+            api_note = "" if api_ok else " Inverter NOT updated; will retry next cycle."
         full_day_note = " — full-charge day" if plan["is_full_day"] else ""
         away_note = " (away)" if plan["away"] else ""
         # "summer_like" → "summer-like": keep internal band names out of user text.
@@ -784,6 +804,13 @@ class SunsynkOptimizer:
             self.coordinator.update_state(
                 operation_mode="monitor",
                 last_flux2_action={"action": "monitor_only", "notified": False, "source": source},
+            )
+            return
+
+        if self._free_event_active():
+            self.coordinator.update_state(
+                operation_mode=self.operation_mode,
+                last_flux2_action={"action": "paused_free_event", "notified": False, "source": source},
             )
             return
 
@@ -987,6 +1014,9 @@ class SunsynkOptimizer:
         keeps the pause and the nightly 01:55 plan re-plans normally.
         """
         now = dt_util.now()
+        if self._free_event_active():
+            _LOGGER.info("Skipping initial import plan — free electricity event active")
+            return
         if self.coordinator.state.evening_export_disabled and 16 <= now.hour < 19:
             _LOGGER.info("Skipping initial import plan — evening export pause active")
             return
@@ -1198,6 +1228,8 @@ class SunsynkOptimizer:
         """Handle SOC threshold-based reactions."""
         new_state = event.data.get("new_state")
         if new_state is None:
+            return
+        if self._free_event_active():
             return
 
         try:
@@ -1421,3 +1453,208 @@ class SunsynkOptimizer:
                 lines,
                 target=data_report_target,
             )
+
+    # ------------------------------------------------------------------ #
+    # Free electricity event (phase 10 — manual entry)                     #
+    # ------------------------------------------------------------------ #
+
+    def _free_event_active(self) -> bool:
+        """True while a free event holds the Flux slots (scheduled/selling/charging)."""
+        return self.coordinator.state.free_event.get("phase") in ("scheduled", "selling", "charging")
+
+    def _clear_free_event_timers(self) -> None:
+        for unsub in self._free_event_unsubs:
+            unsub()
+        self._free_event_unsubs = []
+
+    def _arm_free_event_timers(self, event: dict[str, Any]) -> None:
+        """(Re-)arm the point-in-time callbacks for a scheduled/in-progress free event.
+
+        Called right after scheduling and on startup to resume an event that
+        survived an HA restart — each callback fires immediately (0-second
+        delay) if its trigger time has already passed.
+        """
+        self._clear_free_event_timers()
+        now = dt_util.now()
+        phase = event.get("phase")
+        free_start = dt_util.as_local(dt_util.parse_datetime(event["free_start"]))
+        free_end = dt_util.as_local(dt_util.parse_datetime(event["free_end"]))
+        sell_start = dt_util.as_local(dt_util.parse_datetime(event["sell_start"]))
+
+        if phase == "scheduled" and not event.get("skip_sell"):
+            self._free_event_unsubs.append(
+                async_call_later(self.hass, max(0, (sell_start - now).total_seconds()), self._async_free_event_sell_start)
+            )
+        if phase in ("scheduled", "selling"):
+            self._free_event_unsubs.append(
+                async_call_later(self.hass, max(0, (free_start - now).total_seconds()), self._async_free_event_free_start)
+            )
+        if phase in ("scheduled", "selling", "charging"):
+            self._free_event_unsubs.append(
+                async_call_later(self.hass, max(0, (free_end - now).total_seconds()), self._async_free_event_free_end)
+            )
+
+    async def async_try_schedule_manual_free_event(self) -> None:
+        """Called after either manual start/end datetime entity is set.
+
+        Schedules the event once both are present and valid; otherwise waits
+        for the other one (or, if invalid, notifies and leaves both as-is for
+        the user to correct).
+        """
+        state = self.coordinator.state
+        if not state.free_event_manual_start or not state.free_event_manual_end:
+            return
+        free_start = dt_util.as_local(dt_util.parse_datetime(state.free_event_manual_start))
+        free_end = dt_util.as_local(dt_util.parse_datetime(state.free_event_manual_end))
+        if free_end <= free_start or free_start <= dt_util.now():
+            await self.async_notify(
+                "⚠️ Sunsynk: free event NOT scheduled",
+                "Free event end must be after start, and start must be in the future.",
+            )
+            return
+        await self.async_schedule_free_event(free_start, free_end, source="manual")
+
+    async def async_schedule_free_event(self, free_start: datetime, free_end: datetime, source: str) -> bool:
+        """Plan and arm a free-electricity event. Returns True if it was scheduled."""
+        if self._free_event_active():
+            await self.async_notify(
+                "⚠️ Sunsynk: free event NOT scheduled",
+                "A free event is already scheduled or in progress. Cancel it first.",
+            )
+            return False
+
+        soc = self._essential_state(self.battery_soc_entity)
+        if soc is None:
+            await self.async_notify(
+                "⚠️ Sunsynk: free event NOT scheduled",
+                f"Battery SOC entity {self.battery_soc_entity} unavailable.",
+            )
+            return False
+
+        cfg = self.cfg
+        battery_capacity_kwh = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        default_rate = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
+        charge_rate_kw = float(cfg.get(CONF_FREE_EVENT_CHARGE_RATE_KW) or default_rate)
+        export_rate_kw = float(cfg.get(CONF_FREE_EVENT_EXPORT_RATE_KW) or default_rate)
+
+        result = plan_free_event(free_start, free_end, soc, battery_capacity_kwh, charge_rate_kw, export_rate_kw)
+
+        event = {
+            "source": source,
+            "free_start": free_start.isoformat(),
+            "free_end": free_end.isoformat(),
+            "sell_start": result.sell_start.isoformat(),
+            "sell_end": result.sell_end.isoformat(),
+            "sell_floor_soc": result.sell_floor_soc,
+            "expected_export_kwh": result.expected_export_kwh,
+            "expected_refill_kwh": result.expected_refill_kwh,
+            "skip_sell": result.skip_sell,
+            "charge_rate_kw": charge_rate_kw,
+            "export_rate_kw": export_rate_kw,
+            "phase": "scheduled",
+        }
+        self.coordinator.update_state(free_event=event)
+        self._arm_free_event_timers(event)
+
+        skip_note = " SOC is already at/below the floor, so the sell is skipped." if result.skip_sell else ""
+        await self.async_notify(
+            "🔋 Sunsynk: free event scheduled",
+            (
+                f"Free period {free_start.strftime('%Y-%m-%d %H:%M')} → {free_end.strftime('%H:%M')} ({source}). "
+                f"Sell floor {result.sell_floor_soc}%, expected export {result.expected_export_kwh} kWh, "
+                f"expected refill {result.expected_refill_kwh} kWh.{skip_note}"
+            ),
+        )
+        await self.data_logger.async_log_free_event({"phase": "scheduled", **event})
+        return True
+
+    async def _async_free_event_sell_start(self, _now) -> None:
+        await self._guarded(self._async_do_free_event_sell_start, "Free event sell start")
+
+    async def _async_do_free_event_sell_start(self) -> None:
+        event = dict(self.coordinator.state.free_event)
+        if event.get("phase") != "scheduled":
+            return
+        free_start = dt_util.as_local(dt_util.parse_datetime(event["free_start"]))
+        payload = {
+            "flux_2": {
+                "startTime": dt_util.now().strftime("%H:%M"),
+                "endTime": free_start.strftime("%H:%M"),
+                "targetSoc": event["sell_floor_soc"],
+            }
+        }
+        api_ok = await self.async_push_flux_override(payload)
+        event["phase"] = "selling"
+        self.coordinator.update_state(free_event=event)
+        title = "🔋 Sunsynk: free event sell started" if api_ok else "⚠️ Sunsynk: free event sell NOT applied"
+        await self.async_notify(
+            title, f"Selling down to {event['sell_floor_soc']}% ahead of the free period.{_api_note(api_ok)}"
+        )
+
+    async def _async_free_event_free_start(self, _now) -> None:
+        await self._guarded(self._async_do_free_event_free_start, "Free event free start")
+
+    async def _async_do_free_event_free_start(self) -> None:
+        event = dict(self.coordinator.state.free_event)
+        if event.get("phase") not in ("scheduled", "selling"):
+            return
+        free_end = dt_util.as_local(dt_util.parse_datetime(event["free_end"]))
+        payload = {
+            "flux_1": {
+                "startTime": dt_util.now().strftime("%H:%M"),
+                "endTime": free_end.strftime("%H:%M"),
+                "targetSoc": 100,
+            }
+        }
+        api_ok = await self.async_push_flux_override(payload)
+        event["phase"] = "charging"
+        self.coordinator.update_state(free_event=event)
+        title = "🔋 Sunsynk: free event started" if api_ok else "⚠️ Sunsynk: free event NOT applied"
+        await self.async_notify(title, f"Free period active — charging to 100%.{_api_note(api_ok)}")
+
+    async def _async_free_event_free_end(self, _now) -> None:
+        await self._guarded(self._async_do_free_event_free_end, "Free event free end")
+
+    async def _async_do_free_event_free_end(self) -> None:
+        event = dict(self.coordinator.state.free_event)
+        if event.get("phase") not in ("scheduled", "selling", "charging"):
+            return
+        await self._async_restore_normal_plan()
+        event["phase"] = "done"
+        self._clear_free_event_timers()
+        self.coordinator.update_state(
+            free_event=event, free_event_manual_start=None, free_event_manual_end=None
+        )
+        await self.data_logger.async_log_free_event({"phase": "done", **event})
+        await self.async_notify(
+            "🔋 Sunsynk: free event finished",
+            (
+                f"Free period ended. Sell floor {event['sell_floor_soc']}%, "
+                f"expected export {event['expected_export_kwh']} kWh, "
+                f"expected refill {event['expected_refill_kwh']} kWh. Normal plan restored."
+            ),
+        )
+
+    async def _async_restore_normal_plan(self) -> None:
+        """Re-push the latest computed Flux 1 plan plus the standard Flux 2 slot."""
+        plan = self.coordinator.state.last_import_plan
+        payload: dict[str, Any] = {"flux_2": {"startTime": "16:00", "endTime": "16:15", "targetSoc": 85}}
+        if isinstance(plan, dict) and isinstance(plan.get("payload"), dict) and plan["payload"].get("flux_1"):
+            payload["flux_1"] = plan["payload"]["flux_1"]
+        await self.async_push_flux_override(payload)
+
+    async def async_cancel_free_event(self) -> None:
+        """Cancel a scheduled or in-progress free event (the dashboard 'Cancel free event' button)."""
+        event = dict(self.coordinator.state.free_event)
+        if event.get("phase") not in ("scheduled", "selling", "charging"):
+            return
+        was_holding_slots = event.get("phase") in ("selling", "charging")
+        self._clear_free_event_timers()
+        event["phase"] = "cancelled"
+        self.coordinator.update_state(
+            free_event=event, free_event_manual_start=None, free_event_manual_end=None
+        )
+        if was_holding_slots:
+            await self._async_restore_normal_plan()
+        await self.data_logger.async_log_free_event({"phase": "cancelled", **event})
+        await self.async_notify("🔋 Sunsynk: free event cancelled", "The free electricity event was cancelled.")
