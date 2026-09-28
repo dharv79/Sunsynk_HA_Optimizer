@@ -5,7 +5,8 @@
 ## Progress
 
 - `plan_free_event` (planner, `planning.py`, unit-tested) — done, merged (a7fb3ee, PR #23).
-- Coordinator state, config options, execution listeners, entities/dashboard, Octopus auto-detection, notifications, logging, docs — not started.
+- Manual entry path — done, not yet merged: coordinator state (`free_event`, manual start/end), config options (`free_event_charge_rate_kw`/`free_event_export_rate_kw`), `datetime.py` start/end entities, `button.cancel_free_event`, `sensor.free_event`, execution listeners (sell/free start/end, restart-safe timer resume), do-not-break rule 7 extension, `data_logger.async_log_free_event`, dashboard card, `docs/architecture/free-electricity.md`.
+- Octopus auto-detection — not started, still blocked on a live attribute sample of `calendar.octopus_energy_..._greener_nights` from the user's HA (state currently seen as `unavailable`, no session live).
 
 ## Scope
 
@@ -54,4 +55,4 @@ When a free electricity period is known, sell battery energy just before it usin
 
 ## Open item for build
 
-Get a sample of the Octopus free-electricity entity's state and attributes from your HA before coding the detector.
+Get a sample of the Octopus free-electricity entity's state and attributes from your HA before coding the detector (manual entry does not need this — it's built and doesn't depend on it).

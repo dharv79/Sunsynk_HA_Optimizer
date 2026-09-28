@@ -35,6 +35,8 @@ from .const import (
     CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_FLUX_PRODUCTS,
+    CONF_FREE_EVENT_CHARGE_RATE_KW,
+    CONF_FREE_EVENT_EXPORT_RATE_KW,
     CONF_INVEST,
     CONF_INVERTER_SERIAL,
     CONF_NOTIFY_SERVICE,
@@ -150,6 +152,18 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 selector.NumberSelectorConfig(min=1, max=50, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWh")
             ),
             vol.Required(CONF_CHARGE_RATE, default=values.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0.5, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
+            ),
+            vol.Optional(
+                CONF_FREE_EVENT_CHARGE_RATE_KW,
+                default=values.get(CONF_FREE_EVENT_CHARGE_RATE_KW) or values.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0.5, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
+            ),
+            vol.Optional(
+                CONF_FREE_EVENT_EXPORT_RATE_KW,
+                default=values.get(CONF_FREE_EVENT_EXPORT_RATE_KW) or values.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE),
+            ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
             vol.Required(CONF_AVG_CONSUMPTION_KW, default=values.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW)): selector.NumberSelector(

@@ -73,6 +73,7 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "evening_soc_adjustment", "Evening SOC adjustment", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
+            SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
         ]
     )
 
@@ -117,6 +118,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         if self._sensor_key == "consumption":
             load = _as_dict(state.last_day_actuals).get("day_load_kwh")
             return f"{load} kWh today" if load is not None else None
+
+        if self._sensor_key == "free_event":
+            return _as_dict(state.free_event).get("phase") or "none"
 
         if self._sensor_key == "import_plan_end":
             plan = state.last_import_plan
@@ -178,6 +182,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 return {"raw": action}
         if self._sensor_key == "selected_full_charge_day":
             return {"scores": state.last_full_charge_scores}
+        if self._sensor_key == "free_event":
+            return _as_dict(state.free_event)
         if self._sensor_key == "last_error":
             attrs: dict[str, Any] = {}
             if state.last_api_result:

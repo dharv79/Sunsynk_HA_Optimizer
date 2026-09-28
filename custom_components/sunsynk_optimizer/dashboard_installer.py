@@ -422,6 +422,46 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                     {
                         "type": "grid",
                         "cards": [
+                            {"type": "heading", "heading": "Free electricity event", "heading_style": "title"},
+                            {
+                                "type": "entities",
+                                "title": "Manual entry",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "datetime.free_event_start", "name": "Free event start"},
+                                    {"entity": "datetime.free_event_end", "name": "Free event end"},
+                                ],
+                            },
+                            {
+                                "type": "button",
+                                "name": "Cancel free event",
+                                "icon": "mdi:flash-off",
+                                "tap_action": {
+                                    "action": "call-service",
+                                    "service": "button.press",
+                                    "target": {"entity_id": "button.cancel_free_event"},
+                                },
+                            },
+                            {
+                                "type": "entities",
+                                "title": "Status",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.free_event", "name": "Phase"},
+                                    {"entity": "sensor.free_event", "type": "attribute", "attribute": "free_start", "name": "Free start"},
+                                    {"entity": "sensor.free_event", "type": "attribute", "attribute": "free_end", "name": "Free end"},
+                                    {"entity": "sensor.free_event", "type": "attribute", "attribute": "sell_start", "name": "Sell start"},
+                                    {"entity": "sensor.free_event", "type": "attribute", "attribute": "sell_floor_soc", "name": "Sell floor SOC (%)"},
+                                    {"entity": "sensor.free_event", "type": "attribute", "attribute": "expected_export_kwh", "name": "Expected export (kWh)"},
+                                    {"entity": "sensor.free_event", "type": "attribute", "attribute": "expected_refill_kwh", "name": "Expected refill (kWh)"},
+                                    {"entity": "sensor.free_event", "type": "attribute", "attribute": "skip_sell", "name": "Sell skipped"},
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "type": "grid",
+                        "cards": [
                             {"type": "heading", "heading": "Consumption", "heading_style": "title"},
                             {
                                 "type": "entities",

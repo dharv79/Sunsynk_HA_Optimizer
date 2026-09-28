@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 DOMAIN = "sunsynk_optimizer"
-PLATFORMS = ["sensor", "button", "binary_sensor", "switch"]
+PLATFORMS = ["sensor", "button", "binary_sensor", "switch", "datetime"]
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}_state"
 
@@ -91,6 +91,11 @@ DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE = True
 # in this component — checked at call time, not assumed from this toggle alone.
 CONF_ENABLE_AI_WEEKLY_INSIGHT = "enable_ai_weekly_insight"
 DEFAULT_ENABLE_AI_WEEKLY_INSIGHT = False
+
+# Free electricity event (phase 10). Rates default to the configured charge
+# rate (CONF_CHARGE_RATE) when unset — see SunsynkOptimizer.async_schedule_free_event.
+CONF_FREE_EVENT_CHARGE_RATE_KW = "free_event_charge_rate_kw"
+CONF_FREE_EVENT_EXPORT_RATE_KW = "free_event_export_rate_kw"
 
 SERVICE_RECALCULATE_FULL_CHARGE_DAY = "recalculate_full_charge_day"
 SERVICE_RUN_IMPORT_PLAN_NOW = "run_import_plan_now"
