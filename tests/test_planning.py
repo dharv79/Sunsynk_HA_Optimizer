@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 
@@ -156,3 +158,106 @@ def test_days_in_period_keeps_full_week_and_drops_today(planning):
 def test_week_history_covers_oldest_plan_record(planning):
     # Oldest day's 01:55 import_plan is ~7 d 16 h before the Sunday 18:00 digest.
     assert planning.WEEK_HISTORY_DAYS * 24 > 7 * 24 + 16
+
+
+# --------------------------------------------------------------------------- #
+# Free electricity event (phase 10)                                           #
+# --------------------------------------------------------------------------- #
+
+def _free(planning, **overrides):
+    kwargs = dict(
+        free_start=datetime(2026, 9, 28, 13, 0),
+        free_end=datetime(2026, 9, 28, 15, 0),
+        soc=90.0,
+        capacity_kwh=10.0,
+        charge_rate_kw=2.0,
+        export_rate_kw=2.0,
+    )
+    kwargs.update(overrides)
+    return planning.plan_free_event(**kwargs)
+
+
+def test_free_event_floor_maths(planning):
+    # 2h @ 2kW refill = 4kWh = 40% of 10kWh capacity -> floor = 100 - 40 = 60.
+    plan = _free(planning)
+    assert plan.sell_floor_soc == 60
+
+
+def test_free_event_floor_clamped_at_40(planning):
+    # 4h @ 3kW refill = 12kWh, more than capacity -> floor would go below 40, clamped.
+    plan = _free(planning, free_end=datetime(2026, 9, 28, 17, 0), charge_rate_kw=3.0)
+    assert plan.sell_floor_soc == planning.FREE_EVENT_MIN_FLOOR_SOC == 40
+
+
+def test_free_event_sell_window_length(planning):
+    # Floor 60, soc 90 -> sell 3kWh at 2kW export = 1.5h before free_start.
+    plan = _free(planning)
+    assert plan.sell_start == datetime(2026, 9, 28, 11, 30)
+    assert plan.sell_end == datetime(2026, 9, 28, 13, 0)
+    assert plan.expected_export_kwh == pytest.approx(3.0)
+    assert plan.skip_sell is False
+
+
+def test_free_event_sell_window_capped_at_free_period_length(planning):
+    # Floor 60, soc 100 -> needs 4kWh / 2kW = 2h, but free period is only 1h.
+    plan = _free(planning, free_end=datetime(2026, 9, 28, 14, 0), soc=100.0)
+    assert plan.sell_start == datetime(2026, 9, 28, 12, 0)  # capped to 1h, not 2h
+    assert plan.expected_export_kwh == pytest.approx(2.0)  # 1h @ 2kW, not the full 4kWh
+
+
+def test_free_event_skip_sell_when_already_at_or_below_floor(planning):
+    plan = _free(planning, soc=55.0)  # below the 60% floor
+    assert plan.skip_sell is True
+    assert plan.expected_export_kwh == 0.0
+    assert plan.sell_start == plan.sell_end == datetime(2026, 9, 28, 13, 0)
+
+
+def test_free_event_expected_refill_capped_at_headroom(planning):
+    # Floor 60, soc 95 -> sells 3.5kWh down to 60%, leaving 4kWh headroom to 100%,
+    # exactly matching the 2h@2kW refill capacity (no cap needed here).
+    plan = _free(planning, soc=95.0)
+    assert plan.skip_sell is False
+    assert plan.expected_export_kwh == pytest.approx(3.5)
+    assert plan.expected_refill_kwh == pytest.approx(4.0)
+
+
+def test_free_event_refill_capped_by_headroom_when_sell_was_capped(planning):
+    # Export rate (1kW) slower than charge rate (2kW): the sell can't fully reach
+    # the floor within the 1h free period, so SOC at free_start is higher than the
+    # floor -> less headroom to 100% than the raw charge_rate*free_hours refill.
+    plan = _free(
+        planning,
+        free_end=datetime(2026, 9, 28, 14, 0),  # 1h free period
+        soc=100.0,
+        charge_rate_kw=2.0,
+        export_rate_kw=1.0,
+    )
+    assert plan.expected_export_kwh == pytest.approx(1.0)  # capped to 1h @ 1kW, not 2kWh
+    assert plan.expected_refill_kwh == pytest.approx(1.0)  # capped by headroom, not the raw 2kWh
+
+
+def test_free_event_crosses_midnight(planning):
+    plan = _free(
+        planning,
+        free_start=datetime(2026, 9, 28, 23, 0),
+        free_end=datetime(2026, 9, 29, 1, 0),
+        soc=90.0,
+    )
+    # Same 2h/60%-floor shape as the same-day case, just spanning midnight.
+    assert plan.sell_floor_soc == 60
+    assert plan.sell_start == datetime(2026, 9, 28, 21, 30)
+    assert plan.sell_end == datetime(2026, 9, 28, 23, 0)
+
+
+def test_free_event_overlapping_peak_window_is_plain_time_arithmetic(planning):
+    # A free period starting inside 16:00-19:00: the planner has no special-case
+    # for this — "event wins" over the peak window is an execution-level decision
+    # (optimizer.py), not planning maths. This just checks the times still resolve.
+    plan = _free(
+        planning,
+        free_start=datetime(2026, 9, 28, 17, 0),
+        free_end=datetime(2026, 9, 28, 19, 0),
+        soc=90.0,
+    )
+    assert plan.sell_floor_soc == 60
+    assert plan.sell_start == datetime(2026, 9, 28, 15, 30)

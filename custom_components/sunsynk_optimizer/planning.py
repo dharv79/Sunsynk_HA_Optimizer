@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 # Below this (pessimistic) daily forecast the plan switches to max import:
@@ -268,3 +268,67 @@ def sum_field(days: list[dict[str, Any]], key: str) -> float | None:
     """Sum `key` across days that have it, rounded to 2dp; None if no day does."""
     values = [d[key] for d in days if d.get(key) is not None]
     return round(sum(values), 2) if values else None
+
+
+# Never sell the battery below this SOC ahead of a free electricity event,
+# even if the refillable-floor maths would allow it.
+FREE_EVENT_MIN_FLOOR_SOC = 40
+
+
+@dataclass
+class FreeEventPlan:
+    """Outcome of plan_free_event — see phases/10-free-electricity-event.md."""
+
+    sell_start: datetime
+    sell_end: datetime
+    sell_floor_soc: int
+    expected_export_kwh: float
+    expected_refill_kwh: float
+    skip_sell: bool
+
+
+def plan_free_event(
+    free_start: datetime,
+    free_end: datetime,
+    soc: float,
+    capacity_kwh: float,
+    charge_rate_kw: float,
+    export_rate_kw: float,
+) -> FreeEventPlan:
+    """Plan the sell-before / refill-during shape of a free electricity event.
+
+    Sells down to a "refillable floor" — the SOC that free-period charging at
+    charge_rate_kw can top back up to 100% — never below FREE_EVENT_MIN_FLOOR_SOC.
+    The sell window ends at free_start and is only as long as needed to reach the
+    floor at export_rate_kw, capped at the free period's own length. If SOC is
+    already at or below the floor, the sell is skipped (skip_sell=True) but the
+    free-period import side still happens elsewhere.
+    """
+    free_hours = (free_end - free_start).total_seconds() / 3600
+    refill_kwh = charge_rate_kw * free_hours
+    raw_floor = 100 - (refill_kwh / capacity_kwh * 100 if capacity_kwh > 0 else 0)
+    sell_floor_soc = int(max(FREE_EVENT_MIN_FLOOR_SOC, min(100, round(raw_floor))))
+
+    skip_sell = soc <= sell_floor_soc
+    sell_hours = 0.0
+    expected_export_kwh = 0.0
+    if not skip_sell:
+        energy_to_sell_kwh = (soc - sell_floor_soc) / 100 * capacity_kwh
+        if export_rate_kw > 0:
+            sell_hours = min(energy_to_sell_kwh / export_rate_kw, free_hours)
+            expected_export_kwh = round(sell_hours * export_rate_kw, 2)
+
+    soc_at_free_start = soc - (expected_export_kwh / capacity_kwh * 100 if capacity_kwh > 0 else 0)
+    headroom_kwh = max(0.0, capacity_kwh - soc_at_free_start / 100 * capacity_kwh)
+    expected_refill_kwh = round(min(refill_kwh, headroom_kwh), 2)
+
+    sell_start = free_start - timedelta(hours=sell_hours)
+
+    return FreeEventPlan(
+        sell_start=sell_start,
+        sell_end=free_start,
+        sell_floor_soc=sell_floor_soc,
+        expected_export_kwh=expected_export_kwh,
+        expected_refill_kwh=expected_refill_kwh,
+        skip_sell=skip_sell,
+    )
