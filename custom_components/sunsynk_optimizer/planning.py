@@ -332,3 +332,21 @@ def plan_free_event(
         expected_refill_kwh=expected_refill_kwh,
         skip_sell=skip_sell,
     )
+
+
+def manual_free_event_error(changed: str, start: datetime, end: datetime, now: datetime) -> str | None:
+    """Validate a manual free-event pair after one field ('start' or 'end') was just set.
+
+    The two fields are entered one at a time, so the field not being edited may
+    still hold a stale value. Only the just-set field is judged: a start in the
+    past is always an error, but a start at/after a stale end is silently
+    accepted (the end is about to be set); an end at/before start is an error.
+    Returns the message to notify, or None when the pair is fine or incomplete.
+    """
+    if changed == "start":
+        if start <= now:
+            return "Free event start must be in the future."
+        return None
+    if end <= start:
+        return "Free event end must be after start."
+    return None
