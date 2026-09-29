@@ -5,7 +5,7 @@
 ## Progress
 
 - `plan_free_event` (planner, `planning.py`, unit-tested) — done, merged (a7fb3ee, PR #23).
-- Manual entry path — done, merged (cbee324, PR #25; released in 1.0.11b13): coordinator state (`free_event`, manual start/end), config options (`free_event_charge_rate_kw`/`free_event_export_rate_kw`), `datetime.py` start/end entities, `button.cancel_free_event`, `sensor.free_event`, execution listeners (sell/free start/end, restart-safe timer resume), do-not-break rule 7 extension, `data_logger.async_log_free_event`, dashboard card, `docs/architecture/free-electricity.md`.
+- Manual entry path — done, merged (cbee324, PR #25; released in 1.0.11b13; follow-up validation fix fb0d791, PR #27, b14): coordinator state (`free_event`, manual start/end), config options (`free_event_charge_rate_kw`/`free_event_export_rate_kw`), `datetime.py` start/end entities, `button.cancel_free_event`, `sensor.free_event`, execution listeners (sell/free start/end, restart-safe timer resume), do-not-break rule 7 extension, `data_logger.async_log_free_event`, dashboard card, `docs/architecture/free-electricity.md`.
 - Octopus auto-detection — not started, still blocked on a live attribute sample of `calendar.octopus_energy_..._greener_nights` from the user's HA (state currently seen as `unavailable`, no session live).
 
 ## Scope
