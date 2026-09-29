@@ -261,3 +261,17 @@ def test_free_event_overlapping_peak_window_is_plain_time_arithmetic(planning):
     )
     assert plan.sell_floor_soc == 60
     assert plan.sell_start == datetime(2026, 9, 28, 15, 30)
+
+
+def test_manual_free_event_error_only_judges_changed_field(planning):
+    from datetime import timedelta
+
+    manual_free_event_error = planning.manual_free_event_error
+
+    now = datetime(2026, 9, 28, 22, 0)
+    soon, later, past = now + timedelta(hours=1), now + timedelta(hours=2), now - timedelta(hours=1)
+    assert manual_free_event_error("start", soon, later, now) is None
+    assert manual_free_event_error("start", soon, past, now) is None  # stale end: wait
+    assert manual_free_event_error("start", past, later, now) is not None
+    assert manual_free_event_error("end", soon, later, now) is None
+    assert manual_free_event_error("end", later, soon, now) is not None

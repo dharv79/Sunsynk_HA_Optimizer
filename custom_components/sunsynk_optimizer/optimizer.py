@@ -70,6 +70,7 @@ from .const import (
 from .data_logger import DAILY_COST_FIELDS, DataLogger
 from .flux_helpers import apply_flux_override, build_payload, merge_entry_data, peak_import_price_pence_per_kwh
 from .planning import (
+    manual_free_event_error,
     LOW_SOLAR_THRESHOLD_KWH,
     WEEK_HISTORY_DAYS,
     apply_soc_adjustments,
@@ -95,6 +96,7 @@ _LOGGER = logging.getLogger(__name__)
 _OCTOPUS_CATCH_UP_DAYS = 5
 
 _UNAVAILABLE_STATES = ("unknown", "unavailable", "none", "")
+_INITIAL_REFRESH_MAX_RETRIES = 5  # 60 s apart: covers slow first poll after restart
 
 
 def _api_note(api_ok: bool) -> str:
@@ -109,6 +111,7 @@ class SunsynkOptimizer:
         self.entry = entry
         self.coordinator = coordinator
         self.unsubs: list[Any] = []
+        self._initial_refresh_attempts = 0
         self.last_trim_ts: float | None = None
         self.pending_full_trim_cancel = None
         # Snapshot of load/grid meters at the start of the 16:00-19:00 peak
@@ -1020,6 +1023,16 @@ class SunsynkOptimizer:
         if self.coordinator.state.evening_export_disabled and 16 <= now.hour < 19:
             _LOGGER.info("Skipping initial import plan — evening export pause active")
             return
+        if (
+            self._essential_state(self.battery_soc_entity) is None
+            and self._initial_refresh_attempts < _INITIAL_REFRESH_MAX_RETRIES
+        ):
+            # Sensors haven't polled yet after a restart/reload: wait rather than
+            # send a spurious "plan skipped" warning.
+            self._initial_refresh_attempts += 1
+            _LOGGER.info("Initial import plan deferred — battery SOC not yet available")
+            self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
+            return
         await self._guarded(self.async_run_import_plan, "Initial refresh")
 
     async def _async_choose_best_full_charge_day(self, _now) -> None:
@@ -1494,8 +1507,8 @@ class SunsynkOptimizer:
                 async_call_later(self.hass, max(0, (free_end - now).total_seconds()), self._async_free_event_free_end)
             )
 
-    async def async_try_schedule_manual_free_event(self) -> None:
-        """Called after either manual start/end datetime entity is set.
+    async def async_try_schedule_manual_free_event(self, changed: str = "end") -> None:
+        """Called after either manual start/end datetime entity is set (``changed`` names which).
 
         Schedules the event once both are present and valid; otherwise waits
         for the other one (or, if invalid, notifies and leaves both as-is for
@@ -1506,12 +1519,12 @@ class SunsynkOptimizer:
             return
         free_start = dt_util.as_local(dt_util.parse_datetime(state.free_event_manual_start))
         free_end = dt_util.as_local(dt_util.parse_datetime(state.free_event_manual_end))
-        if free_end <= free_start or free_start <= dt_util.now():
-            await self.async_notify(
-                "⚠️ Sunsynk: free event NOT scheduled",
-                "Free event end must be after start, and start must be in the future.",
-            )
+        error = manual_free_event_error(changed, free_start, free_end, dt_util.now())
+        if error:
+            await self.async_notify("⚠️ Sunsynk: free event NOT scheduled", error)
             return
+        if free_end <= free_start or free_start <= dt_util.now():
+            return  # stale counterpart: wait for the other field to be set
         await self.async_schedule_free_event(free_start, free_end, source="manual")
 
     async def async_schedule_free_event(self, free_start: datetime, free_end: datetime, source: str) -> bool:

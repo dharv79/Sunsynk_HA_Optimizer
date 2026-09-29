@@ -64,4 +64,4 @@ class FreeEventTimeEntity(CoordinatorEntity, DateTimeEntity):
 
     async def async_set_value(self, value: datetime) -> None:
         self.coordinator.update_state(**{self._state_field: value.isoformat()})
-        await self.coordinator.optimizer.async_try_schedule_manual_free_event()
+        await self.coordinator.optimizer.async_try_schedule_manual_free_event(self._which)
