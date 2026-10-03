@@ -217,6 +217,35 @@ def minutes_to_hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+STARTUP_PLAN_SOURCE = "startup"
+NIGHTLY_PLAN_MINUTES = 1 * 60 + 55
+
+
+def should_log_import_plan(source: str, now: datetime) -> bool:
+    """Whether a plan run is tonight's record for the JSONL log.
+
+    The log keeps the first plan per date, so a startup/reload plan before
+    01:55 would displace the real nightly plan (and its 01:55 SOC) from
+    pairing. Later startup plans are harmless: the 01:55 record already won,
+    or — if HA was down at 01:55 — it is the plan the inverter actually ran.
+    """
+    if source != STARTUP_PLAN_SOURCE:
+        return True
+    return now.hour * 60 + now.minute >= NIGHTLY_PLAN_MINUTES
+
+
+def daily_report_plans(nightly: dict[str, Any], latest: dict[str, Any], date: str) -> list[dict[str, Any]]:
+    """Plan lines for the 22:00 data report: tonight's 01:55 plan first.
+
+    A later startup/reload re-plan is appended rather than replacing it, so
+    the report shows the plan that drove the overnight charge.
+    """
+    plans = [p for p in (nightly, latest) if p and p.get("date") == date]
+    if len(plans) == 2 and plans[0] == plans[1]:
+        plans = plans[:1]
+    return plans
+
+
 def score_full_charge_day(item: dict[str, Any], day_name: str) -> float:
     """Score one weekday's weather forecast for full-charge suitability."""
     cloud = float(item.get("cloud_coverage", 50) or 50)

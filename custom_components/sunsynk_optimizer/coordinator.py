@@ -38,6 +38,9 @@ class OptimizerState:
     selected_full_charge_day: str | None = None
     last_full_charge_scores: dict[str, float] = field(default_factory=dict)
     last_import_plan: dict[str, Any] = field(default_factory=dict)
+    # Last non-startup plan (the 01:55 run). last_import_plan also takes
+    # startup/reload re-plans; this one feeds the 22:00 data report.
+    nightly_import_plan: dict[str, Any] = field(default_factory=dict)
     last_flux2_action: dict[str, Any] = field(default_factory=dict)
     evening_export_disabled: bool = False
     updated_at: str | None = None
