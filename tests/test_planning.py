@@ -275,3 +275,30 @@ def test_manual_free_event_error_only_judges_changed_field(planning):
     assert manual_free_event_error("start", past, later, now) is not None
     assert manual_free_event_error("end", soon, later, now) is None
     assert manual_free_event_error("end", later, soon, now) is not None
+
+
+@pytest.mark.parametrize(
+    "source,hhmm,expected",
+    [
+        ("automatic", (1, 55), True),
+        ("startup", (0, 30), False),
+        ("startup", (1, 54), False),
+        ("startup", (1, 55), True),
+        ("startup", (14, 0), True),
+    ],
+)
+def test_should_log_import_plan_skips_pre_nightly_startup(planning, source, hhmm, expected):
+    now = datetime(2026, 10, 2, *hhmm)
+    assert planning.should_log_import_plan(source, now) is expected
+
+
+def test_daily_report_plans_keeps_nightly_and_appends_later_replan(planning):
+    nightly = {"date": "2026-10-02", "soc": 47.0, "source": "automatic"}
+    replan = {"date": "2026-10-02", "soc": 82.0, "source": "startup"}
+    assert planning.daily_report_plans(nightly, replan, "2026-10-02") == [nightly, replan]
+    # No re-plan: latest is the nightly plan itself — reported once.
+    assert planning.daily_report_plans(nightly, nightly, "2026-10-02") == [nightly]
+    # Stale nightly (HA down at 01:55): only today's startup plan.
+    stale = {**nightly, "date": "2026-10-01"}
+    assert planning.daily_report_plans(stale, replan, "2026-10-02") == [replan]
+    assert planning.daily_report_plans({}, {}, "2026-10-02") == []

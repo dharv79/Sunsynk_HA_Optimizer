@@ -1,6 +1,6 @@
 # Phase 9 — Cost-aware export go-live decision
 
-**Status:** Planned, not built. **Size:** S, ~20-40k.
+**Status:** Done (29/09/2026): user chose (a), keep shadow mode; no code change. **Size:** XS, ~15k actual.
 
 ## Scope
 

@@ -72,8 +72,10 @@ from .flux_helpers import apply_flux_override, build_payload, merge_entry_data, 
 from .planning import (
     manual_free_event_error,
     LOW_SOLAR_THRESHOLD_KWH,
+    STARTUP_PLAN_SOURCE,
     WEEK_HISTORY_DAYS,
     apply_soc_adjustments,
+    daily_report_plans,
     days_in_period,
     flux1_end_minutes,
     forecast_band,
@@ -83,6 +85,7 @@ from .planning import (
     resolve_used_charge_rate,
     score_full_charge_day,
     select_target_soc,
+    should_log_import_plan,
     sum_field,
     synthetic_hourly_profile,
     trailing_week,
@@ -724,7 +727,10 @@ class SunsynkOptimizer:
             )
             return
 
-        await self.data_logger.async_log_import_plan(plan_state)
+        if should_log_import_plan(source, now):
+            await self.data_logger.async_log_import_plan(plan_state)
+        if source != STARTUP_PLAN_SOURCE:
+            self.coordinator.update_state(touch=False, nightly_import_plan=plan_state)
 
         self.coordinator.update_state(
             current_soc_target=target_soc,
@@ -1033,7 +1039,9 @@ class SunsynkOptimizer:
             _LOGGER.info("Initial import plan deferred — battery SOC not yet available")
             self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
             return
-        await self._guarded(self.async_run_import_plan, "Initial refresh")
+        await self._guarded(
+            lambda: self.async_run_import_plan(source=STARTUP_PLAN_SOURCE), "Initial refresh"
+        )
 
     async def _async_choose_best_full_charge_day(self, _now) -> None:
         """Time-change callback at 18:00 daily — only acts on Sundays."""
@@ -1438,7 +1446,11 @@ class SunsynkOptimizer:
         self.coordinator.update_state(touch=False, last_day_actuals=actuals_rec)
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
-            plan_rec = self.coordinator.state.last_import_plan or {}
+            plan_recs = daily_report_plans(
+                self.coordinator.state.nightly_import_plan or {},
+                self.coordinator.state.last_import_plan or {},
+                date,
+            )
             morning_rec = self.coordinator.state.last_morning_state or {}
             # Only include today's peak-window record — a stale prior-day value
             # (e.g. the window was never captured today because of a restart)
@@ -1458,7 +1470,7 @@ class SunsynkOptimizer:
                 cost_rec = {}
             lines = "\n".join(
                 json.dumps(r)
-                for r in [plan_rec, morning_rec, actuals_rec, peak_rec, cost_rec]
+                for r in [*plan_recs, morning_rec, actuals_rec, peak_rec, cost_rec]
                 if r
             )
             await self.async_notify(

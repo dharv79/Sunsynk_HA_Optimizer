@@ -32,3 +32,13 @@ All API pushes go through `_async_post_with_status()` which returns a bool. On f
 ### Scoring logic (full-charge day)
 
 Scores Monday–Friday from weather forecast: base score `100 - cloud_coverage - (rain_prob * 0.7)`, adjusted by condition string (+25 sunny/clear, +10 partly cloudy, −10 cloudy/fog, −25 rain/snow), temperature (±3), and day-of-week penalty (Thursday −5, Friday −15). Highest score wins.
+
+### Startup re-plan vs nightly plan (03/10/2026, 1.0.11b15)
+
+Every startup/reload runs a full plan (`_async_initial_refresh`) and pushes it. It was labelled `source: "automatic"` like the 01:55 run, and the 22:00 data report posted `last_import_plan`, so a daytime reload replaced the 01:55 plan in `#sunsynkdebug` (seen 30/09–02/10: plan SOC 60–82% vs 32–47% the previous evening).
+
+- Startup runs now carry `source: "startup"` (`planning.STARTUP_PLAN_SOURCE`).
+- `planning.should_log_import_plan`: a startup plan before 01:55 is not written to the JSONL log, since first-per-date dedup would otherwise pair it instead of the real 01:55 plan. Later startup plans log normally (dedup keeps the 01:55 record; if HA was down at 01:55 the startup plan is the one the inverter ran).
+- `OptimizerState.nightly_import_plan` holds the last non-startup plan; `planning.daily_report_plans` posts it first at 22:00 and appends a same-day startup re-plan as a second line.
+
+Verification: `tests/test_planning.py` (`should_log_import_plan` cut-off, `daily_report_plans` ordering/dedup/stale date); the 22:00 post shows `source: "startup"` lines only after a reload.
