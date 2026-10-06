@@ -1,6 +1,6 @@
 # Phase 11 — Latest complete cost day in the 22:00 bundle
 
-**Status:** Built (PR pending). **Size:** XS–S, ~20-40k est. Verify: next 22:00 `#sunsynkdebug` post carries a complete-day record with a non-null `net_cost_gbp`.
+**Status:** Done, merged (af7d6ac, PR #30). **Size:** XS, ~25k actual. Verify: next 22:00 `#sunsynkdebug` post carries a complete-day record with a non-null `net_cost_gbp`.
 
 ## Scope
 
