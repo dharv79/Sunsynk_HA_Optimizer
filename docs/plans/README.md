@@ -29,8 +29,18 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 19. Pick the full-charge day from the solar forecast | Planned, not built | S, ~20-40k |
 | 20. Faster, seasonal forecast correction | Planned, not built | S, ~20-40k |
 | 21. Octopus Saving Sessions | Planned, not built | S–M, ~35-60k |
+| 22. Charge watchdog | Planned, not built | S, ~25-45k |
+| 23. Gentler charging across the cheap window | Planned, not built | S–M, ~35-60k |
+| 24. Battery wear cost in decisions | Planned, not built | S, ~20-40k |
+| 25. Spare solar sensor and appliance prompts | Planned, not built | S, ~20-40k |
+| 26. Overnight baseload alert | Planned, not built | S, ~20-40k |
+| 27. Automatic away mode | Planned, not built | XS–S, ~15-30k |
+| 28. Tariff comparison report | Planned, not built | M, ~50-80k |
+| 29. Clipped solar detection | Planned, not built | S, ~20-40k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
+
+Phases 22–29 come from the second improvement list (06/10/2026; items 26 hot-water diversion and 31 EV battery hold were declined). 22 is independent and recommended early; 23 needs 22 (safety net) and an API check; 24 before 17; 26 shares phase 12's missing-meter guard; 28 and 23 start with a feasibility check and go "On hold" if it fails.
 
 Token actuals were not metered before this index existed; record them from phase 8 on.
 
