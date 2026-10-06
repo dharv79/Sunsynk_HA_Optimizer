@@ -1,6 +1,8 @@
 # Phase 19 — Pick the full-charge day from the solar forecast
 
-**Status:** Planned, not built. **Size:** S, ~20-40k est. **Origin:** improvement list 06/10/2026 (item 8).
+**Status:** Done, merged (449434d, PR #32). **Size:** S, ~45k actual.
+
+**As built:** Forecast.Solar only gives today/tomorrow, so (user choice) the Sunday weather pick stays and an 18:00 daily re-check moves the full-charge day to tomorrow, at most once a week, when tomorrow's corrected kWh can fill the battery plus daytime load and its weather beats the chosen day. Logic: `planning.full_charge_day_move`; details in `docs/architecture/import-plan.md`. **Origin:** improvement list 06/10/2026 (item 8).
 
 ## Goal
 
