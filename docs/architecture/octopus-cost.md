@@ -12,3 +12,10 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 - **Root cause:** all three sensors were dated by the import sensor's `last_reset`; gas (which commonly reports a day behind electricity) never matched and was dropped. Per-day dedup then locked the partial record against a later complete read.
 - **Fix:** per-sensor dating + `async_merge_daily_cost` fill-only merge (described above); `last_daily_cost` only moves forward.
 - **Verification:** `tests/test_daily_cost.py` (merge helper, late gas completes day, no duplicate on re-read, month-boundary catch-up). In production: 22:00 `#sunsynkdebug` bundle should show non-null gas within a day or two; if not, check the gas sensor's `last_reset`.
+
+## Latest complete cost day in the 22:00 bundle (06/10/2026, phase 11)
+
+- **Symptom:** the 22:00 `#sunsynkdebug` `daily_cost` line almost never showed import, gas or net cost.
+- **Root cause:** not missing data. Import and gas `last_reset` lag export by a day or more (observed 06/10: import/gas 04/10, export 05/10). The log back-fills correctly, but `last_daily_cost` tracks the newest date, which only has export at 22:00.
+- **Fix:** pure `planning.latest_complete_cost_day(days, since)` picks the newest paired day (on/after the `_OCTOPUS_CATCH_UP_DAYS` window start) with import, export and gas all non-null. `_async_capture_daily_cost` stores it as `OptimizerState.last_complete_daily_cost` (`{}` when none). The 22:00 bundle adds it as a `"type": "daily_cost_complete"` line, skipped when stale or when the `daily_cost` line already shows that day complete. Existing `daily_cost` line, weekly summary and year-to-date unchanged; gas is required (matching `net_cost_gbp`), so gas-less accounts get no line.
+- **Verification:** `tests/test_planning.py` (all present, gas lagging, none complete, newest in window). In production: next 22:00 bundle carries a `daily_cost_complete` line with non-null `net_cost_gbp`.

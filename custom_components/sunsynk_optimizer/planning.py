@@ -299,6 +299,32 @@ def sum_field(days: list[dict[str, Any]], key: str) -> float | None:
     return round(sum(values), 2) if values else None
 
 
+_COMPLETE_COST_FIELDS = ("actual_import_cost_gbp", "actual_export_income_gbp", "actual_gas_cost_gbp")
+
+
+def latest_complete_cost_day(days: list[dict[str, Any]], since: str) -> dict[str, Any] | None:
+    """Newest day on/after ISO `since` with import, export and gas all logged.
+
+    Octopus settles each sensor on its own lag (import/gas often a day behind
+    export), so the newest logged day is usually partial. Returns a
+    `daily_cost_complete` record with its net cost, or None if no day in the
+    window is complete. Gas is required, matching net_cost_gbp.
+    """
+    complete = [
+        d for d in days
+        if str(d.get("date", "")) >= since and all(d.get(f) is not None for f in _COMPLETE_COST_FIELDS)
+    ]
+    if not complete:
+        return None
+    day = max(complete, key=lambda d: str(d["date"]))
+    return {
+        "type": "daily_cost_complete",
+        "date": day["date"],
+        **{f: day[f] for f in _COMPLETE_COST_FIELDS},
+        "net_cost_gbp": net_cost_gbp(*(day[f] for f in _COMPLETE_COST_FIELDS)),
+    }
+
+
 # Never sell the battery below this SOC ahead of a free electricity event,
 # even if the refillable-floor maths would allow it.
 FREE_EVENT_MIN_FLOOR_SOC = 40

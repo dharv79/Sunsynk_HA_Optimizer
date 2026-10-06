@@ -79,6 +79,7 @@ from .planning import (
     days_in_period,
     flux1_end_minutes,
     forecast_band,
+    latest_complete_cost_day,
     minutes_to_hhmm,
     net_cost_gbp,
     plan_free_event,
@@ -97,6 +98,11 @@ _LOGGER = logging.getLogger(__name__)
 # accepted when its settlement is running behind schedule (see
 # SunsynkOptimizer._read_octopus_previous_day_cost).
 _OCTOPUS_CATCH_UP_DAYS = 5
+
+
+def _octopus_oldest_date(now: datetime) -> str:
+    """ISO date of the oldest day an Octopus reading is still accepted for."""
+    return (now - timedelta(days=_OCTOPUS_CATCH_UP_DAYS)).date().isoformat()
 
 _UNAVAILABLE_STATES = ("unknown", "unavailable", "none", "")
 _INITIAL_REFRESH_MAX_RETRIES = 5  # 60 s apart: covers slow first poll after restart
@@ -1388,6 +1394,10 @@ class SunsynkOptimizer:
         # what actually bounds it to "this year", not the day count.
         now = dt_util.now()
         paired_days = await self.data_logger.async_load_paired_days(days=366)
+        self.coordinator.update_state(
+            touch=False,
+            last_complete_daily_cost=latest_complete_cost_day(paired_days, _octopus_oldest_date(now)) or {},
+        )
         year_days = [
             d for d in paired_days
             if d.get("net_cost_gbp") is not None and str(d.get("date", "")).startswith(str(now.year))
@@ -1468,9 +1478,16 @@ class SunsynkOptimizer:
             yesterday_str = (now - timedelta(days=1)).date().isoformat()
             if cost_rec.get("date") not in (date, yesterday_str):
                 cost_rec = {}
+            # Newest fully settled day (import/gas usually lag export by a
+            # day or more). Skipped when cost_rec already shows that day whole.
+            complete_rec = self.coordinator.state.last_complete_daily_cost or {}
+            if str(complete_rec.get("date") or "") < _octopus_oldest_date(now) or (
+                complete_rec.get("date") == cost_rec.get("date") and cost_rec.get("net_cost_gbp") is not None
+            ):
+                complete_rec = {}
             lines = "\n".join(
                 json.dumps(r)
-                for r in [*plan_recs, morning_rec, actuals_rec, peak_rec, cost_rec]
+                for r in [*plan_recs, morning_rec, actuals_rec, peak_rec, cost_rec, complete_rec]
                 if r
             )
             await self.async_notify(
