@@ -1,6 +1,8 @@
 # Phase 20 — Faster, seasonal forecast correction
 
-**Status:** Planned, not built. **Size:** S, ~20-40k est. **Origin:** improvement list 06/10/2026 (item 9).
+**Status:** Done, merged (6b1702b, PR #33), shadow only. **Size:** XS, ~25k actual.
+
+**As built:** recency-weighted (14-day half-life), per-band weighted median with global fallback, logged as `forecast_correction_weighted` / `_basis` beside the live factor. The live factor is unchanged; switch over after the phase 14 backtest compares them. Solcast P10 not added (Forecast.Solar is the source). Details: `docs/architecture/import-plan.md`. **Origin:** improvement list 06/10/2026 (item 9).
 
 ## Goal
 

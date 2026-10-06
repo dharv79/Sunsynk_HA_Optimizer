@@ -27,7 +27,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 17. Sell the expected surplus at the peak rate | Planned, not built | M, ~50-80k |
 | 18. Read tariff rates from the Octopus integration | Planned, not built | S, ~20-40k |
 | 19. Pick the full-charge day from the solar forecast (daily re-check) | Done, merged (449434d, PR #32) | S, ~45k actual |
-| 20. Faster, seasonal forecast correction | Planned, not built | S, ~20-40k |
+| 20. Faster, seasonal forecast correction (shadow) | Done, merged (6b1702b, PR #33) | XS, ~25k actual |
 | 21. Octopus Saving Sessions | Planned, not built | S–M, ~35-60k |
 | 22. Charge watchdog | Planned, not built | S, ~25-45k |
 | 23. Gentler charging across the cheap window | Planned, not built | S–M, ~35-60k |
