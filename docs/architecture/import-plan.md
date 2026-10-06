@@ -42,3 +42,13 @@ Every startup/reload runs a full plan (`_async_initial_refresh`) and pushes it. 
 - `OptimizerState.nightly_import_plan` holds the last non-startup plan; `planning.daily_report_plans` posts it first at 22:00 and appends a same-day startup re-plan as a second line.
 
 Verification: `tests/test_planning.py` (`should_log_import_plan` cut-off, `daily_report_plans` ordering/dedup/stale date); the 22:00 post shows `source: "startup"` lines only after a reload.
+
+### Daily full-charge-day re-check (06/10/2026, phase 19)
+
+Forecast.Solar only gives today and tomorrow, so the Sunday pick can only score Tue–Fri by weather. Every day at 18:00 (after the Sunday pick on Sundays), `async_recheck_full_charge_day` may move this week's full-charge day to tomorrow:
+
+- `tomorrow_kwh` = `min(raw, raw × forecast correction)` from `tomorrow_forecast_sensor` (default `sensor.energy_production_tomorrow`; blank disables).
+- `planning.full_charge_day_move` moves only if: tomorrow is a weekday before the chosen day; not already moved this week (`OptimizerState.full_charge_day_moved_to`, cleared by the Sunday pick); `tomorrow_kwh ≥ planning.solar_kwh_to_fill` (battery capacity + 8 h × avg load); and tomorrow's fresh weather score beats the chosen day's. Any missing input → no move.
+- Every check that reaches the decision logs a `full_charge_recheck` record (moved + reason); a move notifies "🔋 Sunsynk: full-charge day moved". Skipped in monitor mode.
+
+Verification: `tests/test_planning.py` (`full_charge_day_move` reasons, threshold, `solar_kwh_to_fill`); on a sunny-tomorrow evening before a cloudier chosen day the move notification fires and the "Selected full charge day" sensor shows tomorrow.

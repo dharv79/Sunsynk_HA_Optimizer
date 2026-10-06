@@ -57,6 +57,9 @@ CONF_SOLAR_START_OFFSET_HOURS = "solar_start_offset_hours"
 CONF_HOURLY_FORECAST_SENSOR = "hourly_forecast_sensor"
 CONF_HOURLY_FORECAST_ATTRIBUTE = "hourly_forecast_attribute"
 DEFAULT_HOURLY_FORECAST_ATTRIBUTE = "hourly"
+# Tomorrow's daily kWh (Forecast.Solar default); drives the daily full-charge-day re-check.
+CONF_TOMORROW_FORECAST_SENSOR = "tomorrow_forecast_sensor"
+DEFAULT_TOMORROW_FORECAST_SENSOR = "sensor.energy_production_tomorrow"
 
 FULL_CHARGE_DAY_OPTIONS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 OPERATION_MODE_OPTIONS = ["auto", "monitor"]

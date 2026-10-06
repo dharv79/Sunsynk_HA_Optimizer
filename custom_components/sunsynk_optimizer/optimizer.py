@@ -54,6 +54,7 @@ from .const import (
     CONF_OCTOPUS_EXPORT_INCOME_SENSOR,
     CONF_OCTOPUS_GAS_COST_SENSOR,
     CONF_WEATHER_ENTITY,
+    CONF_TOMORROW_FORECAST_SENSOR,
     DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
     DEFAULT_AWAY_AVG_CONSUMPTION_KW,
@@ -65,6 +66,7 @@ from .const import (
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
+    DEFAULT_TOMORROW_FORECAST_SENSOR,
     FULL_CHARGE_DAY_OPTIONS,
 )
 from .data_logger import DAILY_COST_FIELDS, DataLogger
@@ -79,6 +81,7 @@ from .planning import (
     days_in_period,
     flux1_end_minutes,
     forecast_band,
+    full_charge_day_move,
     latest_complete_cost_day,
     minutes_to_hhmm,
     net_cost_gbp,
@@ -87,6 +90,7 @@ from .planning import (
     score_full_charge_day,
     select_target_soc,
     should_log_import_plan,
+    solar_kwh_to_fill,
     sum_field,
     synthetic_hourly_profile,
     trailing_week,
@@ -377,36 +381,14 @@ class SunsynkOptimizer:
             )
             return
 
-        weather_entity = self.cfg[CONF_WEATHER_ENTITY]
-        try:
-            response = await self.hass.services.async_call(
-                "weather",
-                "get_forecasts",
-                {"entity_id": weather_entity, "type": "daily"},
-                blocking=True,
-                return_response=True,
-            )
-        except Exception as exc:  # pragma: no cover
-            self.coordinator.update_state(last_error=f"Weather forecast failed: {exc}")
+        # A new weekly pick re-arms the once-a-week daily re-check.
+        self.coordinator.update_state(touch=False, full_charge_day_moved_to=None)
+        weather_scores = await self._async_weekday_weather_scores()
+        if weather_scores is None:
             return
-
-        forecast_items = []
-        if isinstance(response, dict):
-            weather_data = response.get(weather_entity)
-            if isinstance(weather_data, dict):
-                forecast_items = weather_data.get("forecast", []) or []
-
-        scores: dict[str, float] = {day: -999.0 for day in FULL_CHARGE_DAY_OPTIONS}
-        for item in forecast_items:
-            try:
-                dt_value = dt_util.parse_datetime(item.get("datetime"))
-            except Exception:
-                dt_value = None
-            if dt_value is None:
-                continue
-            day_name = dt_value.strftime("%A")
-            if day_name in scores:
-                scores[day_name] = score_full_charge_day(item, day_name)
+        scores: dict[str, float] = {
+            day: (-999.0 if score is None else score) for day, score in weather_scores.items()
+        }
 
         best_day = max(scores, key=scores.get)
         self.coordinator.update_state(
@@ -425,6 +407,110 @@ class SunsynkOptimizer:
                 f"Wed {scores['Wednesday']}, "
                 f"Thu {scores['Thursday']}, "
                 f"Fri {scores['Friday']}."
+            ),
+        )
+
+    async def _async_weekday_weather_scores(self) -> dict[str, float | None] | None:
+        """Mon–Fri full-charge scores from the daily weather forecast.
+
+        A weekday missing from the forecast scores None; None overall (with
+        last_error set) when the weather service call fails.
+        """
+        weather_entity = self.cfg[CONF_WEATHER_ENTITY]
+        try:
+            response = await self.hass.services.async_call(
+                "weather",
+                "get_forecasts",
+                {"entity_id": weather_entity, "type": "daily"},
+                blocking=True,
+                return_response=True,
+            )
+        except Exception as exc:  # pragma: no cover
+            self.coordinator.update_state(last_error=f"Weather forecast failed: {exc}")
+            return None
+
+        forecast_items = []
+        if isinstance(response, dict):
+            weather_data = response.get(weather_entity)
+            if isinstance(weather_data, dict):
+                forecast_items = weather_data.get("forecast", []) or []
+
+        scores: dict[str, float | None] = {day: None for day in FULL_CHARGE_DAY_OPTIONS}
+        for item in forecast_items:
+            try:
+                dt_value = dt_util.parse_datetime(item.get("datetime"))
+            except Exception:
+                dt_value = None
+            if dt_value is None:
+                continue
+            day_name = dt_value.strftime("%A")
+            if day_name in scores:
+                scores[day_name] = score_full_charge_day(item, day_name)
+        return scores
+
+    async def async_recheck_full_charge_day(self) -> None:
+        """Daily 18:00: move this week's full-charge day to tomorrow when
+        Forecast.Solar says tomorrow's PV alone can reach 100% and its weather
+        beats the chosen day's (planning.full_charge_day_move). At most once a week.
+        """
+        if self.operation_mode == "monitor":
+            return
+        cfg = self.cfg
+        sensor_id = str(cfg.get(CONF_TOMORROW_FORECAST_SENSOR, DEFAULT_TOMORROW_FORECAST_SENSOR) or "").strip()
+        if not sensor_id:
+            return
+        tomorrow = (dt_util.now() + timedelta(days=1)).strftime("%A")
+        chosen = self.selected_full_charge_day
+        if tomorrow not in FULL_CHARGE_DAY_OPTIONS or chosen not in FULL_CHARGE_DAY_OPTIONS:
+            return
+        if FULL_CHARGE_DAY_OPTIONS.index(chosen) <= FULL_CHARGE_DAY_OPTIONS.index(tomorrow):
+            return  # chosen day is tomorrow or already passed — nothing to move
+
+        raw_kwh = self._essential_state(sensor_id)
+        tomorrow_kwh: float | None = None
+        if raw_kwh is not None:
+            paired_days = await self.data_logger.async_load_paired_days(days=30)
+            correction = self.data_logger.compute_forecast_correction(paired_days)
+            # Pessimistic of raw vs corrected, as for low-solar decisions.
+            tomorrow_kwh = round(min(raw_kwh, raw_kwh * correction), 2)
+
+        battery_capacity_kwh = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        if self.coordinator.state.away_mode:
+            avg_consumption_kw = float(cfg.get(CONF_AWAY_AVG_CONSUMPTION_KW, DEFAULT_AWAY_AVG_CONSUMPTION_KW))
+        else:
+            avg_consumption_kw = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        needed_kwh = solar_kwh_to_fill(battery_capacity_kwh, avg_consumption_kw)
+
+        weather_scores = await self._async_weekday_weather_scores() or {}
+        move, reason = full_charge_day_move(
+            tomorrow=tomorrow,
+            chosen=chosen,
+            tomorrow_kwh=tomorrow_kwh,
+            needed_kwh=needed_kwh,
+            tomorrow_score=weather_scores.get(tomorrow),
+            chosen_score=weather_scores.get(chosen),
+            already_moved=bool(self.coordinator.state.full_charge_day_moved_to),
+            weekdays=FULL_CHARGE_DAY_OPTIONS,
+        )
+        await self.data_logger.async_log_full_charge_recheck(
+            chosen_day=chosen,
+            tomorrow=tomorrow,
+            tomorrow_kwh=tomorrow_kwh,
+            needed_kwh=needed_kwh,
+            tomorrow_score=weather_scores.get(tomorrow),
+            chosen_score=weather_scores.get(chosen),
+            moved=move,
+            reason=reason,
+        )
+        if not move:
+            return
+        self.coordinator.update_state(selected_full_charge_day=tomorrow, full_charge_day_moved_to=tomorrow)
+        await self.async_notify(
+            "🔋 Sunsynk: full-charge day moved",
+            (
+                f"Moved from {chosen} to {tomorrow}: {tomorrow_kwh} kWh solar forecast "
+                f"(needs {needed_kwh} kWh to fill from PV), weather score "
+                f"{weather_scores.get(tomorrow)} vs {weather_scores.get(chosen)}."
             ),
         )
 
@@ -1050,11 +1136,12 @@ class SunsynkOptimizer:
         )
 
     async def _async_choose_best_full_charge_day(self, _now) -> None:
-        """Time-change callback at 18:00 daily — only acts on Sundays."""
+        """Time-change callback at 18:00 daily: Sunday weekly pick, then the daily re-check."""
         if dt_util.now().strftime("%A") == "Sunday":
             await self._guarded(self.async_choose_best_full_charge_day, "Full-charge-day selection")
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
+        await self._guarded(self.async_recheck_full_charge_day, "Full-charge-day re-check")
 
     async def _async_send_weekly_cost_summary(self) -> None:
         """Sunday 18:00: roll up the 7 complete days ending yesterday (Sun–Sat) and send it as JSON.
