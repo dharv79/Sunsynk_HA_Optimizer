@@ -388,3 +388,55 @@ def test_full_charge_move_blocked(planning, overrides, reason):
 
 def test_full_charge_move_exact_threshold_moves(planning):
     assert _move(planning, tomorrow_kwh=16.0) == (True, "moved")
+
+
+# --------------------------------------------------------------------------- #
+# Phase 20: recency-weighted, per-band forecast correction                     #
+# --------------------------------------------------------------------------- #
+def _corr_day(age, ratio, band="summer_like", today="2026-10-06"):
+    from datetime import date, timedelta
+
+    d = date.fromisoformat(today) - timedelta(days=age)
+    return {"date": d.isoformat(), "solar_forecast_kwh": 10.0, "actual_solar_kwh": 10.0 * ratio, "forecast_band": band}
+
+
+def test_weighted_correction_needs_min_days(planning):
+    from datetime import date
+
+    days = [_corr_day(a, 1.5) for a in range(1, 7)]
+    assert planning.weighted_forecast_correction(days, date(2026, 10, 6)) == (1.0, "none")
+
+
+def test_weighted_correction_favours_recent_days(planning):
+    from datetime import date
+
+    # 8 recent days at 0.8, 10 older days at 1.4: plain median would be 1.4.
+    days = [_corr_day(a, 0.8) for a in range(1, 9)] + [_corr_day(a, 1.4) for a in range(15, 25)]
+    factor, basis = planning.weighted_forecast_correction(days, date(2026, 10, 6))
+    assert (factor, basis) == (0.8, "global")
+
+
+def test_weighted_correction_uses_band_when_enough_days(planning):
+    from datetime import date
+
+    days = [_corr_day(a, 1.2, "winter_like") for a in range(1, 8)] + [_corr_day(a, 0.9) for a in range(1, 20)]
+    assert planning.weighted_forecast_correction(days, date(2026, 10, 6), "winter_like") == (1.2, "band")
+    # Too few days in the band → global fallback.
+    assert planning.weighted_forecast_correction(days[3:], date(2026, 10, 6), "winter_like") == (0.9, "global")
+
+
+@pytest.mark.parametrize("ratio,expected", [(5.0, 3.0), (0.1, 0.5)])
+def test_weighted_correction_capped(planning, ratio, expected):
+    from datetime import date
+
+    days = [_corr_day(a, ratio) for a in range(1, 10)]
+    assert planning.weighted_forecast_correction(days, date(2026, 10, 6)) == (expected, "global")
+
+
+def test_weighted_correction_skips_tiny_forecasts_and_bad_dates(planning):
+    from datetime import date
+
+    days = [_corr_day(a, 1.1) for a in range(1, 8)]
+    days.append({"date": "2026-10-05", "solar_forecast_kwh": 0.2, "actual_solar_kwh": 9.0})
+    days.append({"date": None, "solar_forecast_kwh": 10.0, "actual_solar_kwh": 30.0})
+    assert planning.weighted_forecast_correction(days, date(2026, 10, 6)) == (1.1, "global")

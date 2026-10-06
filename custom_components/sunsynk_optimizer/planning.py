@@ -310,6 +310,55 @@ def full_charge_day_move(
     return True, "moved"
 
 
+# Phase 20: recency-weighted, per-band forecast correction. Logged beside the
+# live 30-day median (shadow) until the phase 14 backtest validates it.
+FORECAST_CORRECTION_HALF_LIFE_DAYS = 14.0
+FORECAST_CORRECTION_MIN_DAYS = 7
+
+
+def weighted_forecast_correction(
+    paired_days: list[dict[str, Any]],
+    today: date,
+    band: str | None = None,
+    half_life_days: float = FORECAST_CORRECTION_HALF_LIFE_DAYS,
+    min_days: int = FORECAST_CORRECTION_MIN_DAYS,
+) -> tuple[float, str]:
+    """Return (factor, basis): weighted median of actual/forecast, capped 0.5-3.0.
+
+    Each day weighs 0.5 ** (age / half_life), so a season change shows up in
+    about two weeks instead of the plain median's ~15 days of lag. Uses only
+    days in ``band`` when it has ``min_days``, else all days ("global"); below
+    ``min_days`` overall returns (1.0, "none"). Same ratio and near-zero skip
+    as data_logger.compute_forecast_correction.
+    """
+    valid = []
+    for d in paired_days:
+        forecast = d.get("solar_forecast_kwh") or 0.0
+        if forecast <= 0.5 or d.get("actual_solar_kwh") is None:
+            continue
+        try:
+            age = max(0, (today - date.fromisoformat(d["date"])).days)
+        except (KeyError, TypeError, ValueError):
+            continue
+        valid.append((d["actual_solar_kwh"] / forecast, 0.5 ** (age / half_life_days), d.get("forecast_band")))
+    if len(valid) < min_days:
+        return 1.0, "none"
+    basis = "global"
+    in_band = [v for v in valid if band is not None and v[2] == band]
+    if len(in_band) >= min_days:
+        valid, basis = in_band, "band"
+    valid.sort(key=lambda v: v[0])
+    half = sum(w for _, w, _ in valid) / 2.0
+    running = 0.0
+    factor = valid[-1][0]
+    for ratio, weight, _ in valid:
+        running += weight
+        if running >= half:
+            factor = ratio
+            break
+    return max(0.5, min(3.0, round(factor, 3))), basis
+
+
 def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cost: float | None) -> float | None:
     """import - export + gas, or None if any input is missing (never treat missing as £0)."""
     if import_cost is None or export_income is None or gas_cost is None:

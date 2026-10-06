@@ -32,6 +32,8 @@ _IMPORT_PLAN_FIELDS = (
     "soc",
     "raw_forecast_kwh",
     "forecast_correction_factor",
+    "forecast_correction_weighted",
+    "forecast_correction_weighted_basis",
     "solar_forecast_kwh",
     "forecast_band",
     "target_soc",
