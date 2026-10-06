@@ -1,6 +1,6 @@
 # Phase 11 — Latest complete cost day in the 22:00 bundle
 
-**Status:** Planned, not built. **Size:** XS–S, ~20-40k est. Verify: next 22:00 `#sunsynkdebug` post carries a complete-day record with a non-null `net_cost_gbp`.
+**Status:** Built (PR pending). **Size:** XS–S, ~20-40k est. Verify: next 22:00 `#sunsynkdebug` post carries a complete-day record with a non-null `net_cost_gbp`.
 
 ## Scope
 
@@ -33,3 +33,7 @@ Not a fix: moving the read from 22:00 to 22:10 (lag is days, not seconds).
 - Missing data stays `None`, never 0; no logged value overwritten.
 - Existing `daily_cost` line, weekly summary and year-to-date unchanged.
 - Feature section added to `docs/architecture/octopus-cost.md`.
+
+## Outcome
+
+Built as designed; `sensor.consumption` attributes not added (optional, skipped). Gas-less accounts: gas required, matching `net_cost_gbp` (they never get a net cost today either).

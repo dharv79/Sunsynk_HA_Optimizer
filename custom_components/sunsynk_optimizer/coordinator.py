@@ -75,6 +75,9 @@ class OptimizerState:
     # with the PRIOR day's date (their "previous accumulative cost" sensors
     # only settle a few hours after midnight). Diagnostic only.
     last_daily_cost: dict[str, Any] = field(default_factory=dict)
+    # Newest day with import, export and gas all settled (Octopus lags differ
+    # per sensor, so last_daily_cost is usually partial). Diagnostic only.
+    last_complete_daily_cost: dict[str, Any] = field(default_factory=dict)
     # Running year-to-date net cost (electricity + gas), recomputed daily
     # alongside last_daily_cost from the full paired-day history.
     last_year_to_date_cost: dict[str, Any] = field(default_factory=dict)

@@ -302,3 +302,39 @@ def test_daily_report_plans_keeps_nightly_and_appends_later_replan(planning):
     stale = {**nightly, "date": "2026-10-01"}
     assert planning.daily_report_plans(stale, replan, "2026-10-02") == [replan]
     assert planning.daily_report_plans({}, {}, "2026-10-02") == []
+
+
+def _cost_day(date, imp=None, exp=None, gas=None):
+    return {"date": date, "actual_import_cost_gbp": imp, "actual_export_income_gbp": exp, "actual_gas_cost_gbp": gas}
+
+
+def test_latest_complete_cost_day_all_present(planning):
+    rec = planning.latest_complete_cost_day([_cost_day("2026-10-05", 3.0, 1.0, 1.5)], "2026-10-01")
+    assert rec == {
+        "type": "daily_cost_complete", "date": "2026-10-05",
+        "actual_import_cost_gbp": 3.0, "actual_export_income_gbp": 1.0, "actual_gas_cost_gbp": 1.5,
+        "net_cost_gbp": 3.5,
+    }
+
+
+def test_latest_complete_cost_day_skips_lagging_gas(planning):
+    days = [_cost_day("2026-10-05", 3.0, 1.0, None), _cost_day("2026-10-04", 2.0, 0.5, 1.0)]
+    rec = planning.latest_complete_cost_day(days, "2026-10-01")
+    assert rec["date"] == "2026-10-04" and rec["net_cost_gbp"] == 2.5
+
+
+def test_latest_complete_cost_day_none_complete(planning):
+    days = [_cost_day("2026-10-05", None, 1.0, None), _cost_day("2026-10-04", 2.0, None, 1.0)]
+    assert planning.latest_complete_cost_day(days, "2026-10-01") is None
+    assert planning.latest_complete_cost_day([], "2026-10-01") is None
+
+
+def test_latest_complete_cost_day_picks_newest_in_window(planning):
+    # Unordered input; zero is a real value, not missing; out-of-window days ignored.
+    days = [
+        _cost_day("2026-10-02", 1.0, 1.0, 1.0),
+        _cost_day("2026-10-03", 0.0, 0.0, 0.0),
+        _cost_day("2026-09-20", 9.0, 0.0, 9.0),
+    ]
+    assert planning.latest_complete_cost_day(days, "2026-10-01")["date"] == "2026-10-03"
+    assert planning.latest_complete_cost_day(days[2:], "2026-10-01") is None
