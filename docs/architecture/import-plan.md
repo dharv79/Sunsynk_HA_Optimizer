@@ -52,3 +52,13 @@ Forecast.Solar only gives today and tomorrow, so the Sunday pick can only score 
 - Every check that reaches the decision logs a `full_charge_recheck` record (moved + reason); a move notifies "🔋 Sunsynk: full-charge day moved". Skipped in monitor mode.
 
 Verification: `tests/test_planning.py` (`full_charge_day_move` reasons, threshold, `solar_kwh_to_fill`); on a sunny-tomorrow evening before a cloudier chosen day the move notification fires and the "Selected full charge day" sensor shows tomorrow.
+
+## Weighted forecast correction, shadow (06/10/2026, phase 20)
+
+**Problem.** The live correction is the plain median of actual/forecast over 30 paired days, so it lags about two weeks behind spring/autumn changes and mixes sunny and dull days.
+
+**Design.** `planning.weighted_forecast_correction(paired_days, today, band)` weights each day `0.5 ** (age / 14)` and takes the weighted median. It uses only days in tonight's forecast band when there are at least 7, otherwise all days (`basis` "global"); below 7 days overall it returns `(1.0, "none")`. Same 0.5–3.0 cap and >0.5 kWh forecast filter as `data_logger.compute_forecast_correction`.
+
+**Shadow.** The 01:55 plan logs `forecast_correction_weighted` and `forecast_correction_weighted_basis` beside `forecast_correction_factor` (both in `_IMPORT_PLAN_FIELDS`, so the JSONL record keeps them for the backtest); the live factor is unchanged. Switch over only after the phase 14 backtest shows the weighted factor tracks actual solar better. Low-solar decisions keep `min(raw, corrected)` either way (do-not-break 8). Solcast P10 was not added (Forecast.Solar is the configured source).
+
+**Verification.** `tests/test_planning.py` (min days, recency, band and fallback, cap, bad rows). In HA: after 01:55 the `import_plan` debug line carries both factors.

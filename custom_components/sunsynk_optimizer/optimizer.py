@@ -94,6 +94,7 @@ from .planning import (
     sum_field,
     synthetic_hourly_profile,
     trailing_week,
+    weighted_forecast_correction,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -688,6 +689,8 @@ class SunsynkOptimizer:
         applied_correction = 1.0 if forecast_fallback else forecast_correction
         solar_forecast_kwh = round(raw_forecast_kwh * applied_correction, 2)
         band = forecast_band(solar_forecast_kwh)
+        # Shadow only (phase 20): logged beside the live factor, not applied.
+        weighted_correction, weighted_basis = weighted_forecast_correction(paired_days, now.date(), band)
         # Low-solar decisions key on the PESSIMISTIC of raw vs corrected. The
         # learned correction is derived mostly from good days; on a genuinely bad
         # day the raw forecast is already right, and multiplying it above the
@@ -778,6 +781,8 @@ class SunsynkOptimizer:
             "soc": soc,
             "raw_forecast_kwh": raw_forecast_kwh,
             "forecast_correction_factor": forecast_correction,
+            "forecast_correction_weighted": weighted_correction,
+            "forecast_correction_weighted_basis": weighted_basis,
             "solar_forecast_kwh": solar_forecast_kwh,
             "low_solar_forecast_kwh": round(low_solar_forecast_kwh, 2),
             "forecast_band": band,
