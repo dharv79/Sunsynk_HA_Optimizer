@@ -2,7 +2,7 @@
 
 ## Context
 
-Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15). Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
+Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b1 (beta) adds phase 11. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
 
 ## Phase status
 
@@ -18,7 +18,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 8. Weekly digest covers a full 7 days | Done, merged (6f45de0, PR #19) | XS, ~15k actual |
 | 9. Cost-aware export go-live decision | Done: decided to keep shadow mode (no code change) | XS, ~15k actual |
 | 10. Free electricity event (sell before, refill during) | In progress — planner done (a7fb3ee, PR #23); manual entry done and merged (cbee324, PR #25; in 1.0.11b13); validation/startup-warning fixes merged (fb0d791, PR #27; in 1.0.11b14); Octopus auto-detect not started | M, ~60-90k |
-| 11. Latest complete cost day in the 22:00 bundle | Planned, not built | XS–S, ~20-40k |
+| 11. Latest complete cost day in the 22:00 bundle (1.0.12b1) | Done, merged (af7d6ac, PR #30) | XS, ~25k actual |
 
 Token actuals were not metered before this index existed; record them from phase 8 on.
 
