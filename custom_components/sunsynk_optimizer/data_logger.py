@@ -101,6 +101,10 @@ class DataLogger:
         """Log the weekly full-charge day selection and its weather scores."""
         await self._async_append(_record("full_charge_day", chosen_day=chosen_day, scores=scores))
 
+    async def async_log_full_charge_recheck(self, **fields: Any) -> None:
+        """Log the daily full-charge-day re-check (moved or not, with the reason)."""
+        await self._async_append(_record("full_charge_recheck", **fields))
+
     async def async_log_morning_state(
         self,
         date: str,

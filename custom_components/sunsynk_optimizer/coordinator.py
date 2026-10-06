@@ -37,6 +37,9 @@ class OptimizerState:
 
     selected_full_charge_day: str | None = None
     last_full_charge_scores: dict[str, float] = field(default_factory=dict)
+    # Day the daily re-check moved this week's full-charge day to (phase 19);
+    # cleared by the Sunday pick so it moves at most once a week.
+    full_charge_day_moved_to: str | None = None
     last_import_plan: dict[str, Any] = field(default_factory=dict)
     # Last non-startup plan (the 01:55 run). last_import_plan also takes
     # startup/reload re-plans; this one feeds the 22:00 data report.

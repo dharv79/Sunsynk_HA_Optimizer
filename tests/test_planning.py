@@ -338,3 +338,53 @@ def test_latest_complete_cost_day_picks_newest_in_window(planning):
     ]
     assert planning.latest_complete_cost_day(days, "2026-10-01")["date"] == "2026-10-03"
     assert planning.latest_complete_cost_day(days[2:], "2026-10-01") is None
+
+
+# --- Phase 19: daily full-charge-day re-check ---
+
+_WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+
+def _move(planning, **overrides):
+    kwargs = dict(
+        tomorrow="Tuesday",
+        chosen="Thursday",
+        tomorrow_kwh=20.0,
+        needed_kwh=16.0,
+        tomorrow_score=80.0,
+        chosen_score=40.0,
+        already_moved=False,
+        weekdays=_WEEKDAYS,
+    )
+    kwargs.update(overrides)
+    return planning.full_charge_day_move(**kwargs)
+
+
+def test_solar_kwh_to_fill(planning):
+    assert planning.solar_kwh_to_fill(10.0, 0.75) == 16.0
+
+
+def test_full_charge_move_sunny_tomorrow_better_weather(planning):
+    assert _move(planning) == (True, "moved")
+
+
+@pytest.mark.parametrize(
+    "overrides, reason",
+    [
+        ({"tomorrow": "Saturday"}, "not_weekday"),
+        ({"tomorrow": "Thursday"}, "already_chosen"),
+        ({"tomorrow": "Friday"}, "chosen_passed"),
+        ({"already_moved": True}, "already_moved"),
+        ({"tomorrow_kwh": None}, "no_forecast"),
+        ({"tomorrow_kwh": 15.9}, "not_enough_solar"),
+        ({"tomorrow_score": None}, "no_weather"),
+        ({"chosen_score": None}, "no_weather"),
+        ({"tomorrow_score": 40.0}, "chosen_looks_better"),
+    ],
+)
+def test_full_charge_move_blocked(planning, overrides, reason):
+    assert _move(planning, **overrides) == (False, reason)
+
+
+def test_full_charge_move_exact_threshold_moves(planning):
+    assert _move(planning, tomorrow_kwh=16.0) == (True, "moved")

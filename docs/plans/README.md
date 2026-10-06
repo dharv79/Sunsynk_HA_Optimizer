@@ -19,6 +19,28 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 9. Cost-aware export go-live decision | Done: decided to keep shadow mode (no code change) | XS, ~15k actual |
 | 10. Free electricity event (sell before, refill during) | In progress — planner done (a7fb3ee, PR #23); manual entry done and merged (cbee324, PR #25; in 1.0.11b13); validation/startup-warning fixes merged (fb0d791, PR #27; in 1.0.11b14); Octopus auto-detect not started | M, ~60-90k |
 | 11. Latest complete cost day in the 22:00 bundle (1.0.12b1) | Done, merged (af7d6ac, PR #30) | XS, ~25k actual |
+| 12. Learned household load (+ zero day_actuals guard) | Planned, not built | S, ~25-45k |
+| 13. Charge losses and in-window load in Flux 1 sizing | Planned, not built | XS–S, ~15-30k |
+| 14. Efficiency KPIs and backtest harness | Planned, not built | M, ~50-80k |
+| 15. Day-rate import feedback for the overnight target | Planned, not built | S–M, ~35-60k |
+| 16. Evening reserve to 02:00 | Planned, not built | S, ~25-45k |
+| 17. Sell the expected surplus at the peak rate | Planned, not built | M, ~50-80k |
+| 18. Read tariff rates from the Octopus integration | Planned, not built | S, ~20-40k |
+| 19. Pick the full-charge day from the solar forecast | Planned, not built | S, ~20-40k |
+| 20. Faster, seasonal forecast correction | Planned, not built | S, ~20-40k |
+| 21. Octopus Saving Sessions | Planned, not built | S–M, ~35-60k |
+| 22. Charge watchdog | Planned, not built | S, ~25-45k |
+| 23. Gentler charging across the cheap window | Planned, not built | S–M, ~35-60k |
+| 24. Battery wear cost in decisions | Planned, not built | S, ~20-40k |
+| 25. Spare solar sensor and appliance prompts | Planned, not built | S, ~20-40k |
+| 26. Overnight baseload alert | Planned, not built | S, ~20-40k |
+| 27. Automatic away mode | Planned, not built | XS–S, ~15-30k |
+| 28. Tariff comparison report | Planned, not built | M, ~50-80k |
+| 29. Clipped solar detection | Planned, not built | S, ~20-40k |
+
+Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
+
+Phases 22–29 come from the second improvement list (06/10/2026; items 26 hot-water diversion and 31 EV battery hold were declined). 22 is independent and recommended early; 23 needs 22 (safety net) and an API check; 24 before 17; 26 shares phase 12's missing-meter guard; 28 and 23 start with a feasibility check and go "On hold" if it fails.
 
 Token actuals were not metered before this index existed; record them from phase 8 on.
 

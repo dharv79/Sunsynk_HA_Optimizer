@@ -263,6 +263,53 @@ def score_full_charge_day(item: dict[str, Any], day_name: str) -> float:
     return round(score, 1)
 
 
+# Daylight hours of house load the PV must cover on top of filling the battery
+# for a full-charge day to reach 100% from solar rather than grid.
+FULL_CHARGE_DAYLIGHT_LOAD_HOURS = 8.0
+
+
+def solar_kwh_to_fill(battery_capacity_kwh: float, avg_consumption_kw: float) -> float:
+    """Conservative PV kWh needed to fill the battery from empty plus daytime load."""
+    return round(battery_capacity_kwh + avg_consumption_kw * FULL_CHARGE_DAYLIGHT_LOAD_HOURS, 2)
+
+
+def full_charge_day_move(
+    *,
+    tomorrow: str,
+    chosen: str,
+    tomorrow_kwh: float | None,
+    needed_kwh: float,
+    tomorrow_score: float | None,
+    chosen_score: float | None,
+    already_moved: bool,
+    weekdays: list[str],
+) -> tuple[bool, str]:
+    """Daily re-check: move this week's full-charge day to tomorrow?
+
+    Moves only when tomorrow's kWh forecast says PV alone can reach 100% and
+    tomorrow's weather scores better than the chosen day's, at most once a
+    week and never to a day after the chosen one has already passed.
+    Returns (move, reason); missing inputs never move.
+    """
+    if tomorrow not in weekdays or chosen not in weekdays:
+        return False, "not_weekday"
+    if tomorrow == chosen:
+        return False, "already_chosen"
+    if weekdays.index(chosen) < weekdays.index(tomorrow):
+        return False, "chosen_passed"
+    if already_moved:
+        return False, "already_moved"
+    if tomorrow_kwh is None:
+        return False, "no_forecast"
+    if tomorrow_kwh < needed_kwh:
+        return False, "not_enough_solar"
+    if tomorrow_score is None or chosen_score is None:
+        return False, "no_weather"
+    if tomorrow_score <= chosen_score:
+        return False, "chosen_looks_better"
+    return True, "moved"
+
+
 def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cost: float | None) -> float | None:
     """import - export + gas, or None if any input is missing (never treat missing as £0)."""
     if import_cost is None or export_income is None or gas_cost is None:
