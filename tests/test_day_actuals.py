@@ -141,3 +141,14 @@ def test_unavailable_meters_log_none_not_zero():
     assert written[0]["day_grid_import_kwh"] is None
     assert written[0]["day_grid_export_kwh"] == 1.23
     assert written[1]["overnight_load_kwh"] is None
+
+
+def test_charge_watchdog_dedups_same_night(tmp_path):
+    # At most one watchdog record per night, even if a restart re-runs it.
+    dl = _make_dl(tmp_path)
+    record = {"type": "charge_watchdog", "date": "2026-10-08", "result": "ok", "retried": False}
+    dl._write_record(record)
+    dl._write_record(dict(record, result="stalled"))
+    records = _read_jsonl(tmp_path)
+    assert len(records) == 1
+    assert records[0]["result"] == "ok"

@@ -502,3 +502,52 @@ def test_learned_load_weekend_split_with_fallback(planning):
 )
 def test_resolve_load_kw_clamps_to_config_band(planning, learned, expected):
     assert planning.resolve_load_kw(0.75, learned) == expected
+
+
+# ---- Phase 22: charge watchdog --------------------------------------------- #
+
+
+def _progress(planning, **overrides):
+    # 3 kW into 10 kWh for 20 min → ~10% expected rise; 2.5% needed.
+    kwargs = dict(start_soc=40.0, now_soc=40.0, minutes=20, expected_rate_kw=3.0, capacity_kwh=10.0,
+                  grid_import_w=200.0, target_soc=80)
+    kwargs.update(overrides)
+    return planning.charge_progress_ok(**kwargs)
+
+
+def test_charge_progress_rising_soc_is_ok(planning):
+    assert _progress(planning, now_soc=45.0) == "ok"
+
+
+def test_charge_progress_flat_soc_with_import_is_ok(planning):
+    # SOC can lag a cloud poll; grid draw at charge power proves it's running.
+    assert _progress(planning, grid_import_w=3200.0) == "ok"
+
+
+def test_charge_progress_flat_soc_no_import_is_stalled(planning):
+    assert _progress(planning) == "stalled"
+    assert _progress(planning, now_soc=41.0) == "stalled"  # 1% is SOC noise, not progress
+
+
+@pytest.mark.parametrize("missing", ["start_soc", "now_soc", "grid_import_w", "expected_rate_kw"])
+def test_charge_progress_missing_inputs_are_unknown(planning, missing):
+    assert _progress(planning, **{missing: None}) == "unknown"
+
+
+def test_charge_progress_no_elapsed_time_is_unknown(planning):
+    assert _progress(planning, minutes=0) == "unknown"
+
+
+def test_charge_progress_at_target_is_ok(planning):
+    assert _progress(planning, start_soc=79.0, now_soc=80.0) == "ok"
+
+
+def test_charge_progress_small_gain_floor(planning):
+    # 0.5 kW for 5 min → tiny expected rise; the 1% floor still applies.
+    assert _progress(planning, minutes=5, expected_rate_kw=0.5, now_soc=40.5, grid_import_w=0.0) == "stalled"
+    assert _progress(planning, minutes=5, expected_rate_kw=0.5, now_soc=41.0, grid_import_w=0.0) == "ok"
+
+
+@pytest.mark.parametrize("hhmm,minutes", [("02:00", 120), ("05:00", 300), ("bad", None), (None, None)])
+def test_hhmm_to_minutes(planning, hhmm, minutes):
+    assert planning.hhmm_to_minutes(hhmm) == minutes

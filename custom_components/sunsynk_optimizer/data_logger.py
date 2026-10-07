@@ -221,6 +221,10 @@ class DataLogger:
             )
         )
 
+    async def async_log_charge_watchdog(self, **fields: Any) -> None:
+        """Log the nightly charge watchdog outcome (phase 22): one record per night."""
+        await self._async_append(_record("charge_watchdog", **fields))
+
     async def async_log_free_event(self, event: dict[str, Any]) -> None:
         """Log a free-electricity-event lifecycle point (scheduled / done / cancelled).
 
@@ -631,7 +635,7 @@ class DataLogger:
     # ------------------------------------------------------------------ #
 
     # daily_cost is not deduped here — it merges via async_merge_daily_cost.
-    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals", "peak_window_usage")
+    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog")
 
     async def _async_append(self, record: dict[str, Any]) -> None:
         """Offload the blocking file write to the executor so it doesn't block the event loop."""

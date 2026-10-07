@@ -2,7 +2,7 @@
 
 ## Context
 
-Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b2 (beta) adds phases 11, 19 and 20. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
+Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b2 (beta) adds phases 11, 19 and 20; phase 12 is merged but not yet released. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
 
 ## Phase status
 
@@ -19,7 +19,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 9. Cost-aware export go-live decision | Done: decided to keep shadow mode (no code change) | XS, ~15k actual |
 | 10. Free electricity event (sell before, refill during) | In progress — planner done (a7fb3ee, PR #23); manual entry done and merged (cbee324, PR #25; in 1.0.11b13); validation/startup-warning fixes merged (fb0d791, PR #27; in 1.0.11b14); Octopus auto-detect not started | M, ~60-90k |
 | 11. Latest complete cost day in the 22:00 bundle (1.0.12b1) | Done, merged (af7d6ac, PR #30) | XS, ~25k actual |
-| 12. Learned household load (+ zero day_actuals guard) | In progress | S, ~25-45k |
+| 12. Learned household load (+ zero day_actuals guard) | Done, merged (7a1809a, PR #35) | S, ~35k actual |
 | 13. Charge losses and in-window load in Flux 1 sizing | Planned, not built | XS–S, ~15-30k |
 | 14. Efficiency KPIs and backtest harness | Planned, not built | M, ~50-80k |
 | 15. Day-rate import feedback for the overnight target | Planned, not built | S–M, ~35-60k |
