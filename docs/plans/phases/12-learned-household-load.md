@@ -1,6 +1,8 @@
 # Phase 12 — Learned household load
 
-**Status:** Planned, not built. **Size:** S, ~25-45k est. **Origin:** improvement list 06/10/2026 (item 1).
+**Status:** Done, merged (7a1809a, PR #35). **Size:** S, ~35k actual.
+
+**As built:** `planning.learned_load_kw` is the median of 06:00 `overnight_load_kwh / 6` over the last 28 home days, excluding full-charge days and days with a missing or zero load. It uses the weekday/weekend split when there are 7 matching days, otherwise pooled days, and needs at least 7 days. `resolve_load_kw` clamps the result to 0.5×–2× config; away nights keep the config rate. Missing meters at 22:00 and 06:00 now log `None`. The plan logs `load_source`, `learned_load_kw` and `learned_load_days`. Details: `docs/architecture/import-plan.md`. **Origin:** improvement list 06/10/2026 (item 1).
 
 ## Goal
 
