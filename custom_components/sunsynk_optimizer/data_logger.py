@@ -46,6 +46,9 @@ _IMPORT_PLAN_FIELDS = (
     "selected_full_charge_day",
     "away",
     "effective_charge_rate_kw",
+    "avg_consumption_kw",
+    "load_source",
+    "learned_load_kw",
 )
 
 
@@ -112,7 +115,7 @@ class DataLogger:
         date: str,
         morning_soc: float,
         morning_pv_power: float,
-        overnight_load_kwh: float = 0.0,
+        overnight_load_kwh: float | None = None,
     ) -> None:
         """Log SOC and PV power at 06:00 — just before solar typically starts.
 
@@ -128,7 +131,7 @@ class DataLogger:
                 date=date,
                 morning_soc=round(morning_soc, 1),
                 morning_pv_power=round(morning_pv_power, 1),
-                overnight_load_kwh=round(overnight_load_kwh, 2),
+                overnight_load_kwh=round_or_none(overnight_load_kwh),
             )
         )
 
@@ -195,9 +198,9 @@ class DataLogger:
         evening_soc: float,
         actual_solar_kwh: float,
         evening_export_disabled: bool,
-        day_load_kwh: float = 0.0,
-        day_grid_import_kwh: float = 0.0,
-        day_grid_export_kwh: float = 0.0,
+        day_load_kwh: float | None = None,
+        day_grid_import_kwh: float | None = None,
+        day_grid_export_kwh: float | None = None,
     ) -> None:
         """Log end-of-day actuals captured at 22:00.
 
@@ -212,9 +215,9 @@ class DataLogger:
                 evening_soc=round(evening_soc, 1),
                 actual_solar_kwh=round(actual_solar_kwh, 2),
                 evening_export_disabled=evening_export_disabled,
-                day_load_kwh=round(day_load_kwh, 2),
-                day_grid_import_kwh=round(day_grid_import_kwh, 2),
-                day_grid_export_kwh=round(day_grid_export_kwh, 2),
+                day_load_kwh=round_or_none(day_load_kwh),
+                day_grid_import_kwh=round_or_none(day_grid_import_kwh),
+                day_grid_export_kwh=round_or_none(day_grid_export_kwh),
             )
         )
 

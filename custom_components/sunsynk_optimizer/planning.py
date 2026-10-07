@@ -359,6 +359,60 @@ def weighted_forecast_correction(
     return max(0.5, min(3.0, round(factor, 3))), basis
 
 
+# Phase 12: overnight load rate learned from the 06:00 morning_state reading
+# (SolarSynkV3 daily load at 06:00 = 00:00-06:00 household use).
+OVERNIGHT_LOAD_HOURS = 6.0
+LEARNED_LOAD_WINDOW_DAYS = 28
+LEARNED_LOAD_MIN_DAYS = 7
+LEARNED_LOAD_CLAMP = (0.5, 2.0)
+
+
+def learned_load_kw(
+    paired_days: list[dict[str, Any]],
+    today: date,
+    weekend: bool | None = None,
+    window_days: int = LEARNED_LOAD_WINDOW_DAYS,
+    min_days: int = LEARNED_LOAD_MIN_DAYS,
+) -> tuple[float | None, int]:
+    """Return (median overnight kW, days used), or (None, n) below ``min_days``.
+
+    Home days only (away days are a different regime — do-not-break 18), no
+    full-charge days, and no day with a missing or zero load reading (a meter
+    unavailable at 06:00 must not drag the rate down). With ``weekend`` set,
+    uses only matching days when there are ``min_days`` of them, else all.
+    """
+    rates: list[tuple[float, bool]] = []
+    for d in paired_days:
+        load = d.get("overnight_load_kwh")
+        if d.get("away") or d.get("is_full_day") or not load or load <= 0:
+            continue
+        try:
+            day = date.fromisoformat(d["date"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not 0 < (today - day).days <= window_days:
+            continue
+        rates.append((load / OVERNIGHT_LOAD_HOURS, day.weekday() >= 5))
+    if weekend is not None:
+        matching = [r for r in rates if r[1] == weekend]
+        if len(matching) >= min_days:
+            rates = matching
+    if len(rates) < min_days:
+        return None, len(rates)
+    values = sorted(r for r, _ in rates)
+    mid = len(values) // 2
+    median = values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
+    return round(median, 3), len(values)
+
+
+def resolve_load_kw(config_kw: float, learned_kw: float | None) -> tuple[float, str]:
+    """Return (rate used, source): learned, clamped to 0.5x-2x config, else config."""
+    if learned_kw is None:
+        return config_kw, "config"
+    low, high = LEARNED_LOAD_CLAMP
+    return round(max(config_kw * low, min(config_kw * high, learned_kw)), 3), "learned"
+
+
 def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cost: float | None) -> float | None:
     """import - export + gas, or None if any input is missing (never treat missing as £0)."""
     if import_cost is None or export_income is None or gas_cost is None:

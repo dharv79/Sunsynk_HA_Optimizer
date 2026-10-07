@@ -62,3 +62,30 @@ Verification: `tests/test_planning.py` (`full_charge_day_move` reasons, threshol
 **Shadow.** The 01:55 plan logs `forecast_correction_weighted` and `forecast_correction_weighted_basis` beside `forecast_correction_factor` (both in `_IMPORT_PLAN_FIELDS`, so the JSONL record keeps them for the backtest); the live factor is unchanged. Switch over only after the phase 14 backtest shows the weighted factor tracks actual solar better. Low-solar decisions keep `min(raw, corrected)` either way (do-not-break 8). Solcast P10 was not added (Forecast.Solar is the configured source).
 
 **Verification.** `tests/test_planning.py` (min days, recency, band and fallback, cap, bad rows). In HA: after 01:55 the `import_plan` debug line carries both factors.
+
+## Learned household load (07/10/2026, phase 12)
+
+**Design.** The solar bridge (`bridge_soc`, `walk_bridge_gap`) used a fixed `avg_consumption_kw` from config (weekday/weekend/away). Home nights now use a rate learned from the 06:00 `morning_state.overnight_load_kwh`, which is the SolarSynkV3 daily load at 06:00, so it covers 00:00–06:00:
+
+- `planning.learned_load_kw(paired_days, today, weekend)` takes the median of `overnight_load_kwh / 6` over the last 28 complete days. It needs at least 7 days, otherwise it returns `None`.
+- Days that are excluded:
+  - away days (do-not-break 18);
+  - full-charge days;
+  - days with a missing or zero load;
+  - today.
+- The weekday/weekend split uses only matching days when there are 7 of them, otherwise all days.
+- `planning.resolve_load_kw` clamps the learned rate to 0.5×–2× the matching config rate. With no learned rate it falls back to config.
+- Away nights always use the config away rate.
+
+**Prerequisite fix.** A meter unavailable at 22:00 or 06:00 used to log `0.0` load, like the zeroed 28/09 `day_actuals`. It now logs `None`: `_async_capture_day_actuals` and `_async_capture_morning_state` read the meters with `_essential_state`. Zero and `None` days are skipped by the learning.
+
+**Logged.** The plan sets `avg_consumption_kw` (the rate used, which the dashboard reads) and also logs:
+
+- `load_source` (`learned` / `config`);
+- `learned_load_kw` (before the clamp, `None` when there is too little history);
+- `learned_load_days`.
+
+The first three fields are in `_IMPORT_PLAN_FIELDS`, so the JSONL record and the 22:00 bundle plan line both carry them. They are not read back by pairing.
+
+**Verification.** `tests/test_planning.py` covers the minimum day count, the median, the exclusions, the weekend split with its fallback, and the clamp. `tests/test_day_actuals.py` checks that missing meters log `None`.
+

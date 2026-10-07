@@ -83,10 +83,13 @@ from .planning import (
     forecast_band,
     full_charge_day_move,
     latest_complete_cost_day,
+    learned_load_kw,
     minutes_to_hhmm,
     net_cost_gbp,
     plan_free_event,
+    resolve_load_kw,
     resolve_used_charge_rate,
+    round_or_none,
     score_full_charge_day,
     select_target_soc,
     should_log_import_plan,
@@ -682,6 +685,10 @@ class SunsynkOptimizer:
             avg_consumption_kw = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
 
         paired_days = await self.data_logger.async_load_paired_days(days=30)
+        # Phase 12: home nights use the overnight rate learned from the 06:00
+        # load readings (clamped to 0.5x-2x config); away keeps its config rate.
+        learned_kw, learned_load_days = (None, 0) if away else learned_load_kw(paired_days, now.date(), is_weekend)
+        avg_consumption_kw, load_source = resolve_load_kw(avg_consumption_kw, learned_kw)
         forecast_correction = self.data_logger.compute_forecast_correction(paired_days)
         # When the forecast sensor was unavailable we already used yesterday's raw
         # value; don't apply the correction factor a second time on top of values
@@ -810,6 +817,9 @@ class SunsynkOptimizer:
             "is_weekend": is_weekend,
             "away": away,
             "avg_consumption_kw": avg_consumption_kw,
+            "load_source": load_source,
+            "learned_load_kw": learned_kw,
+            "learned_load_days": learned_load_days,
             "battery_temp_c": battery_temp_c,
             "temp_deration_factor": temp_factor,
             "hourly_forecast_used": decision.hourly_forecast_used,
@@ -1419,7 +1429,7 @@ class SunsynkOptimizer:
             self._state_float(self.pv_mppt0_entity, 0)
             + self._state_float(self.pv_mppt1_entity, 0)
         )
-        overnight_load_kwh = self._state_float(self.day_load_entity, 0)
+        overnight_load_kwh = self._essential_state(self.day_load_entity)
         date = dt_util.now().date().isoformat()
         await self.data_logger.async_log_morning_state(
             date=date,
@@ -1434,7 +1444,7 @@ class SunsynkOptimizer:
                 "date": date,
                 "morning_soc": round(soc, 1),
                 "morning_pv_power": round(pv_power, 1),
-                "overnight_load_kwh": round(overnight_load_kwh, 2),
+                "overnight_load_kwh": round_or_none(overnight_load_kwh),
             },
         )
         await self._async_capture_daily_cost()
@@ -1516,10 +1526,10 @@ class SunsynkOptimizer:
         await self._async_capture_daily_cost()
         soc = self._state_float(self.battery_soc_entity, 0)
         actual_solar_kwh = self._state_float(self.day_pv_energy_entity, 0)
-        meters = self._read_daily_meters()
-        day_load_kwh = meters["load"]
-        day_grid_import_kwh = meters["grid_import"]
-        day_grid_export_kwh = meters["grid_export"]
+        # Unavailable meters log None, not 0.0 — a zero load would skew learning.
+        day_load_kwh = self._essential_state(self.day_load_entity)
+        day_grid_import_kwh = self._essential_state(self.day_grid_import_entity)
+        day_grid_export_kwh = self._essential_state(self.day_grid_export_entity)
         now = dt_util.now()
         date = now.date().isoformat()
         evening_export_disabled = self.coordinator.state.evening_export_disabled
@@ -1538,9 +1548,9 @@ class SunsynkOptimizer:
             "evening_soc": round(soc, 1),
             "actual_solar_kwh": round(actual_solar_kwh, 2),
             "evening_export_disabled": evening_export_disabled,
-            "day_load_kwh": round(day_load_kwh, 2),
-            "day_grid_import_kwh": round(day_grid_import_kwh, 2),
-            "day_grid_export_kwh": round(day_grid_export_kwh, 2),
+            "day_load_kwh": round_or_none(day_load_kwh),
+            "day_grid_import_kwh": round_or_none(day_grid_import_kwh),
+            "day_grid_export_kwh": round_or_none(day_grid_export_kwh),
         }
         # Persisted (not just logged/notified) so the dashboard's Consumption
         # sensor has today's actuals to display, the same way last_morning_state
