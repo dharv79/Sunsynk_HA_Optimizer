@@ -217,6 +217,53 @@ def minutes_to_hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def hhmm_to_minutes(hhmm: str) -> int | None:
+    """Minutes after midnight for an "HH:MM" string, or None when malformed."""
+    try:
+        hours, minutes = str(hhmm).split(":")
+        return int(hours) * 60 + int(minutes)
+    except (ValueError, TypeError):
+        return None
+
+
+CHARGE_WATCHDOG_MINUTES = 2 * 60 + 20  # 20 min into the 02:00 import window
+CHARGE_WATCHDOG_RECHECK_MINUTES = 15
+# Progress counts as "ok" once SOC has gained this share of the expected rise
+# (the charge ramps up and house load eats into it), with a 1% floor so SOC
+# rounding alone never passes; or while grid import is at least this share of
+# the expected charge power (SOC can lag the cloud reading by a poll or two).
+CHARGE_WATCHDOG_SOC_SHARE = 0.25
+CHARGE_WATCHDOG_MIN_SOC_GAIN = 1.0
+CHARGE_WATCHDOG_IMPORT_SHARE = 0.5
+
+
+def charge_progress_ok(
+    start_soc: float | None,
+    now_soc: float | None,
+    minutes: float,
+    expected_rate_kw: float | None,
+    capacity_kwh: float,
+    grid_import_w: float | None,
+    target_soc: float | None = None,
+) -> str:
+    """Judge whether the overnight Flux 1 charge is running: ok | stalled | unknown.
+
+    "unknown" (missing sensors or rate, no elapsed time) must never trigger
+    an action. Reaching the target counts as ok — the inverter stops charging.
+    """
+    if start_soc is None or now_soc is None or grid_import_w is None or not expected_rate_kw or minutes <= 0:
+        return "unknown"
+    if target_soc is not None and now_soc >= target_soc:
+        return "ok"
+    expected_gain = expected_rate_kw * minutes / 60.0 / max(0.1, capacity_kwh) * 100.0
+    needed_gain = max(CHARGE_WATCHDOG_MIN_SOC_GAIN, expected_gain * CHARGE_WATCHDOG_SOC_SHARE)
+    if now_soc - start_soc >= needed_gain:
+        return "ok"
+    if grid_import_w >= expected_rate_kw * 1000 * CHARGE_WATCHDOG_IMPORT_SHARE:
+        return "ok"
+    return "stalled"
+
+
 STARTUP_PLAN_SOURCE = "startup"
 NIGHTLY_PLAN_MINUTES = 1 * 60 + 55
 

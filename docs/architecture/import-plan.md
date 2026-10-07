@@ -89,3 +89,13 @@ The first three fields are in `_IMPORT_PLAN_FIELDS`, so the JSONL record and the
 
 **Verification.** `tests/test_planning.py` covers the minimum day count, the median, the exclusions, the weekend split with its fallback, and the clamp. `tests/test_day_actuals.py` checks that missing meters log `None`.
 
+
+## Charge watchdog (07/10/2026, phase 22)
+
+Catches a night where the Flux 1 charge silently fails (cloud write lost, inverter ignored it).
+
+- **When:** 02:20 listener (`CHARGE_WATCHDOG_MINUTES`), run through `_guarded`. Skipped in monitor mode, while a free event holds the slots, when tonight's 01:55 plan (`nightly_import_plan`) never pushed (`api_ok is None`), when no charge was planned (`target_soc <= soc`), or when the window has already ended.
+- **Judgement:** pure `planning.charge_progress_ok(start_soc, now_soc, minutes, expected_rate_kw, capacity_kwh, grid_import_w, target_soc)` → `ok | stalled | unknown`. `ok` when SOC rose by at least 25% of the expected rise (1% floor), grid import is at least 50% of the expected charge power (SOC lags the cloud poll), or SOC reached target. `unknown` on any missing sensor — never acted on.
+- **On stalled:** re-push the plan's payload once via `async_push_flux_override` → `_async_post_with_status`, then re-check 15 min later (`async_call_later`, handle cancelled on shutdown, unpersisted), judged from the retry-time SOC over the minutes the window was still open. Still stalled → "⚠️ Sunsynk: overnight charge not running" with SOC, target, window and grid figures; wording gated on the re-push bool.
+- **Log:** `charge_watchdog` record (`result` ok / unknown / recovered / stalled, `retried`, `retry_api_ok`, `soc_start`, `soc_now`, `grid_import_w`, `first_check`); in `_DEDUP_TYPES`, so one per night.
+- **Verification:** `tests/test_planning.py` (rising SOC, flat with import, flat without, missing sensors, target reached, 1% floor); `tests/test_day_actuals.py` dedup. Live behaviour needs a real failed night; the listener path is HA-only.

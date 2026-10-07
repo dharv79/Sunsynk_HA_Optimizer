@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -76,12 +77,16 @@ from .planning import (
     LOW_SOLAR_THRESHOLD_KWH,
     STARTUP_PLAN_SOURCE,
     WEEK_HISTORY_DAYS,
+    CHARGE_WATCHDOG_MINUTES,
+    CHARGE_WATCHDOG_RECHECK_MINUTES,
     apply_soc_adjustments,
+    charge_progress_ok,
     daily_report_plans,
     days_in_period,
     flux1_end_minutes,
     forecast_band,
     full_charge_day_move,
+    hhmm_to_minutes,
     latest_complete_cost_day,
     learned_load_kw,
     minutes_to_hhmm,
@@ -147,6 +152,9 @@ class SunsynkOptimizer:
         # persisted — restart resumption re-arms them from coordinator.state.free_event
         # via _arm_free_event_timers, same tradeoff as pending_full_trim_cancel above.
         self._free_event_unsubs: list[Any] = []
+        # Charge watchdog (phase 22) 15-minute re-check handle. Not persisted:
+        # a restart mid-check just skips that night's re-check.
+        self._charge_watchdog_recheck = None
         self.data_logger = DataLogger(hass)
 
     @property
@@ -195,6 +203,7 @@ class SunsynkOptimizer:
         daily = (
             (18, 0, self._async_choose_best_full_charge_day),  # gated to Sundays in the handler
             (1, 55, self._async_run_import_plan),
+            (CHARGE_WATCHDOG_MINUTES // 60, CHARGE_WATCHDOG_MINUTES % 60, self._async_charge_watchdog),
             (6, 0, self._async_capture_morning_state),
             (22, 0, self._async_capture_day_actuals),
         )
@@ -225,6 +234,9 @@ class SunsynkOptimizer:
             unsub()
         self.unsubs.clear()
         self._clear_free_event_timers()
+        if self._charge_watchdog_recheck:
+            self._charge_watchdog_recheck()
+            self._charge_watchdog_recheck = None
         if self.pending_full_trim_cancel:
             self.pending_full_trim_cancel()
             self.pending_full_trim_cancel = None
@@ -1295,6 +1307,103 @@ class SunsynkOptimizer:
     async def _async_run_import_plan(self, _now) -> None:
         """Time-change callback at 01:55 daily."""
         await self._guarded(self.async_run_import_plan, "Scheduled import plan")
+
+    async def _async_charge_watchdog(self, _now) -> None:
+        """Time-change callback at 02:20 daily."""
+        await self._guarded(self.async_run_charge_watchdog, "Charge watchdog")
+
+    def _charge_watchdog_plan(self, now) -> dict[str, Any] | None:
+        """Tonight's pushed plan when it has a charge to watch, else None.
+
+        Skipped in monitor mode (no API writes), while a free event holds the
+        Flux slots, when the 01:55 push never ran, or when no charge was planned.
+        """
+        if self.operation_mode == "monitor" or self._free_event_active():
+            return None
+        plan = self.coordinator.state.nightly_import_plan or {}
+        if plan.get("date") != now.date().isoformat() or plan.get("api_ok") is None:
+            return None
+        soc, target = plan.get("soc"), plan.get("target_soc")
+        if soc is None or target is None or target <= soc or not plan.get("payload"):
+            return None
+        return plan
+
+    async def async_run_charge_watchdog(self) -> None:
+        """Check the overnight charge is running; re-push the plan once if stalled."""
+        now = dt_util.now()
+        plan = self._charge_watchdog_plan(now)
+        now_minutes = now.hour * 60 + now.minute
+        end_minutes = hhmm_to_minutes(plan.get("flux1_end")) if plan else None
+        if plan is None or end_minutes is None or end_minutes <= now_minutes:
+            return
+        capacity = max(0.1, float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        soc_now = self._essential_state(self.battery_soc_entity)
+        grid_import_w = self._essential_state(self.grid_pac_entity)
+        result = charge_progress_ok(
+            plan["soc"], soc_now, now_minutes - 2 * 60, plan.get("used_charge_rate_kw"),
+            capacity, grid_import_w, plan["target_soc"],
+        )
+        record = {
+            "date": plan["date"],
+            "soc_start": plan["soc"],
+            "target_soc": plan["target_soc"],
+            "expected_rate_kw": plan.get("used_charge_rate_kw"),
+            "first_check": {"soc_now": soc_now, "grid_import_w": grid_import_w, "result": result},
+        }
+        if result != "stalled":
+            await self.data_logger.async_log_charge_watchdog(
+                **record, result=result, retried=False, soc_now=soc_now, grid_import_w=grid_import_w
+            )
+            return
+        retry_ok = await self.async_push_flux_override(plan["payload"])
+        retry = {**record, "retry_api_ok": retry_ok, "retry_minutes": now_minutes, "retry_soc": soc_now}
+        self._charge_watchdog_recheck = async_call_later(
+            self.hass,
+            CHARGE_WATCHDOG_RECHECK_MINUTES * 60,
+            partial(self._async_charge_watchdog_recheck, retry),
+        )
+
+    async def _async_charge_watchdog_recheck(self, retry: dict[str, Any], _now) -> None:
+        self._charge_watchdog_recheck = None
+        await self._guarded(lambda: self.async_run_charge_watchdog_recheck(retry), "Charge watchdog re-check")
+
+    async def async_run_charge_watchdog_recheck(self, retry: dict[str, Any]) -> None:
+        """Judge the charge again after the one retry; notify if still stalled."""
+        now = dt_util.now()
+        plan = self._charge_watchdog_plan(now)
+        if plan is None:
+            return
+        capacity = max(0.1, float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        soc_now = self._essential_state(self.battery_soc_entity)
+        grid_import_w = self._essential_state(self.grid_pac_entity)
+        # If the window ended before the re-check, judge only the minutes it was open.
+        end_minutes = hhmm_to_minutes(plan.get("flux1_end")) or 0
+        elapsed = min(now.hour * 60 + now.minute, end_minutes) - retry["retry_minutes"]
+        result = charge_progress_ok(
+            retry["retry_soc"], soc_now, elapsed, plan.get("used_charge_rate_kw"),
+            capacity, grid_import_w, plan["target_soc"],
+        )
+        fields = {k: v for k, v in retry.items() if k not in ("retry_minutes", "retry_soc")}
+        await self.data_logger.async_log_charge_watchdog(
+            **fields,
+            result="recovered" if result == "ok" else result,
+            retried=True,
+            soc_now=soc_now,
+            grid_import_w=grid_import_w,
+        )
+        if result != "stalled":
+            return
+        pushed = (
+            "The plan was re-pushed once but the charge still isn't running."
+            if retry["retry_api_ok"]
+            else "Re-pushing the plan FAILED — the inverter may not have the charge window."
+        )
+        await self.async_notify(
+            "⚠️ Sunsynk: overnight charge not running",
+            f"{pushed} SOC {plan['soc']}% at 01:55 → {soc_now}% now (target {plan['target_soc']}%, "
+            f"window {plan.get('next_import_window')}). Grid import {round(grid_import_w)} W. "
+            "Check the inverter's time-of-use settings.",
+        )
 
     async def _async_periodic_flux2_check(self, _now) -> None:
         """30-minute interval callback."""
