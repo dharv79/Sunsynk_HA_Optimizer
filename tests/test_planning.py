@@ -440,3 +440,65 @@ def test_weighted_correction_skips_tiny_forecasts_and_bad_dates(planning):
     days.append({"date": "2026-10-05", "solar_forecast_kwh": 0.2, "actual_solar_kwh": 9.0})
     days.append({"date": None, "solar_forecast_kwh": 10.0, "actual_solar_kwh": 30.0})
     assert planning.weighted_forecast_correction(days, date(2026, 10, 6)) == (1.1, "global")
+
+
+# Phase 12: learned household load. 2026-10-06 is a Tuesday.
+def _load_day(age, kwh, today="2026-10-06", **extra):
+    from datetime import date, timedelta
+
+    d = date.fromisoformat(today) - timedelta(days=age)
+    return {"date": d.isoformat(), "overnight_load_kwh": kwh, **extra}
+
+
+def test_learned_load_needs_min_days(planning):
+    from datetime import date
+
+    days = [_load_day(a, 3.0) for a in range(1, 7)]
+    assert planning.learned_load_kw(days, date(2026, 10, 6)) == (None, 6)
+
+
+def test_learned_load_median_rate(planning):
+    from datetime import date
+
+    days = [_load_day(a, kwh) for a, kwh in enumerate([3.0, 3.6, 4.2, 4.8, 5.4, 6.0, 30.0], start=1)]
+    # Median 4.8 kWh over 00:00-06:00 → 0.8 kW; the 30 kWh outlier doesn't move it.
+    assert planning.learned_load_kw(days, date(2026, 10, 6)) == (0.8, 7)
+
+
+def test_learned_load_excludes_away_full_missing_zero_and_old(planning):
+    from datetime import date
+
+    good = [_load_day(a, 3.0) for a in range(1, 8)]
+    bad = [
+        _load_day(8, 12.0, away=True),
+        _load_day(9, 12.0, is_full_day=True),
+        _load_day(10, None),
+        _load_day(11, 0.0),
+        _load_day(29, 12.0),  # outside the 28-day window
+        _load_day(0, 12.0),  # today: not a complete past night
+        {"date": None, "overnight_load_kwh": 12.0},
+    ]
+    assert planning.learned_load_kw(good + bad, date(2026, 10, 6)) == (0.5, 7)
+
+
+def test_learned_load_weekend_split_with_fallback(planning):
+    from datetime import date
+
+    # 28 days back from Tue 06/10: 8 weekend days at 1.2 kW, 20 weekdays at 0.6 kW.
+    days = [
+        _load_day(a, 7.2 if date.fromordinal(date(2026, 10, 6).toordinal() - a).weekday() >= 5 else 3.6)
+        for a in range(1, 29)
+    ]
+    today = date(2026, 10, 6)
+    assert planning.learned_load_kw(days, today, weekend=True) == (1.2, 8)
+    assert planning.learned_load_kw(days, today, weekend=False) == (0.6, 20)
+    # Too few weekend days → pooled history.
+    assert planning.learned_load_kw(days[:14], today, weekend=True) == (0.6, 14)
+
+
+@pytest.mark.parametrize(
+    "learned,expected",
+    [(None, (0.75, "config")), (0.9, (0.9, "learned")), (0.2, (0.375, "learned")), (3.0, (1.5, "learned"))],
+)
+def test_resolve_load_kw_clamps_to_config_band(planning, learned, expected):
+    assert planning.resolve_load_kw(0.75, learned) == expected

@@ -118,3 +118,26 @@ def test_peak_window_usage_dedups_same_day(tmp_path):
     records = _read_jsonl(tmp_path)
     assert len(records) == 1
     assert records[0]["peak_load_kwh"] == 3.2  # first write wins, no duplicate
+
+
+def test_unavailable_meters_log_none_not_zero():
+    # A meter unavailable at 22:00 / 06:00 used to log 0.0, which would drag
+    # the phase 12 learned load rate down; it must log None instead.
+    import asyncio
+
+    dl = object.__new__(_data_logger.DataLogger)
+    written = []
+
+    async def _append(record):
+        written.append(record)
+
+    dl._async_append = _append
+    asyncio.run(dl.async_log_day_actuals(
+        date="2026-09-28", evening_soc=50.0, actual_solar_kwh=8.0, evening_export_disabled=False,
+        day_load_kwh=None, day_grid_import_kwh=None, day_grid_export_kwh=1.234,
+    ))
+    asyncio.run(dl.async_log_morning_state(date="2026-09-29", morning_soc=40.0, morning_pv_power=0.0))
+    assert written[0]["day_load_kwh"] is None
+    assert written[0]["day_grid_import_kwh"] is None
+    assert written[0]["day_grid_export_kwh"] == 1.23
+    assert written[1]["overnight_load_kwh"] is None
