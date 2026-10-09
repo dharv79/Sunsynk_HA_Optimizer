@@ -49,6 +49,9 @@ _IMPORT_PLAN_FIELDS = (
     "avg_consumption_kw",
     "load_source",
     "learned_load_kw",
+    "charge_efficiency",
+    "window_load_kwh",
+    "grid_kwh_needed",
 )
 
 

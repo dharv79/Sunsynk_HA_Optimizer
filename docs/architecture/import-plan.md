@@ -25,7 +25,7 @@ Before calculating targets, four adaptive corrections are fetched from `data_log
 
 Drain and evening-nudge adjustments are applied whenever `target_soc < 100` (covers both regular nights and full-charge-day solar bridge plans). Skipped when target is already 100%.
 
-Import window (Flux 1) is physics-based: `minutes = (energy_needed_kwh / used_charge_rate) × 60`, rounded up to the next 15-minute slot, clamped 02:15–05:00. Extended to 05:00 when `low_solar_forecast_kwh < 7`. `used_charge_rate = min(config charge rate, effective_charge_rate)`, then multiplied by a battery-temperature deration factor.
+Import window (Flux 1) is physics-based: `minutes = (energy_needed_kwh / charge_efficiency / used_charge_rate) × 60` (phase 13), rounded up to the next 15-minute slot, clamped 02:15–05:00. Extended to 05:00 when `low_solar_forecast_kwh < 7`. `used_charge_rate = min(config charge rate, effective_charge_rate)`, then multiplied by a battery-temperature deration factor.
 
 All API pushes go through `_async_post_with_status()` which returns a bool. On failure the notification title switches to a "⚠️ Sunsynk: … NOT applied" variant. On a successful push the import plan clears any stale `last_error`. The plan state dict always includes `api_ok`, `source`, `forecast_fallback`, `low_solar_forecast_kwh`, and `charge_rate_from_cache` fields. Notification titles follow a `🔋 Sunsynk: <sentence case>` convention.
 
@@ -99,3 +99,20 @@ Catches a night where the Flux 1 charge silently fails (cloud write lost, invert
 - **On stalled:** re-push the plan's payload once via `async_push_flux_override` → `_async_post_with_status`, then re-check 15 min later (`async_call_later`, handle cancelled on shutdown, unpersisted), judged from the retry-time SOC over the minutes the window was still open. Still stalled → "⚠️ Sunsynk: overnight charge not running" with SOC, target, window and grid figures; wording gated on the re-push bool.
 - **Log:** `charge_watchdog` record (`result` ok / unknown / recovered / stalled, `retried`, `retry_api_ok`, `soc_start`, `soc_now`, `grid_import_w`, `first_check`); in `_DEDUP_TYPES`, so one per night.
 - **Verification:** `tests/test_planning.py` (rising SOC, flat with import, flat without, missing sensors, target reached, 1% floor); `tests/test_day_actuals.py` dedup. Live behaviour needs a real failed night; the listener path is HA-only.
+
+
+## Charge losses and in-window load (09/10/2026, phase 13)
+
+**Problem.** Flux 1 was sized as if every imported kWh landed in the battery, and the plan never said how much grid energy the night would buy.
+
+**Check first.** `compute_effective_charge_rate_kw` measures SOC gained per window hour, so the learned rate already embeds losses. Applying an efficiency on top of it would double-count.
+
+**Design.**
+
+- `planning.charge_efficiency(config_rate, effective_rate)` returns `CHARGE_EFFICIENCY` (0.92) when the nameplate rate is used, and 1.0 when the learned rate is used. It uses the same "more than 10% lower" test as `resolve_used_charge_rate`.
+- The window is `flux1_end_minutes(energy_needed / efficiency, used_charge_rate)`, still clamped 02:15–05:00. The low-solar 05:00 window is unchanged.
+- In-window house load is served from the grid in parallel with the battery charge, so it does not lengthen the window. Charge-end to 06:00 drain is already covered by the drain adjustment. `planning.window_grid_kwh` adds the load to the grid kWh instead: `grid_kwh_needed = energy_needed / efficiency + load_kw × window_hours`, where the load is phase 12's resolved `avg_consumption_kw`.
+
+**Logged.** The plan carries `charge_efficiency`, `energy_needed_kwh`, `window_load_kwh` and `grid_kwh_needed`. `charge_efficiency`, `window_load_kwh` and `grid_kwh_needed` are in `_IMPORT_PLAN_FIELDS`, so the JSONL record keeps them for the phase 14 KPIs.
+
+**Verification.** `tests/test_planning.py` checks that efficiency 1.0 with zero load reproduces the old minutes, that losses lengthen the window (2.9 kWh at 3 kW goes from 03:00 to 03:15), that the clamp holds, that the learned-rate path uses 1.0, and the grid kWh arithmetic. In HA, the Test plan button shows the new fields.
