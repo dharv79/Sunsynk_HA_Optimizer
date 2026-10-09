@@ -1,6 +1,16 @@
 # Phase 16 — Evening reserve to 02:00
 
-**Status:** Planned, not built. **Size:** S, ~25-45k est. **Origin:** improvement list 06/10/2026 (item 3).
+**Status:** Done, merged (f739100, PR #40). **Size:** S, ~20k actual.
+
+**As built:**
+
+- `planning.evening_reserve_soc(load_kw, capacity)` is `min(100, ceil(20 + load × 7 h / capacity × 100))`. The load is the plan rate, or config.
+- `planning.trim_target_soc` returns `max(82, reserve)`, or `None` (skip) when that is not below the SOC.
+- Both trims use it. The action names are kept, and the sensor reads the real target from the payload.
+- At the defaults the reserve is 73%, so there is no behaviour change until the load or capacity pushes it above 82%.
+- The 22:00 `day_kpis` line carries `evening_reserve_soc` and a new `grid_import_evening_kwh` (19:00–22:00 only, because the meters reset at midnight).
+
+Details: `docs/architecture/export-control.md`. **Origin:** improvement list 06/10/2026 (item 3).
 
 ## Goal
 

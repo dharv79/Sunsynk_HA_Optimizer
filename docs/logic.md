@@ -316,6 +316,7 @@ All configurable via **Settings → Devices & Services → Sunsynk Optimizer →
 | Default full-charge day | `default_full_charge_day` | Wednesday | Used until the weather-based selector has run |
 | Operation mode | `operation_mode` | auto | `auto` = full control, `monitor` = observe only |
 | Day-rate import feedback live | `import_feedback_live` | off | Off = log the phase 15 adjustment only; on = it replaces the evening SOC nudge |
+| Peak surplus export live | `peak_export_live` | off | Off = log the 16:00 decision only; on = export 16:00–19:00 down to evening reserve + 5% |
 
 ---
 

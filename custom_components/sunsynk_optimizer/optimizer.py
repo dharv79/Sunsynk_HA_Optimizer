@@ -40,6 +40,7 @@ from .const import (
     CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_IMPORT_FEEDBACK_LIVE,
+    CONF_PEAK_EXPORT_LIVE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
     CONF_FREE_EVENT_EXPORT_RATE_KW,
@@ -66,6 +67,7 @@ from .const import (
     DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_IMPORT_FEEDBACK_LIVE,
+    DEFAULT_PEAK_EXPORT_LIVE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
@@ -103,6 +105,7 @@ from .planning import (
     learned_load_kw,
     minutes_to_hhmm,
     net_cost_gbp,
+    peak_export_plan,
     plan_free_event,
     resolve_load_kw,
     resolve_used_charge_rate,
@@ -174,6 +177,10 @@ class SunsynkOptimizer:
         # Charge watchdog (phase 22) 15-minute re-check handle. Not persisted:
         # a restart mid-check just skips that night's re-check.
         self._charge_watchdog_recheck = None
+        # Today's 16:00 peak export decision (phase 17). Not persisted: after a
+        # restart mid-window a trim may replace a live export window, and the
+        # 22:00 bundle omits the line (the JSONL record survives).
+        self._peak_export: dict[str, Any] | None = None
         self.data_logger = DataLogger(hass)
 
     @property
@@ -229,6 +236,7 @@ class SunsynkOptimizer:
             (2, 0, self._async_meter_snapshot),
             (5, 0, self._async_meter_snapshot),
             (16, 0, self._async_meter_snapshot),
+            (16, 0, self._async_peak_export),
             (19, 0, self._async_meter_snapshot),
         )
         for hour, minute, callback in daily:
@@ -1093,7 +1101,10 @@ class SunsynkOptimizer:
         # Phase 16: never below the evening reserve (19:00 → 02:00 load).
         reserve = self._evening_reserve_soc()
         trim_target = trim_target_soc(soc, reserve)
-        if not is_full_day and soc > 85 and trim_target is not None and self._cooldown_ok():
+        if (
+            not is_full_day and soc > 85 and trim_target is not None
+            and not self._peak_export_holds_flux2(now_local) and self._cooldown_ok()
+        ):
             self._mark_trim()
             api_ok = await self._async_push_flux2_action(
                 "trim_to_82",
@@ -1270,6 +1281,10 @@ class SunsynkOptimizer:
             "year_to_date": self.coordinator.state.last_year_to_date_cost or {},
             "cost_aware_export_shadow_tally": shadow_mode_tally,
             **week_kpis(paired_days),
+            # Phase 17: shadow (or live) peak-export gain over the week.
+            "week_peak_export_kwh": _sum("peak_export_kwh"),
+            "week_peak_export_gain_gbp": _sum("peak_export_gain_gbp"),
+            "peak_export_live": bool(self.cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)),
         }
 
 
@@ -1549,6 +1564,73 @@ class SunsynkOptimizer:
         await self.data_logger.async_log_day_kpis(**record)
         return {"type": "day_kpis", **record}
 
+    async def _async_peak_export(self, _now) -> None:
+        await self._guarded(self.async_run_peak_export, "Peak surplus export")
+
+    async def async_run_peak_export(self) -> None:
+        """16:00: sell the SOC above the evening reserve + margin at the peak rate (phase 17).
+
+        Shadow by default: the decision, kWh and £ are logged and nothing is
+        pushed. Live (CONF_PEAK_EXPORT_LIVE) pushes Flux 2 16:00-19:00 to the
+        target via _async_post_with_status. Skipped while a free event holds
+        the slots; never pushes in monitor mode; the export-disable (watt
+        trigger) wins — if it already fired, or fires later, it holds 100%.
+        """
+        if self._free_event_active():
+            return
+        soc = self._essential_state(self.battery_soc_entity)
+        if soc is None:
+            return
+        cfg = self.cfg
+        now = dt_util.now()
+        reserve = self._evening_reserve_soc()
+        prices = kpi_prices_pence(cfg.get(CONF_CHARGES, []))
+        plan = peak_export_plan(
+            soc,
+            reserve,
+            max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))),
+            prices["export_peak"],
+            prices["offpeak"],
+        )
+        if plan["decision"] == "export" and self.coordinator.state.evening_export_disabled:
+            plan["decision"] = "export_disabled"
+        live = bool(cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)) and self.operation_mode != "monitor"
+        api_ok = None
+        if live and plan["decision"] == "export":
+            api_ok = await self._async_push_flux2_action(
+                "peak_export",
+                {"startTime": "16:00", "endTime": "19:00", "targetSoc": plan["target_soc"]},
+                {"soc": soc, "source": "automatic", "evening_reserve_soc": reserve},
+                f"surplus_{plan['export_kwh']}kWh_above_{plan['target_soc']}%",
+            )
+            title = "🔋 Sunsynk: selling surplus at peak rate" if api_ok else "⚠️ Sunsynk: peak export NOT applied"
+            await self.async_notify(
+                title,
+                f"SOC {round(soc, 1)}%: exporting about {plan['export_kwh']} kWh down to "
+                f"{plan['target_soc']}% (evening reserve {reserve}%) until 19:00.{_api_note(api_ok)}",
+            )
+        self._peak_export = {
+            "type": "peak_export",
+            "date": now.date().isoformat(),
+            "soc": soc,
+            "evening_reserve_soc": reserve,
+            **plan,
+            "live": live,
+            "api_ok": api_ok,
+        }
+        await self.data_logger.async_log_peak_export(
+            **{k: v for k, v in self._peak_export.items() if k != "type"}
+        )
+
+    def _peak_export_holds_flux2(self, now_local) -> bool:
+        """True while today's live peak export window owns Flux 2 (16:00-19:00)."""
+        rec = self._peak_export or {}
+        return (
+            rec.get("api_ok") is True
+            and rec.get("date") == now_local.date().isoformat()
+            and 16 <= now_local.hour < 19
+        )
+
     def _evening_reserve_soc(self) -> int:
         """Phase 16: SOC to hold at 19:00 so the house runs to the 02:00 off-peak start.
 
@@ -1595,9 +1677,10 @@ class SunsynkOptimizer:
                 # Phase 16: floor the sell-down at the evening reserve.
                 reserve = self._evening_reserve_soc()
                 trim_target = trim_target_soc(current_soc, reserve)
-                if trim_target is None:
-                    return
                 now_local = dt_util.now()
+                # A live peak export (phase 17) already sells lower; don't replace it.
+                if trim_target is None or self._peak_export_holds_flux2(now_local):
+                    return
                 api_ok = await self._async_push_flux2_action(
                     "full_day_trim_to_82",
                     {
@@ -1794,6 +1877,7 @@ class SunsynkOptimizer:
             peak_rec = self.coordinator.state.last_peak_window_usage or {}
             if peak_rec.get("date") != date:
                 peak_rec = {}
+            peak_export_rec = self._peak_export if (self._peak_export or {}).get("date") == date else {}
             # daily_cost is captured this morning tagged with YESTERDAY's date
             # (Octopus settlement lag — see _async_capture_daily_cost), so it's
             # inherently a day behind `date` here, not equal to it. Include it
@@ -1813,7 +1897,7 @@ class SunsynkOptimizer:
                 complete_rec = {}
             lines = "\n".join(
                 json.dumps(r)
-                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, peak_rec, cost_rec, complete_rec]
+                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, peak_rec, peak_export_rec, cost_rec, complete_rec]
                 if r
             )
             await self.async_notify(

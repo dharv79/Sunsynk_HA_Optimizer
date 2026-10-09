@@ -25,3 +25,43 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 **Logged.** The 22:00 `day_kpis` line carries `evening_reserve_soc`. A new KPI, `grid_import_evening_kwh`, covers 19:00–22:00; the meters reset at midnight, so 22:00–02:00 is not visible.
 
 **Verification.** `tests/test_planning.py` covers the reserve maths, the cap and the `max` floor, including skipping when nothing is left to trim. `tests/test_kpis.py` covers the evening band. In HA, a trim notification says "to keep the evening reserve" only when the reserve is above 82%.
+
+
+## Peak surplus export, shadow (09/10/2026, phase 17)
+
+**Goal.** Sell what the evening will not need at the Flux peak export rate, instead of only trimming to a fixed 82%.
+
+**Design.** A 16:00 listener (`_async_peak_export`, run through `_guarded`) calls `planning.peak_export_plan(soc, reserve, capacity, export_p, offpeak_p)`.
+
+- The target is the evening reserve (phase 16) plus a 5% margin, capped at 100.
+- The surplus is the SOC above the target, in kWh.
+- `planning.arbitrage_worth_it` says to sell only if the peak export price beats the off-peak price ÷ 0.85 round-trip efficiency, plus battery wear. The wear term is `None` (no term) until phase 24 adds the options.
+- The decision is one of:
+  - `export`;
+  - `no_surplus` (< 0.5 kWh);
+  - `not_worth_it`;
+  - `no_price`, because a missing price is never treated as 0p;
+  - `export_disabled`, when the watt-trigger pause is already active at 16:00. The export-disable always wins: if it fires later it pushes its 100% hold over the export window.
+- Prices come from `flux_helpers.kpi_prices_pence`.
+
+**Shadow and live.** The new option `peak_export_live` defaults off.
+
+- In shadow the decision is only logged.
+- Live (and not in monitor mode, do-not-break 16) pushes Flux 2 (index 1, do-not-break 3) 16:00–19:00 to the target as action `peak_export`, via `_async_post_with_status`. It notifies "🔋 Sunsynk: selling surplus at peak rate" or "⚠️ Sunsynk: peak export NOT applied", gated on the bool.
+- While a successful live export holds Flux 2, the daytime and full-charge-day trims are skipped so they don't replace the window (`_peak_export_holds_flux2`, unpersisted `_peak_export`).
+- The export is skipped entirely while a free event holds the slots (do-not-break 7).
+
+**Logged.** A `peak_export` record (deduped per day) holds `soc`, `evening_reserve_soc`, `decision`, `target_soc`, `export_kwh`, `export_gbp`, `gain_gbp` (export income minus replacement cost), `live` and `api_ok`.
+
+- It appears in the 22:00 bundle.
+- `_pair_records` carries `peak_export_kwh` / `peak_export_gain_gbp` / `peak_export_live` for export days only.
+- The Sunday digest adds `week_peak_export_kwh`, `week_peak_export_gain_gbp` and `peak_export_live`.
+
+**Verification.** `tests/test_kpis.py` covers:
+
+- the worth-it margin, the wear term, and missing prices;
+- that a surplus sets the target and kWh/£;
+- no surplus, not worth it, no price, and the 100 cap;
+- record dedup and export-only pairing.
+
+The free-event, monitor-mode and export-disable gates are early returns in the HA-only listener. In HA, the 22:00 bundle shows a `peak_export` line with `live: false`.

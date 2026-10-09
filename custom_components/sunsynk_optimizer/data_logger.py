@@ -240,6 +240,10 @@ class DataLogger:
         """Log the 22:00 efficiency KPIs (phase 14): one per day."""
         await self._async_append(_record("day_kpis", **fields))
 
+    async def async_log_peak_export(self, **fields: Any) -> None:
+        """Log the 16:00 peak surplus export decision (phase 17): one per day."""
+        await self._async_append(_record("peak_export", **fields))
+
     async def async_load_meter_snapshots(self, date: str) -> dict[str, dict[str, Any]]:
         """Return {"HH:MM": snapshot} for `date` (first record per time wins)."""
         records = await self.hass.async_add_executor_job(self._read_recent, 2)
@@ -310,7 +314,7 @@ class DataLogger:
         """Join import_plan + day_actuals + morning_state + daily_cost records by date into unified dicts."""
         by_type: dict[str, dict[str, dict[str, Any]]] = {
             "import_plan": {}, "day_actuals": {}, "morning_state": {}, "daily_cost": {},
-            "day_kpis": {},
+            "day_kpis": {}, "peak_export": {},
         }
         for r in records:
             bucket = by_type.get(r.get("type"))
@@ -321,6 +325,7 @@ class DataLogger:
         mornings = by_type["morning_state"]
         costs = by_type["daily_cost"]
         kpis = by_type["day_kpis"]
+        peak_exports = by_type["peak_export"]
         paired = []
         for date in set(plans) & set(actuals):
             plan = plans[date]
@@ -364,6 +369,8 @@ class DataLogger:
                 "initial_soc": plan.get("soc"),
                 "flux1_end": plan.get("flux1_end", ""),
                 **{key: kpis.get(date, {}).get(key) for key in DAY_KPI_FIELDS},
+                # Phase 17: shadow or live, only days whose 16:00 decision was export.
+                **_peak_export_fields(peak_exports.get(date, {})),
             })
         return paired
 
@@ -660,7 +667,7 @@ class DataLogger:
     # daily_cost is not deduped here — it merges via async_merge_daily_cost.
     _DEDUP_TYPES = (
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog",
-        "meter_snapshot", "day_kpis",
+        "meter_snapshot", "day_kpis", "peak_export",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:
@@ -718,3 +725,12 @@ def snapshots_for_date(records: list[dict[str, Any]], date: str) -> dict[str, di
         if rec.get("type") == "meter_snapshot" and rec.get("date") == date and rec.get("time"):
             out.setdefault(rec["time"], rec)
     return out
+
+
+def _peak_export_fields(rec: dict[str, Any]) -> dict[str, Any]:
+    exporting = rec.get("decision") == "export"
+    return {
+        "peak_export_kwh": rec.get("export_kwh") if exporting else None,
+        "peak_export_gain_gbp": rec.get("gain_gbp") if exporting else None,
+        "peak_export_live": rec.get("live") if exporting else None,
+    }

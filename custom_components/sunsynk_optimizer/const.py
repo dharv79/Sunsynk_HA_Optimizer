@@ -93,6 +93,12 @@ DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE = True
 CONF_IMPORT_FEEDBACK_LIVE = "import_feedback_live"
 DEFAULT_IMPORT_FEEDBACK_LIVE = False
 
+# Peak surplus export at 16:00 (phase 17). Off = shadow: the decision and £
+# are logged but nothing is pushed. On = Flux 2 exports 16:00-19:00 down to
+# the evening reserve + margin.
+CONF_PEAK_EXPORT_LIVE = "peak_export_live"
+DEFAULT_PEAK_EXPORT_LIVE = False
+
 # Optional HA AI Task-generated weekly insight (v1.0.11 Part 4). Off by
 # default: depends on the user having an AI Task provider configured in this
 # HA instance (Settings -> Voice assistants), which may incur cost on their
