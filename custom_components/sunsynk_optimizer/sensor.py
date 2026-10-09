@@ -161,6 +161,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 if soc is not None:
                     return f"Trim to {target}% (SOC {soc}%)"
                 return f"Trim to {target}%"
+            if name == "peak_export":
+                return f"Peak export to {target}% until {flux2.get('endTime', '19:00')}"
             if name == "full_day_trim_to_82":
                 return f"Full charge trim to {target}%"
             if name == "schedule_full_trim":

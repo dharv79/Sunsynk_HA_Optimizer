@@ -35,6 +35,7 @@ from .const import (
     CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_IMPORT_FEEDBACK_LIVE,
+    CONF_PEAK_EXPORT_LIVE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
     CONF_FREE_EVENT_EXPORT_RATE_KW,
@@ -66,6 +67,7 @@ from .const import (
     DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_IMPORT_FEEDBACK_LIVE,
+    DEFAULT_PEAK_EXPORT_LIVE,
     DEFAULT_FULL_CHARGE_DAY,
     DEFAULT_INVEST,
     DEFAULT_NOTIFY_SERVICE,
@@ -149,6 +151,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Required(
                 CONF_IMPORT_FEEDBACK_LIVE,
                 default=values.get(CONF_IMPORT_FEEDBACK_LIVE, DEFAULT_IMPORT_FEEDBACK_LIVE),
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_PEAK_EXPORT_LIVE,
+                default=values.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE),
             ): selector.BooleanSelector(),
             vol.Required(
                 CONF_DEFAULT_FULL_CHARGE_DAY,

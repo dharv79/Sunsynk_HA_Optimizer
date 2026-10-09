@@ -260,3 +260,62 @@ def test_import_feedback_away_regime_uses_away_days():
 
 def test_day_kpis_evening_band():
     assert planning.day_kpis(_snaps(), PRICES, 10.0, 0.5)["grid_import_evening_kwh"] == 0.3
+
+
+# ---------------------------------------------------------------- phase 17
+
+def test_arbitrage_worth_it_margin_and_missing():
+    # 16.66 / 0.85 = 19.6p replacement cost.
+    assert planning.arbitrage_worth_it(16.66, 27.81) is True
+    assert planning.arbitrage_worth_it(16.66, 19.5) is False
+    assert planning.arbitrage_worth_it(16.66, 27.81, wear_pence=9.0) is False  # wear tips it
+    assert planning.arbitrage_worth_it(None, 27.81) is None
+    assert planning.arbitrage_worth_it(16.66, None) is None
+
+
+def test_peak_export_surplus_exports_down_to_reserve_plus_margin():
+    plan = planning.peak_export_plan(95, 73, 10.0, 27.81, 16.66)
+    assert plan["decision"] == "export"
+    assert plan["target_soc"] == 78
+    assert plan["export_kwh"] == 1.7
+    assert plan["export_gbp"] == round(1.7 * 27.81 / 100, 2)
+    assert plan["gain_gbp"] == round(1.7 * (27.81 - 16.66 / 0.85) / 100, 2)
+
+
+def test_peak_export_no_surplus():
+    plan = planning.peak_export_plan(80, 73, 10.0, 27.81, 16.66)  # 0.2 kWh above 78%
+    assert plan["decision"] == "no_surplus"
+    assert plan["export_kwh"] == 0.0
+    assert plan["gain_gbp"] is None
+
+
+def test_peak_export_not_worth_it_and_no_price():
+    assert planning.peak_export_plan(95, 73, 10.0, 15.0, 16.66)["decision"] == "not_worth_it"
+    plan = planning.peak_export_plan(95, 73, 10.0, None, 16.66)
+    assert plan["decision"] == "no_price"
+    assert plan["export_gbp"] is None
+
+
+def test_peak_export_target_capped_at_100():
+    assert planning.peak_export_plan(100, 98, 10.0, 27.81, 16.66)["target_soc"] == 100
+
+
+def test_peak_export_dedups_and_pairs_export_days_only(tmp_path):
+    dl = object.__new__(_data_logger.DataLogger)
+    dl._data_dir = str(tmp_path)
+    rec = {"type": "peak_export", "date": "2026-10-09", "decision": "export", "export_kwh": 1.7,
+           "gain_gbp": 0.14, "live": False}
+    dl._write_record(rec)
+    dl._write_record(dict(rec, export_kwh=9.9))
+    records = [json.loads(l) for f in tmp_path.glob("*.jsonl") for l in f.read_text().splitlines()]
+    assert [r["export_kwh"] for r in records] == [1.7]
+    base = [
+        {"type": "import_plan", "date": "2026-10-09", "solar_forecast_kwh": 10.0, "target_soc": 50, "soc": 30},
+        {"type": "day_actuals", "date": "2026-10-09", "evening_soc": 40.0, "actual_solar_kwh": 8.0},
+        {"type": "import_plan", "date": "2026-10-10", "solar_forecast_kwh": 10.0, "target_soc": 50, "soc": 30},
+        {"type": "day_actuals", "date": "2026-10-10", "evening_soc": 40.0, "actual_solar_kwh": 8.0},
+        {"type": "peak_export", "date": "2026-10-10", "decision": "no_surplus", "export_kwh": 0.0},
+    ]
+    days = {d["date"]: d for d in dl._pair_records(records + base)}
+    assert days["2026-10-09"]["peak_export_gain_gbp"] == 0.14
+    assert days["2026-10-10"]["peak_export_kwh"] is None

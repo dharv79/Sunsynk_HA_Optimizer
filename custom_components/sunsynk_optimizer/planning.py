@@ -675,6 +675,65 @@ def trim_target_soc(soc: float, reserve_soc: int | None, default: int = DEFAULT_
     return target if target < soc else None
 
 
+# Phase 17: sell the surplus above the evening reserve 16:00-19:00 (shadow first).
+PEAK_EXPORT_MARGIN_SOC = 5
+PEAK_EXPORT_MIN_KWH = 0.5  # below this it isn't worth an API write
+ROUND_TRIP_EFFICIENCY = 0.85
+
+
+def arbitrage_worth_it(
+    buy_pence: float | None, sell_pence: float | None,
+    round_trip_eff: float = ROUND_TRIP_EFFICIENCY, wear_pence: float | None = None,
+) -> bool | None:
+    """True when selling now beats buying the energy back later after losses
+    (and battery wear, once phase 24 supplies it; None = no wear term).
+    None when a price is missing — never treat a missing price as 0p."""
+    if buy_pence is None or sell_pence is None or round_trip_eff <= 0:
+        return None
+    return sell_pence > buy_pence / round_trip_eff + (wear_pence or 0.0)
+
+
+def peak_export_plan(
+    soc: float,
+    reserve_soc: int,
+    battery_capacity_kwh: float,
+    export_pence: float | None,
+    offpeak_pence: float | None,
+    margin_soc: int = PEAK_EXPORT_MARGIN_SOC,
+    wear_pence: float | None = None,
+) -> dict[str, Any]:
+    """16:00 decision: export the SOC above reserve + margin at the peak rate.
+
+    The kWh sold would otherwise reduce tomorrow's off-peak charge, so it is
+    worth it only if the peak export price beats the off-peak replacement cost
+    after round-trip losses. `decision` is export / no_surplus / not_worth_it /
+    no_price; gain is export income minus replacement cost.
+    """
+    target = min(100, reserve_soc + margin_soc)
+    surplus_kwh = max(0.0, soc - target) / 100 * battery_capacity_kwh
+    worth = arbitrage_worth_it(offpeak_pence, export_pence, wear_pence=wear_pence)
+    if worth is None:
+        decision = "no_price"
+    elif surplus_kwh < PEAK_EXPORT_MIN_KWH:
+        decision = "no_surplus"
+    elif not worth:
+        decision = "not_worth_it"
+    else:
+        decision = "export"
+    exporting = decision == "export"
+    export_gbp = gain_gbp = None
+    if exporting:
+        export_gbp = surplus_kwh * export_pence / 100
+        gain_gbp = export_gbp - surplus_kwh * (offpeak_pence / ROUND_TRIP_EFFICIENCY + (wear_pence or 0.0)) / 100
+    return {
+        "decision": decision,
+        "target_soc": target,
+        "export_kwh": round(surplus_kwh, 2) if exporting else 0.0,
+        "export_gbp": round_or_none(export_gbp),
+        "gain_gbp": round_or_none(gain_gbp),
+    }
+
+
 def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cost: float | None) -> float | None:
     """import - export + gas, or None if any input is missing (never treat missing as £0)."""
     if import_cost is None or export_income is None or gas_cost is None:
