@@ -1,6 +1,6 @@
 # Phase 23 — Gentler charging across the cheap window
 
-**Status:** Planned, not built. **Size:** S–M, ~35-60k est. **Origin:** improvement list 2, 06/10/2026 (item 23).
+**Status:** Done, merged (dff4259, PR #45). **Size:** S, ~40k actual. **Origin:** improvement list 2, 06/10/2026 (item 23).
 
 ## Goal
 
@@ -18,3 +18,7 @@ Charge at the lowest current that still reaches the target by window end, instea
 
 - Tests for the current maths (clamps, margin, zero need).
 - Window sizing (Flux 1 end) unchanged when the option is off.
+
+## Outcome (09/10/2026)
+
+API check passed: settings at `common/setting/{inverter sn}/read|set`; the grid-charge current `sdBatteryCurrent` is global, not per slot (key inferred from SolarSynkV3 — verify on the first live night). `gentle_charge_current_a` logged on every plan; `gentle_charge_live` (default off) writes it at 01:55, keeps Flux 1 open to 05:00 and restores the original at 05:00 (30-minute retries). Watchdog uses the gentle rate on live nights. Details: `docs/architecture/import-plan.md`.
