@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any
 
 from .const import (
@@ -110,14 +111,119 @@ def peak_import_price_pence_per_kwh(
     return band_price_pence_per_kwh(charges, window_start, window_end, "import")
 
 
+# Flux bands the KPIs and decisions price: key -> (start, end, status).
+TARIFF_BANDS: dict[str, tuple[str, str, str]] = {
+    "offpeak": ("02:00", "05:00", "import"),
+    "day": ("05:00", "16:00", "import"),
+    "peak": ("16:00", "19:00", "import"),
+    "export_peak": ("16:00", "19:00", "export"),
+}
+
+
 def kpi_prices_pence(charges: list[dict[str, Any]]) -> dict[str, float | None]:
     """Prices the phase 14 KPIs need, keyed as `planning.day_kpis` expects."""
     return {
-        "offpeak": band_price_pence_per_kwh(charges, "02:00", "05:00"),
-        "day": band_price_pence_per_kwh(charges, "05:00", "16:00"),
-        "peak": band_price_pence_per_kwh(charges, "16:00", "19:00"),
-        "export_peak": band_price_pence_per_kwh(charges, "16:00", "19:00", "export"),
+        key: band_price_pence_per_kwh(charges, start, end, status)
+        for key, (start, end, status) in TARIFF_BANDS.items()
     }
+
+
+def _rate_time(value: Any, tz: tzinfo | None) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if tz is not None and value.tzinfo is not None:
+        value = value.astimezone(tz)
+    return value
+
+
+def _rate_slots(state: Any, attributes: dict[str, Any]) -> list[tuple[Any, Any, Any]]:
+    """(start, end, £/kWh) slots from an Octopus Energy rates entity's attributes."""
+    rows = attributes.get("rates") or attributes.get("all_rates")
+    if isinstance(rows, list):
+        return [
+            (row.get("start"), row.get("end"), row.get("value_inc_vat"))
+            for row in rows
+            if isinstance(row, dict)
+        ]
+    # Current-rate sensor: one block, state is the rate in £/kWh.
+    if attributes.get("start") is not None and attributes.get("end") is not None:
+        return [(attributes["start"], attributes["end"], state)]
+    return []
+
+
+def octopus_rate_pence_per_kwh(
+    state: Any,
+    attributes: dict[str, Any] | None,
+    window_start: str,
+    window_end: str,
+    on_date: date | None = None,
+    tz: tzinfo | None = None,
+) -> float | None:
+    """Time-weighted p/kWh for an HH:MM window from an Octopus Energy rates entity (phase 18).
+
+    Accepts the Octopus Energy integration's day-rates event (`rates` list),
+    the legacy `all_rates` attribute, or the current-rate sensor (`start`/`end`
+    attributes, state = rate). Rates are £/kWh inc VAT, returned in pence.
+    Uses `on_date`'s window when the slots cover it, else the latest covered
+    date (Flux rates repeat daily). None when no slot overlaps — never 0p.
+    """
+    start_min, end_min = _parse_minutes(window_start), _parse_minutes(window_end)
+    if end_min <= start_min:  # window wraps past midnight
+        end_min += 24 * 60
+    covered: dict[date, list[float]] = {}  # window date -> [seconds, pence * seconds]
+    for raw_start, raw_end, raw_value in _rate_slots(state, attributes or {}):
+        slot_start, slot_end = _rate_time(raw_start, tz), _rate_time(raw_end, tz)
+        try:
+            pence = float(raw_value) * 100
+        except (TypeError, ValueError):
+            continue
+        if slot_start is None or slot_end is None or slot_end <= slot_start:
+            continue
+        for day in (slot_start.date() - timedelta(days=1), slot_start.date()):
+            midnight = datetime.combine(day, time(), tzinfo=slot_start.tzinfo)
+            overlap = (
+                min(slot_end, midnight + timedelta(minutes=end_min))
+                - max(slot_start, midnight + timedelta(minutes=start_min))
+            ).total_seconds()
+            if overlap > 0:
+                totals = covered.setdefault(day, [0.0, 0.0])
+                totals[0] += overlap
+                totals[1] += pence * overlap
+    if not covered:
+        return None
+    seconds, weighted = covered[on_date if on_date in covered else max(covered)]
+    return round(weighted / seconds, 3)
+
+
+def tariff_prices_pence(
+    charges: list[dict[str, Any]],
+    octopus: dict[str, float | None] | None = None,
+) -> tuple[dict[str, float | None], dict[str, str | None]]:
+    """Band prices (as `kpi_prices_pence`) preferring Octopus-entity rates (phase 18).
+
+    `octopus` maps band key -> p/kWh read from the rates entity (None/absent
+    = unavailable). Returns (prices, sources); source per band is "octopus",
+    "charges", or None when neither has a price.
+    """
+    prices = kpi_prices_pence(charges)
+    sources: dict[str, str | None] = {key: None if value is None else "charges" for key, value in prices.items()}
+    for key, value in (octopus or {}).items():
+        if key in prices and value is not None:
+            prices[key], sources[key] = value, "octopus"
+    return prices, sources
+
+
+def price_source(sources: dict[str, str | None], *keys: str) -> str | None:
+    """One label for the bands a decision used: their common source, "mixed", or None."""
+    used = {sources.get(key) for key in keys} - {None}
+    if not used:
+        return None
+    return used.pop() if len(used) == 1 else "mixed"
 
 
 def merge_entry_data(data: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:

@@ -54,6 +54,8 @@ from .const import (
     CONF_OCTOPUS_IMPORT_COST_SENSOR,
     CONF_OCTOPUS_EXPORT_INCOME_SENSOR,
     CONF_OCTOPUS_GAS_COST_SENSOR,
+    CONF_OCTOPUS_IMPORT_RATES_ENTITY,
+    CONF_OCTOPUS_EXPORT_RATES_ENTITY,
     CONF_USERNAME,
     CONF_WEATHER_ENTITY,
     DEFAULT_AVG_CONSUMPTION_KW,
@@ -198,6 +200,8 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Optional(CONF_OCTOPUS_IMPORT_COST_SENSOR, default=values.get(CONF_OCTOPUS_IMPORT_COST_SENSOR, "")): selector.TextSelector(),
             vol.Optional(CONF_OCTOPUS_EXPORT_INCOME_SENSOR, default=values.get(CONF_OCTOPUS_EXPORT_INCOME_SENSOR, "")): selector.TextSelector(),
             vol.Optional(CONF_OCTOPUS_GAS_COST_SENSOR, default=values.get(CONF_OCTOPUS_GAS_COST_SENSOR, "")): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_IMPORT_RATES_ENTITY, default=values.get(CONF_OCTOPUS_IMPORT_RATES_ENTITY, "")): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_EXPORT_RATES_ENTITY, default=values.get(CONF_OCTOPUS_EXPORT_RATES_ENTITY, "")): selector.TextSelector(),
             vol.Optional(
                 CONF_DATA_REPORT_TARGET,
                 default=values.get(CONF_DATA_REPORT_TARGET, ""),
