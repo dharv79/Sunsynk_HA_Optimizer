@@ -2,7 +2,7 @@
 
 ## Context
 
-Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b2 (beta) adds phases 11, 19 and 20; phases 12–16 and 22 are merged but not yet released. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
+Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b2 (beta) adds phases 11, 19 and 20; phases 12–17 and 22 are merged but not yet released. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
 
 ## Phase status
 
@@ -24,7 +24,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 14. Efficiency KPIs and backtest harness | Done, merged (166f29f, PR #38) | M, ~45k actual |
 | 15. Day-rate import feedback for the overnight target | Done, merged (18667e7, PR #39) | S, ~25k actual |
 | 16. Evening reserve to 02:00 | Done, merged (f739100, PR #40) | S, ~20k actual |
-| 17. Sell the expected surplus at the peak rate | Planned, not built | M, ~50-80k |
+| 17. Sell the expected surplus at the peak rate | Done, merged (c8ba7d9, PR #41) | S, ~30k actual |
 | 18. Read tariff rates from the Octopus integration | Planned, not built | S, ~20-40k |
 | 19. Pick the full-charge day from the solar forecast (daily re-check) (1.0.12b2) | Done, merged (449434d, PR #32) | S, ~45k actual |
 | 20. Faster, seasonal forecast correction (shadow) (1.0.12b2) | Done, merged (6b1702b, PR #33) | XS, ~25k actual |
