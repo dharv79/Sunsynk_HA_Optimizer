@@ -1,6 +1,15 @@
 # Phase 17 — Sell the expected surplus at the peak rate
 
-**Status:** Planned, not built. **Size:** M, ~50-80k est. **Origin:** improvement list 06/10/2026 (item 5).
+**Status:** Done, merged (c8ba7d9, PR #41). **Size:** S, ~30k actual.
+
+**As built:**
+
+- The 16:00 listener uses `planning.peak_export_plan`: the target is the reserve + 5%, and it exports only a surplus of at least 0.5 kWh. `planning.arbitrage_worth_it` compares the export price with off-peak ÷ 0.85, plus a wear term.
+- It was built before phase 24 at the user's request (13–17 in one run). The wear term is a `None` hook for phase 24 to fill.
+- Shadow by default. The `peak_export_live` option pushes Flux 2 16:00–19:00. Trims are skipped while a live export holds the slot, the export-disable still wins, and free events and monitor mode never push.
+- A `peak_export` record goes into the 22:00 bundle, pairing and the weekly digest.
+
+Details: `docs/architecture/export-control.md`. **Origin:** improvement list 06/10/2026 (item 5).
 
 ## Goal
 
