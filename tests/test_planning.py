@@ -578,3 +578,19 @@ def test_charge_progress_small_gain_floor(planning):
 @pytest.mark.parametrize("hhmm,minutes", [("02:00", 120), ("05:00", 300), ("bad", None), (None, None)])
 def test_hhmm_to_minutes(planning, hhmm, minutes):
     assert planning.hhmm_to_minutes(hhmm) == minutes
+
+
+def test_evening_reserve_soc(planning):
+    # 20% floor + 0.75 kW × 7 h / 10 kWh = 72.5 → 73.
+    assert planning.evening_reserve_soc(0.75, 10.0) == 73
+    assert planning.evening_reserve_soc(0.0, 10.0) == 20
+    assert planning.evening_reserve_soc(2.0, 10.0) == 100  # capped
+    assert planning.evening_reserve_soc(0.5, 10.0, hours=4.0, floor_soc=10) == 30
+
+
+def test_trim_target_floored_at_reserve(planning):
+    assert planning.trim_target_soc(90, 73) == 82  # reserve below default
+    assert planning.trim_target_soc(90, 84) == 84  # reserve raises the floor
+    assert planning.trim_target_soc(86, 88) is None  # nothing left to trim
+    assert planning.trim_target_soc(100, 100) is None
+    assert planning.trim_target_soc(90, None) == 82

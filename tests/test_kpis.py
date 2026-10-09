@@ -256,3 +256,7 @@ def test_import_feedback_away_regime_uses_away_days():
     days = [_fb_day(i, away=True, grid_import_morning_kwh=2.0) for i in range(5)]
     assert planning.import_feedback_adjustment(days, TODAY, "shoulder", True)[0] == 5
     assert planning.import_feedback_adjustment(days, TODAY, "shoulder", False)[0] == 0
+
+
+def test_day_kpis_evening_band():
+    assert planning.day_kpis(_snaps(), PRICES, 10.0, 0.5)["grid_import_evening_kwh"] == 0.3

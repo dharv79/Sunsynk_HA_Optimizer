@@ -150,17 +150,19 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 if grid_pac is not None:
                     return f"Export disabled, target 100% ({round(grid_pac)}W)"
                 return "Export disabled, target 100%"
+            # Action names keep "82" for history; the target can be higher when
+            # floored at the evening reserve (phase 16), so read it from the payload.
+            flux2 = payload.get("flux_2", {}) if isinstance(payload, dict) else {}
+            target = flux2.get("targetSoc", 82)
             if name == "trim_to_82":
-                if isinstance(payload, dict):
-                    flux2 = payload.get("flux_2", {})
-                    end = flux2.get("endTime")
-                    if end:
-                        return f"Trim to 82% until {end}"
+                end = flux2.get("endTime")
+                if end:
+                    return f"Trim to {target}% until {end}"
                 if soc is not None:
-                    return f"Trim to 82% (SOC {soc}%)"
-                return "Trim to 82%"
+                    return f"Trim to {target}% (SOC {soc}%)"
+                return f"Trim to {target}%"
             if name == "full_day_trim_to_82":
-                return "Full charge trim to 82%"
+                return f"Full charge trim to {target}%"
             if name == "schedule_full_trim":
                 return "Full charge trim scheduled"
             if name == "none":
