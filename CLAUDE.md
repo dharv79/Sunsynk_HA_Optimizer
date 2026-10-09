@@ -36,7 +36,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 4. Mutate state only via `coordinator.update_state` — `coordinator.py`.
 5. Push only via `_async_post_with_status`; gate notification text on its bool — `optimizer.py`.
 6. Scheduled callbacks run through `_guarded` — `optimizer.py`.
-7. Reload one-shot skipped 16:00–19:00 while `evening_export_disabled`, and always while a free event holds the slots — `optimizer.py`.
+7. Reload one-shot skipped 16:00–19:00 while `evening_export_disabled`, and always while a free event or saving session holds the slots (`_slots_held`) — `optimizer.py`.
 8. Low-solar decisions use `min(raw, corrected)` forecast — `planning.select_target_soc`.
 9. Drain nights require `initial_soc < target_soc` — `data_logger._is_drain_night`.
 10. Plan fields read back by `_pair_records` must be in `_IMPORT_PLAN_FIELDS` — `data_logger.py`.
@@ -76,7 +76,7 @@ Real behaviour needs an HA instance; use the **Test plan (dry run)** button. Det
 | Octopus cost | `docs/architecture/octopus-cost.md` | Octopus sensors, per-sensor dating, daily_cost merge, year-to-date |
 | Import plan | `docs/architecture/import-plan.md` | 01:55 plan, target SOC selection, Flux 1 sizing, full-charge-day scoring |
 | Export control | `docs/architecture/export-control.md` | 16:00–19:00 export-disable, watt vs cost trigger, shadow mode |
-| Free electricity event | `docs/architecture/free-electricity.md` | Manual/auto trigger, sell-before/refill-during design, timer resume, do-not-break notes |
+| Free electricity event / saving sessions | `docs/architecture/free-electricity.md` | Manual/auto trigger, sell-before/refill-during design, saving-session fill-then-export, timer resume, do-not-break notes |
 | Weekly reports | `docs/architecture/weekly-reports.md` | Sunday cost digest, AI Task insight |
 | Entities & dashboard | `docs/architecture/entities-dashboard.md` | Sensors, buttons, binary sensors, Lovelace generator |
 | Config | `docs/architecture/config.md` | Entry data/options split, ID distinction, options flow, operation modes |

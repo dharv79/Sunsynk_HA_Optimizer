@@ -258,6 +258,10 @@ class DataLogger:
         """
         await self._async_append(_record("free_event", **event))
 
+    async def async_log_saving_session(self, session: dict[str, Any]) -> None:
+        """Log a saving-session lifecycle point (scheduled / done / cancelled). Tag only."""
+        await self._async_append(_record("saving_session", **session))
+
     # ------------------------------------------------------------------ #
     # History analysis                                                     #
     # ------------------------------------------------------------------ #

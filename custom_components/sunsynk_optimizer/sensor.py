@@ -74,6 +74,7 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
             SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
+            SunsynkOptimizerSensor(coordinator, entry, "saving_session", "Saving session"),
         ]
     )
 
@@ -121,6 +122,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "free_event":
             return _as_dict(state.free_event).get("phase") or "none"
+
+        if self._sensor_key == "saving_session":
+            return _as_dict(state.saving_session).get("phase") or "none"
 
         if self._sensor_key == "import_plan_end":
             plan = state.last_import_plan
@@ -188,6 +192,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return {"scores": state.last_full_charge_scores}
         if self._sensor_key == "free_event":
             return _as_dict(state.free_event)
+        if self._sensor_key == "saving_session":
+            return _as_dict(state.saving_session)
         if self._sensor_key == "last_error":
             attrs: dict[str, Any] = {}
             if state.last_api_result:

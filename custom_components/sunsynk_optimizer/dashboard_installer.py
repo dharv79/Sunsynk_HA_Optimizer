@@ -462,6 +462,47 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                     {
                         "type": "grid",
                         "cards": [
+                            {"type": "heading", "heading": "Saving session", "heading_style": "title"},
+                            {
+                                "type": "entities",
+                                "title": "Manual entry",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "datetime.saving_session_start", "name": "Saving session start"},
+                                    {"entity": "datetime.saving_session_end", "name": "Saving session end"},
+                                ],
+                            },
+                            {
+                                "type": "button",
+                                "name": "Cancel saving session",
+                                "icon": "mdi:piggy-bank-outline",
+                                "tap_action": {
+                                    "action": "call-service",
+                                    "service": "button.press",
+                                    "target": {"entity_id": "button.cancel_saving_session"},
+                                },
+                            },
+                            {
+                                "type": "entities",
+                                "title": "Status",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.saving_session", "name": "Phase"},
+                                    {"entity": "sensor.saving_session", "type": "attribute", "attribute": "source", "name": "Source"},
+                                    {"entity": "sensor.saving_session", "type": "attribute", "attribute": "session_start", "name": "Session start"},
+                                    {"entity": "sensor.saving_session", "type": "attribute", "attribute": "session_end", "name": "Session end"},
+                                    {"entity": "sensor.saving_session", "type": "attribute", "attribute": "value_pence", "name": "Worth (p/kWh)"},
+                                    {"entity": "sensor.saving_session", "type": "attribute", "attribute": "floor_soc", "name": "Export floor SOC (%)"},
+                                    {"entity": "sensor.saving_session", "type": "attribute", "attribute": "precharge_start", "name": "Top-up start"},
+                                    {"entity": "sensor.saving_session", "type": "attribute", "attribute": "offpeak_boost", "name": "Off-peak charge to 100%"},
+                                    {"entity": "sensor.saving_session", "type": "attribute", "attribute": "expected_export_kwh", "name": "Expected export (kWh)"},
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "type": "grid",
+                        "cards": [
                             {"type": "heading", "heading": "Consumption", "heading_style": "title"},
                             {
                                 "type": "entities",

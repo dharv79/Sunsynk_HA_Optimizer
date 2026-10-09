@@ -24,6 +24,7 @@
           "default_full_charge_day": "Default full charge day",
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "charge_rate_kw": "Charge rate (kW)",
+          "saving_session_reward_pence": "Saving session reward for manual sessions (optional, p/kWh)",
           "avg_consumption_kw": "Average home consumption (kW)",
           "weekend_avg_consumption_kw": "Weekend average consumption (kW)",
           "away_avg_consumption_kw": "Away / holiday consumption (kW)",
@@ -36,6 +37,7 @@
           "octopus_gas_cost_sensor": "Octopus gas cost sensor (optional)",
           "octopus_import_rates_entity": "Octopus import rates entity (optional; current rate sensor or day rates event)",
           "octopus_export_rates_entity": "Octopus export rates entity (optional; current rate sensor or day rates event)",
+          "octopus_saving_session_entity": "Octopus saving session events entity (optional; saving session or Power Down events, enables auto-detect)",
           "data_report_target": "Daily data report notify target (optional, developer)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
         }
@@ -75,6 +77,7 @@
           "default_full_charge_day": "Default full charge day",
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "charge_rate_kw": "Charge rate (kW)",
+          "saving_session_reward_pence": "Saving session reward for manual sessions (optional, p/kWh)",
           "avg_consumption_kw": "Average home consumption (kW)",
           "weekend_avg_consumption_kw": "Weekend average consumption (kW)",
           "away_avg_consumption_kw": "Away / holiday consumption (kW)",
@@ -87,6 +90,7 @@
           "octopus_gas_cost_sensor": "Octopus gas cost sensor (optional)",
           "octopus_import_rates_entity": "Octopus import rates entity (optional; current rate sensor or day rates event)",
           "octopus_export_rates_entity": "Octopus export rates entity (optional; current rate sensor or day rates event)",
+          "octopus_saving_session_entity": "Octopus saving session events entity (optional; saving session or Power Down events, enables auto-detect)",
           "data_report_target": "Daily data report notify target (optional, developer)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
         }

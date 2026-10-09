@@ -1,6 +1,6 @@
 # Phase 18 — Read tariff rates from the Octopus integration
 
-**Status:** Planned, not built. **Size:** S, ~20-40k est. **Origin:** improvement list 06/10/2026 (item 6).
+**Status:** Done, merged (b4adfc9, PR #43). **Size:** S, ~30k actual. **Origin:** improvement list 06/10/2026 (item 6).
 
 ## Goal
 
@@ -16,3 +16,7 @@ Cost-aware export and phase 17 use user-entered `charges`. Read live Flux rates 
 
 - Tests: sensor rates used, fallback to charges, missing → None.
 - Shadow mode decision unchanged (locked).
+
+## Outcome (09/10/2026)
+
+Built as designed: `octopus_import_rates_entity` / `octopus_export_rates_entity` accept the current-rate sensor or the day-rates event; per-band fallback to `charges`; `price_source` on the peak-window flux2 action, `day_kpis` and `peak_export`. Shadow decision unchanged. Details: `docs/architecture/export-control.md`.

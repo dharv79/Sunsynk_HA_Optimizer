@@ -6,7 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Datetime entities for Sunsynk Optimizer (manual free-electricity-event entry)."""
+"""Datetime entities for Sunsynk Optimizer (manual free-event and saving-session entry)."""
 
 from __future__ import annotations
 
@@ -33,6 +33,8 @@ async def async_setup_entry(
         [
             FreeEventTimeEntity(coordinator, entry, "start", "Free event start"),
             FreeEventTimeEntity(coordinator, entry, "end", "Free event end"),
+            SavingSessionTimeEntity(coordinator, entry, "start", "Saving session start"),
+            SavingSessionTimeEntity(coordinator, entry, "end", "Saving session end"),
         ]
     )
 
@@ -65,3 +67,21 @@ class FreeEventTimeEntity(CoordinatorEntity, DateTimeEntity):
     async def async_set_value(self, value: datetime) -> None:
         self.coordinator.update_state(**{self._state_field: value.isoformat()})
         await self.coordinator.optimizer.async_try_schedule_manual_free_event(self._which)
+
+
+class SavingSessionTimeEntity(FreeEventTimeEntity):
+    """Manual start/end entry for an Octopus Saving Session (phase 21)."""
+
+    _attr_icon = "mdi:piggy-bank-outline"
+
+    def __init__(self, coordinator, entry: ConfigEntry, which: str, name: str) -> None:
+        super().__init__(coordinator, entry, which, name)
+        self._attr_unique_id = f"{entry.entry_id}_saving_session_{which}"
+
+    @property
+    def _state_field(self) -> str:
+        return "saving_session_manual_start" if self._which == "start" else "saving_session_manual_end"
+
+    async def async_set_value(self, value: datetime) -> None:
+        self.coordinator.update_state(**{self._state_field: value.isoformat()})
+        await self.coordinator.optimizer.async_try_schedule_manual_saving_session(self._which)

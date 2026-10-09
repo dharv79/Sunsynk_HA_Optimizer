@@ -25,7 +25,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 15. Day-rate import feedback for the overnight target (1.0.12b3) | Done, merged (18667e7, PR #39) | S, ~25k actual |
 | 16. Evening reserve to 02:00 (1.0.12b3) | Done, merged (f739100, PR #40) | S, ~20k actual |
 | 17. Sell the expected surplus at the peak rate (1.0.12b3) | Done, merged (c8ba7d9, PR #41) | S, ~30k actual |
-| 18. Read tariff rates from the Octopus integration | Planned, not built | S, ~20-40k |
+| 18. Read tariff rates from the Octopus integration | Done, merged (b4adfc9, PR #43) | S, ~30k actual |
 | 19. Pick the full-charge day from the solar forecast (daily re-check) (1.0.12b2) | Done, merged (449434d, PR #32) | S, ~45k actual |
 | 20. Faster, seasonal forecast correction (shadow) (1.0.12b2) | Done, merged (6b1702b, PR #33) | XS, ~25k actual |
 | 21. Octopus Saving Sessions | Planned, not built | S–M, ~35-60k |

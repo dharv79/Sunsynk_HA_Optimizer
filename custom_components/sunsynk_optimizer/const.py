@@ -117,6 +117,13 @@ DEFAULT_ENABLE_AI_WEEKLY_INSIGHT = False
 CONF_FREE_EVENT_CHARGE_RATE_KW = "free_event_charge_rate_kw"
 CONF_FREE_EVENT_EXPORT_RATE_KW = "free_event_export_rate_kw"
 
+# Octopus Saving Sessions (phase 21). The reward (p/kWh) prices manual
+# sessions; Octopus-detected sessions carry their own Octopoints rate. The
+# entity is the Octopus Energy integration's saving-session (or Power Down)
+# events entity — blank disables auto-detect.
+CONF_SAVING_SESSION_REWARD_PENCE = "saving_session_reward_pence"
+CONF_OCTOPUS_SAVING_SESSION_ENTITY = "octopus_saving_session_entity"
+
 SERVICE_RECALCULATE_FULL_CHARGE_DAY = "recalculate_full_charge_day"
 SERVICE_RUN_IMPORT_PLAN_NOW = "run_import_plan_now"
 SERVICE_RUN_FLUX2_CHECK_NOW = "run_flux2_check_now"

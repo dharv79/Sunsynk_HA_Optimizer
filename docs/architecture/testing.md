@@ -42,5 +42,6 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_kpis.py` | Phase 14 `day_kpis` / `week_kpis`, KPI prices, meter_snapshot dedup and pairing, `tools/backtest.py` replay and forecast-error report; phase 15 `import_feedback_adjustment`; phase 17 `arbitrage_worth_it` / `peak_export_plan` and peak_export pairing |
 | `tests/test_flux_helpers_cost.py` | `peak_import_price_pence_per_kwh` cost-trigger helper |
 | `tests/test_octopus_rates.py` | Phase 18 Octopus rate-entity window pricing, `tariff_prices_pence` fallback to `charges`, `price_source` labels |
+| `tests/test_saving_session.py` | Phase 21 `plan_saving_session` (floor, off-peak boost, day-rate top-up, missing prices), Octopoints conversion, labelled manual validation, `next_joined_saving_session` parsing |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |
