@@ -193,3 +193,66 @@ def test_backtest_forecast_error_and_cli(data_dir, capsys):
     assert err == {"days": 1, "live_mae_kwh": 2.0, "weighted_mae_kwh": 0.0}
     report = bt.main([str(data_dir), "--target-offset", "5", "--capacity", "10"])
     assert json.loads(capsys.readouterr().out) == report
+
+
+# ---------------------------------------------------------------- phase 15
+
+from datetime import date as _date
+
+TODAY = _date(2026, 10, 20)
+
+
+def _fb_day(i, **overrides):
+    day = {
+        "date": f"2026-10-{19 - i:02d}", "forecast_band": "shoulder", "is_full_day": False,
+        "evening_export_disabled": False, "away": False, "target_soc": 50,
+        "grid_import_morning_kwh": 0.0, "unused_charge_kwh": 0.0,
+    }
+    day.update(overrides)
+    return day
+
+
+def test_day_kpis_morning_band():
+    assert planning.day_kpis(_snaps(), PRICES, 10.0, 0.5)["grid_import_morning_kwh"] == 1.0
+
+
+def test_import_feedback_raises_on_day_rate_import():
+    days = [_fb_day(i, grid_import_morning_kwh=1.2) for i in range(5)]
+    assert planning.import_feedback_adjustment(days, TODAY, "shoulder", False) == (5, 5, "day_rate_import")
+
+
+def test_import_feedback_lowers_on_unused_charge_without_import():
+    days = [_fb_day(i, grid_import_morning_kwh=0.1, unused_charge_kwh=1.5) for i in range(6)]
+    assert planning.import_feedback_adjustment(days, TODAY, "shoulder", False) == (-5, 6, "unused_charge")
+
+
+def test_import_feedback_neutral_when_on_target():
+    days = [_fb_day(i, grid_import_morning_kwh=0.2, unused_charge_kwh=0.3) for i in range(5)]
+    assert planning.import_feedback_adjustment(days, TODAY, "shoulder", False) == (0, 5, "on_target")
+
+
+def test_import_feedback_below_min_days_is_zero():
+    days = [_fb_day(i, grid_import_morning_kwh=2.0) for i in range(4)]
+    assert planning.import_feedback_adjustment(days, TODAY, "shoulder", False) == (0, 4, "insufficient_days")
+
+
+@pytest.mark.parametrize("override", [
+    {"forecast_band": "summer_like"},
+    {"is_full_day": True},
+    {"evening_export_disabled": True},
+    {"away": True},
+    {"target_soc": 100},
+    {"grid_import_morning_kwh": None},
+    {"date": "2026-10-20"},  # today
+    {"date": "2026-10-01"},  # older than 14 days
+])
+def test_import_feedback_exclusions(override):
+    days = [_fb_day(i, grid_import_morning_kwh=2.0) for i in range(4)]
+    days.append(_fb_day(4, **{"grid_import_morning_kwh": 2.0, **override}))
+    assert planning.import_feedback_adjustment(days, TODAY, "shoulder", False)[0] == 0
+
+
+def test_import_feedback_away_regime_uses_away_days():
+    days = [_fb_day(i, away=True, grid_import_morning_kwh=2.0) for i in range(5)]
+    assert planning.import_feedback_adjustment(days, TODAY, "shoulder", True)[0] == 5
+    assert planning.import_feedback_adjustment(days, TODAY, "shoulder", False)[0] == 0

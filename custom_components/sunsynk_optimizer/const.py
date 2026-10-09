@@ -87,6 +87,12 @@ CONF_COST_AWARE_EXPORT_SHADOW_MODE = "cost_aware_export_shadow_mode"
 DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR = 58.32
 DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE = True
 
+# Day-rate import feedback for the overnight target (phase 15). Off = shadow:
+# the adjustment is logged beside the evening-SOC nudge but not applied. On =
+# it replaces the evening-SOC nudge.
+CONF_IMPORT_FEEDBACK_LIVE = "import_feedback_live"
+DEFAULT_IMPORT_FEEDBACK_LIVE = False
+
 # Optional HA AI Task-generated weekly insight (v1.0.11 Part 4). Off by
 # default: depends on the user having an AI Task provider configured in this
 # HA instance (Settings -> Voice assistants), which may incur cost on their

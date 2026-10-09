@@ -280,6 +280,16 @@ The 50 W PV threshold ensures the 06:00 SOC reading is pure battery drain, not c
 
 Evening export disabled days are excluded because the export disable action keeps the battery artificially full, which would corrupt the nudge signal.
 
+### 6.4 Day-rate import feedback (phase 15, shadow by default)
+
+| Parameter | Value |
+|---|---|
+| Minimum days | 5 in the last 14, same `forecast_band` and home/away regime |
+| Valid record filter | `not is_full_day` AND `not evening_export_disabled` AND `target_soc < 100` AND a logged `grid_import_morning_kwh` |
+| Signal | median 05:00–16:00 grid import (phase 14 KPI); else median `unused_charge_kwh` |
+| Output | +5% if import > 0.3 kWh; −5% if no import and unused charge > 0.5 kWh; else 0 |
+| Effect | Logged as `import_feedback_adjustment`; replaces the evening SOC nudge only when `import_feedback_live` is on |
+
 ---
 
 ## 7. Configuration parameters
@@ -295,6 +305,7 @@ All configurable via **Settings → Devices & Services → Sunsynk Optimizer →
 | Export disable threshold | `export_disable_threshold` | 1500 W | Grid draw above this between 16–19h disables Flux 2 export |
 | Default full-charge day | `default_full_charge_day` | Wednesday | Used until the weather-based selector has run |
 | Operation mode | `operation_mode` | auto | `auto` = full control, `monitor` = observe only |
+| Day-rate import feedback live | `import_feedback_live` | off | Off = log the phase 15 adjustment only; on = it replaces the evening SOC nudge |
 
 ---
 
@@ -307,7 +318,7 @@ All configurable via **Settings → Devices & Services → Sunsynk Optimizer →
 - The 35% "too full" signal may never trigger, even if the system is slightly over-importing
 - The 20% "too empty" signal may trigger on cloudy days when the solar bridge target was too optimistic
 
-These thresholds should be reviewed after 2–3 weeks of solar bridge data has accumulated.
+These thresholds should be reviewed after 2–3 weeks of solar bridge data has accumulated. Phase 15's day-rate import feedback (§6.4) is the intended replacement; it ships in shadow until the backtest agrees.
 
 ### Low-solar override threshold
 
