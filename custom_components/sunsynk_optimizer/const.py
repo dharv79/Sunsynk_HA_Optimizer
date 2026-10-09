@@ -104,6 +104,17 @@ DEFAULT_IMPORT_FEEDBACK_LIVE = False
 CONF_PEAK_EXPORT_LIVE = "peak_export_live"
 DEFAULT_PEAK_EXPORT_LIVE = False
 
+# Gentler charging (phase 23). Off = logged only: the plan records the lowest
+# grid-charge current that would still reach the target by 05:00. On = the
+# 01:55 plan writes that current to the inverter (global setting, not
+# per-slot), keeps the window open to 05:00, and restores the previous value
+# at 05:00. GENTLE_CHARGE_SETTING is the Sunsynk "Grid charge A" field ("sd" =
+# mains, as in sdChargeOn), read/written via common/setting/{inverter sn}.
+CONF_GENTLE_CHARGE_LIVE = "gentle_charge_live"
+DEFAULT_GENTLE_CHARGE_LIVE = False
+CONF_BATTERY_VOLTAGE = "battery_voltage"
+GENTLE_CHARGE_SETTING = "sdBatteryCurrent"
+
 # Optional HA AI Task-generated weekly insight (v1.0.11 Part 4). Off by
 # default: depends on the user having an AI Task provider configured in this
 # HA instance (Settings -> Voice assistants), which may incur cost on their

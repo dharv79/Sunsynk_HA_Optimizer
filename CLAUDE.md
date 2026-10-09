@@ -21,7 +21,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 | `optimizer.py` | Business logic + HA listeners (01:55, 02:20, 06:00, 18:00 Sun, 22:00, 02/05/16/19:00 meter snapshots, 16:00 peak export, 30-min, SOC change) |
 | `planning.py` | HA-free planning maths (target SOC tree, charge rate, Flux 1 window, scoring, cost helpers) |
 | `data_logger.py` | Monthly JSONL logging, pairing, adaptive `compute_*` corrections |
-| `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST |
+| `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST, inverter settings read/write |
 | `flux_helpers.py` | `fluxProducts` payload, `merge_entry_data`, peak-price helper |
 | `sensor.py` / `binary_sensor.py` / `button.py` / `switch.py` / `datetime.py` | Entities (event-driven, no polling) |
 | `dashboard_installer.py` | Generates Lovelace YAML |
@@ -31,10 +31,10 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 ## Do-not-break (reasoning: `docs/architecture/do-not-break.md`)
 
 1. Read config only via `merge_entry_data(dict(entry.data), dict(entry.options))` — `flux_helpers.py`.
-2. `plant_id` (API) and `inverter_serial` (entity IDs) are different; never swap — `api.py`, `dashboard_installer.s()`.
+2. `plant_id` (plant API) and `inverter_serial` (entity IDs, settings API `sn`) are different; never swap — `api.py`, `dashboard_installer.s()`.
 3. Flux index 0 = import (`direction=1`), index 1 = export (`direction=0`) — `flux_helpers.apply_flux_override`.
 4. Mutate state only via `coordinator.update_state` — `coordinator.py`.
-5. Push only via `_async_post_with_status`; gate notification text on its bool — `optimizer.py`.
+5. Push only via `_async_post_with_status` (settings: `_async_write_setting`); gate notification text on its bool — `optimizer.py`.
 6. Scheduled callbacks run through `_guarded` — `optimizer.py`.
 7. Reload one-shot skipped 16:00–19:00 while `evening_export_disabled`, and always while a free event or saving session holds the slots (`_slots_held`) — `optimizer.py`.
 8. Low-solar decisions use `min(raw, corrected)` forecast — `planning.select_target_soc`.
@@ -45,7 +45,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 13. Other per-day record types dedup at write — `data_logger._write_record` / `_DEDUP_TYPES`.
 14. `cost_trigger` stays `None` when no price applies, never 0p — `flux_helpers.peak_import_price_pence_per_kwh`.
 15. Shadow mode defaults on (watt trigger drives export-disable) — `CONF_COST_AWARE_EXPORT_SHADOW_MODE`.
-16. Monitor mode makes no API writes — `optimizer.py` early returns.
+16. Monitor mode makes no API writes (except undoing its own gentle-charge current) — `optimizer.py` early returns.
 17. Test plan button is a pure dry run (no push, log or state) — `async_run_import_plan(dry_run=True)`.
 18. Away days filtered by regime for drain/nudge; excluded from charge rate — `data_logger.py`.
 19. New decision logic goes in `planning.py` with a test.

@@ -99,6 +99,10 @@ class OptimizerState:
     saving_session: dict[str, Any] = field(default_factory=dict)
     saving_session_manual_start: str | None = None
     saving_session_manual_end: str | None = None
+    # Gentler charging (phase 23) live write: phase applied / restored,
+    # current_a, restore_current_a, restore_at. Persisted so a restart before
+    # 05:00 still restores the inverter's normal grid-charge current.
+    gentle_charge: dict[str, Any] = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

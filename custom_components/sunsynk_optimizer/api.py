@@ -6,7 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Sunsynk cloud API client — authentication, encryption, and income/Flux payload writes."""
+"""Sunsynk cloud API client — authentication, encryption, income/Flux payload and inverter settings writes."""
 
 from __future__ import annotations
 
@@ -133,23 +133,40 @@ class SunsynkApiClient:
         if not self._token:
             await self.async_login()
 
-    async def async_post_income(self, plant_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """POST an income/Flux config payload to the Sunsynk API.
+    async def _authorized_json(self, method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Authenticated request returning parsed JSON.
 
         On a 401 the token is cleared and a single re-login + retry is attempted,
         which handles session expiry without requiring the caller to manage tokens.
         """
         await self._ensure_login()
-        url = f"{BASE_API}/api/v1/plant/{plant_id}/income"
 
         def _headers() -> dict[str, str]:
             return {**_JSON_HEADERS, "Authorization": f"Bearer {self._token}"}
 
-        async with self._session.post(url, json=payload, headers=_headers()) as response:
+        async with self._session.request(method, url, json=payload, headers=_headers()) as response:
             if response.status != 401:
                 return await self._json_or_raise(response)
         # Token expired mid-session — re-authenticate and retry once.
         self._token = None
         await self.async_login()
-        async with self._session.post(url, json=payload, headers=_headers()) as retry_response:
+        async with self._session.request(method, url, json=payload, headers=_headers()) as retry_response:
             return await self._json_or_raise(retry_response)
+
+    async def async_post_income(self, plant_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST an income/Flux config payload to the Sunsynk API (keyed by plant_id)."""
+        return await self._authorized_json("POST", f"{BASE_API}/api/v1/plant/{plant_id}/income", payload)
+
+    async def async_read_settings(self, inverter_sn: str) -> dict[str, Any]:
+        """Read the inverter's settings (keyed by the inverter serial, not plant_id)."""
+        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/read")
+        settings = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(settings, dict):
+            raise SunsynkApiError(f"Unexpected settings response: {data}")
+        return settings
+
+    async def async_write_settings(self, inverter_sn: str, settings: dict[str, Any]) -> dict[str, Any]:
+        """Write inverter settings. Send the full dict just read with only the
+        changed key altered — the portal posts the whole form, so a partial
+        body risks blanking the fields it leaves out."""
+        return await self._authorized_json("POST", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/set", settings)

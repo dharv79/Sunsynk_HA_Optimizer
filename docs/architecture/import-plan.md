@@ -137,3 +137,19 @@ Catches a night where the Flux 1 charge silently fails (cloud write lost, invert
 - Turn it on once a week or two of KPIs exists and the backtest agrees.
 
 **Verification.** `tests/test_kpis.py` covers import raising the target, unused charge lowering it, on-target, the minimum days, each exclusion, and the away regime.
+
+## Gentler charging (09/10/2026, phase 23)
+
+**Goal.** Charge at the lowest grid-charge current that still reaches the target by 05:00, instead of full rate then idle — fewer conversion/I²R losses and less battery heat.
+
+**API check (prerequisite).** The Sunsynk cloud API exposes inverter settings at `GET /api/v1/common/setting/{sn}/read` and `POST …/{sn}/set` (the same endpoints SolarSynkV3 uses; `sn` = `inverter_serial`). The grid-charge current is `sdBatteryCurrent` ("sd" = mains, as in the grid-charge enable `sdChargeOn`); `batteryMaxCurrentCharge` is the overall battery limit and also caps solar, so it is not used. The current is **global, not per time-of-use slot** (slots carry only time, power, SOC and grid/gen enable), so it must be restored after the window. The write posts the full settings dict just read with one key changed (the portal posts the whole form; a partial body could blank fields). The key name is inferred from SolarSynkV3's settings list — verify on the first live night.
+
+**Maths.** `planning.gentle_charge_current_a(kwh_needed, 3 h, battery_voltage, max_current_a, margin=1.2, min 10 A)`: `ceil(kWh × 1000 × margin / (V × h))`, clamped to `[min, max]`; `None` when nothing to charge. `max_current_a` = nameplate `charge_rate` / voltage. `kwh_needed` is the battery-side `energy_needed_kwh`; the margin covers in-window house load and calibration error.
+
+**Logged first.** Every plan (including the dry run) records `gentle_current_a`, `gentle_max_current_a`, `gentle_charge_rate_kw`, `battery_voltage` and `gentle_charge_applied`; `gentle_current_a` / `gentle_charge_applied` (and phase 21's `saving_session_boost`) are in `_IMPORT_PLAN_FIELDS` so phase 14 KPIs can compare kWh imported per SOC% on gentle vs normal nights.
+
+**Live (`gentle_charge_live`, default off).** Applies only when the gentle current is below the max, before 05:00 (so a daytime reload never throttles), and while no event holds the slots. `_async_write_setting` reads the settings, refuses if the current value isn't numeric, and writes the gentle current; on success Flux 1 ends at 05:00 instead of the physics-sized end and `OptimizerState.gentle_charge` (persisted) holds `restore_current_a` / `restore_at`. A re-plan before 05:00 keeps the original restore value rather than reading back its own. If the write fails the normal window is pushed unchanged. With the option off, window sizing is untouched.
+
+**Restore.** 05:00 timer (re-armed on startup), retried by the 30-minute check until it sticks; the first failure notifies "⚠️ Sunsynk: grid charge current NOT restored". Runs even in monitor mode (it only undoes this integration's own write).
+
+**Watchdog.** On a live gentle night the phase 22 watchdog expects `gentle_charge_rate_kw` instead of `used_charge_rate_kw` (`_watchdog_rate_kw`), so slow-by-design charging isn't flagged as stalled.
