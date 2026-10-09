@@ -28,7 +28,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 
 **KPIs.** `planning.day_kpis(snapshots, prices, capacity, late_load_kw)` covers 00:00–22:00. The daily meters reset at midnight, so 22:00–24:00 is not counted, the same as `day_actuals`.
 
-- `grid_import_offpeak_kwh` covers 02:00–05:00, `grid_import_peak_kwh` covers 16:00–19:00, and `grid_import_day_kwh` covers the rest. `grid_import_morning_kwh` (05:00–16:00, part of the day band) was added in phase 15.
+- `grid_import_offpeak_kwh` covers 02:00–05:00, `grid_import_peak_kwh` covers 16:00–19:00, and `grid_import_day_kwh` covers the rest. `grid_import_morning_kwh` (05:00–16:00, part of the day band) was added in phase 15, and `grid_import_evening_kwh` (19:00–22:00) plus `evening_reserve_soc` on the record in phase 16.
 - `self_sufficiency_pct` is `1 − import / load` at 22:00.
 - `avoidable_import_gbp` is day plus peak import at their prices.
 - `export_peak_kwh` and `export_peak_gbp` cover 16:00–19:00.

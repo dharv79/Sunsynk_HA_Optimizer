@@ -503,6 +503,7 @@ DAY_KPI_FIELDS = (
     "grid_import_day_kwh",
     "grid_import_morning_kwh",
     "grid_import_peak_kwh",
+    "grid_import_evening_kwh",
     "self_sufficiency_pct",
     "avoidable_import_gbp",
     "export_peak_kwh",
@@ -555,7 +556,8 @@ def day_kpis(
     offpeak = _snap_delta(snapshots, "02:00", "05:00", imp)
     peak = _snap_delta(snapshots, "16:00", "19:00", imp)
     morning = _snap_delta(snapshots, "05:00", "16:00", imp)
-    parts = (_snap(snapshots, "02:00", imp), morning, _snap_delta(snapshots, "19:00", "22:00", imp))
+    evening = _snap_delta(snapshots, "19:00", "22:00", imp)
+    parts = (_snap(snapshots, "02:00", imp), morning, evening)
     day = None if any(p is None for p in parts) else sum(parts)
 
     load22, imp22 = _snap(snapshots, "22:00", "load_kwh"), _snap(snapshots, "22:00", imp)
@@ -586,6 +588,7 @@ def day_kpis(
         "grid_import_day_kwh": round_or_none(day),
         "grid_import_morning_kwh": round_or_none(morning),
         "grid_import_peak_kwh": round_or_none(peak),
+        "grid_import_evening_kwh": round_or_none(evening),
         "self_sufficiency_pct": round_or_none(self_sufficiency, 1),
         "avoidable_import_gbp": round_or_none(None if avoidable_pence is None else avoidable_pence / 100),
         "export_peak_kwh": round_or_none(export_peak),
@@ -651,6 +654,25 @@ def import_feedback_adjustment(
     if unused and _median(unused) > IMPORT_FEEDBACK_UNUSED_KWH:
         return -IMPORT_FEEDBACK_STEP, len(relevant), "unused_charge"
     return 0, len(relevant), "on_target"
+
+
+# Phase 16: keep enough at 19:00 to run the house to the 02:00 off-peak start.
+EVENING_RESERVE_HOURS = 7.0
+DEFAULT_TRIM_TARGET_SOC = 82
+
+
+def evening_reserve_soc(
+    load_kw: float, battery_capacity_kwh: float,
+    hours: float = EVENING_RESERVE_HOURS, floor_soc: int = KPI_RESERVE_SOC,
+) -> int:
+    """SOC% needed at 19:00 to cover `hours` of load above the floor, capped at 100."""
+    return min(100, math.ceil(floor_soc + load_kw * hours / battery_capacity_kwh * 100))
+
+
+def trim_target_soc(soc: float, reserve_soc: int | None, default: int = DEFAULT_TRIM_TARGET_SOC) -> int | None:
+    """Sell-down target floored at the evening reserve; None when that leaves nothing to trim."""
+    target = max(default, reserve_soc or 0)
+    return target if target < soc else None
 
 
 def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cost: float | None) -> float | None:

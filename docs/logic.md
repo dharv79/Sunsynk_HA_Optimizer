@@ -205,6 +205,16 @@ The 82% target sits 3% below the 85% trigger, preventing oscillation where a tri
 
 The 1-hour hold allows the battery cells to fully condition at 100% before trimming. This only runs once per arrival at 100% (guarded by `pending_full_trim_cancel`).
 
+### Evening reserve floor (phase 16)
+
+Both trims sell down to `max(82%, evening_reserve_soc)`, and skip when that is not below the current SOC.
+
+```
+evening_reserve_soc = min(100, ceil(20 + load_kw × 7 h / battery_capacity_kwh × 100))
+```
+
+`load_kw` is tonight's plan rate (phase 12 learned or config). With the defaults (0.75 kW, 10 kWh) the reserve is 73%, so the 82% trim is unchanged. It only binds for heavier loads or smaller batteries.
+
 ---
 
 ## 5. Data logging

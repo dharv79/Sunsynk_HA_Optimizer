@@ -92,6 +92,7 @@ from .planning import (
     charge_progress_ok,
     daily_report_plans,
     day_kpis,
+    evening_reserve_soc,
     days_in_period,
     flux1_end_minutes,
     forecast_band,
@@ -113,6 +114,7 @@ from .planning import (
     sum_field,
     synthetic_hourly_profile,
     trailing_week,
+    trim_target_soc,
     week_kpis,
     weighted_forecast_correction,
     window_grid_kwh,
@@ -136,6 +138,10 @@ _INITIAL_REFRESH_MAX_RETRIES = 5  # 60 s apart: covers slow first poll after res
 
 def _api_note(api_ok: bool) -> str:
     return "" if api_ok else " (inverter NOT updated)"
+
+
+def _reserve_note(trim_target: int, reserve: int) -> str:
+    return " to keep the evening reserve" if trim_target == reserve else ""
 
 
 class SunsynkOptimizer:
@@ -1084,22 +1090,26 @@ class SunsynkOptimizer:
 
         # Trim if SOC exceeds 85% on a non-full-charge day. Target 82% leaves a 3% gap
         # below the trigger so normal fluctuation doesn't immediately re-trigger a trim.
-        if not is_full_day and soc > 85 and self._cooldown_ok():
+        # Phase 16: never below the evening reserve (19:00 → 02:00 load).
+        reserve = self._evening_reserve_soc()
+        trim_target = trim_target_soc(soc, reserve)
+        if not is_full_day and soc > 85 and trim_target is not None and self._cooldown_ok():
             self._mark_trim()
             api_ok = await self._async_push_flux2_action(
                 "trim_to_82",
                 {
                     "startTime": now_local.strftime("%H:%M"),
                     "endTime": (now_local + timedelta(minutes=45)).strftime("%H:%M"),
-                    "targetSoc": 82,
+                    "targetSoc": trim_target,
                 },
-                base_action,
+                {**base_action, "evening_reserve_soc": reserve},
                 f"soc_{round(soc)}%_exceeds_85",
             )
             title = "🔋 Sunsynk: battery trim" if api_ok else "⚠️ Sunsynk: battery trim NOT applied"
             await self.async_notify(
                 title,
-                f"SOC {round(soc, 1)}% is above 85%. Trimming to 82%.{_api_note(api_ok)}",
+                f"SOC {round(soc, 1)}% is above 85%. Trimming to {trim_target}%"
+                f"{_reserve_note(trim_target, reserve)}.{_api_note(api_ok)}",
             )
             return
 
@@ -1530,9 +1540,26 @@ class SunsynkOptimizer:
             max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))),
             late_load_kw,
         )
-        record = {"date": date, "snapshot_times": sorted(snapshots), **kpis}
+        record = {
+            "date": date,
+            "snapshot_times": sorted(snapshots),
+            **kpis,
+            "evening_reserve_soc": self._evening_reserve_soc(),
+        }
         await self.data_logger.async_log_day_kpis(**record)
         return {"type": "day_kpis", **record}
+
+    def _evening_reserve_soc(self) -> int:
+        """Phase 16: SOC to hold at 19:00 so the house runs to the 02:00 off-peak start.
+
+        Load is tonight's plan rate (phase 12 learned or config), else config.
+        """
+        cfg = self.cfg
+        load_kw = (self.coordinator.state.last_import_plan or {}).get("avg_consumption_kw")
+        if load_kw is None:
+            load_kw = cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW)
+        capacity = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        return evening_reserve_soc(float(load_kw), capacity)
 
     def _read_daily_meters(self) -> dict[str, float]:
         """SolarSynkV3 cumulative daily load / grid import / grid export (kWh)."""
@@ -1565,25 +1592,32 @@ class SunsynkOptimizer:
                 current_soc = self._state_float(self.battery_soc_entity, 0)
                 if current_soc < 99.5:
                     return
+                # Phase 16: floor the sell-down at the evening reserve.
+                reserve = self._evening_reserve_soc()
+                trim_target = trim_target_soc(current_soc, reserve)
+                if trim_target is None:
+                    return
                 now_local = dt_util.now()
                 api_ok = await self._async_push_flux2_action(
                     "full_day_trim_to_82",
                     {
                         "startTime": now_local.strftime("%H:%M"),
                         "endTime": (now_local + timedelta(minutes=60)).strftime("%H:%M"),
-                        "targetSoc": 82,
+                        "targetSoc": trim_target,
                     },
                     {
                         "soc": current_soc,
                         "grid_pac": self._state_float(self.grid_pac_entity, 0),
                         "source": "automatic",
+                        "evening_reserve_soc": reserve,
                     },
                     "held_100%_for_1h",
                 )
                 title = "🔋 Sunsynk: full-charge hold complete" if api_ok else "⚠️ Sunsynk: full-charge trim NOT applied"
                 await self.async_notify(
                     title,
-                    f"Held at 100% for 1 hour. Trimming to 82%.{_api_note(api_ok)}",
+                    f"Held at 100% for 1 hour. Trimming to {trim_target}%"
+                    f"{_reserve_note(trim_target, reserve)}.{_api_note(api_ok)}",
                 )
 
             # Hold at 100% for 1 hour to fully condition the cells, then trim to 82%.
