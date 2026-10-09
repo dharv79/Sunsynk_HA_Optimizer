@@ -492,6 +492,117 @@ def resolve_load_kw(config_kw: float, learned_kw: float | None) -> tuple[float, 
     return round(max(config_kw * low, min(config_kw * high, learned_kw)), 3), "learned"
 
 
+# Phase 14: cumulative daily-meter snapshots at the Flux band edges. The
+# SolarSynkV3 daily totals reset at midnight, so 22:00 closes the KPI day
+# (22:00-24:00 is not covered, same as day_actuals).
+METER_SNAPSHOT_TIMES = ("02:00", "05:00", "16:00", "19:00", "22:00")
+KPI_RESERVE_SOC = 20  # same floor as bridge_soc
+KPI_LATE_LOAD_HOURS = 4.0  # 22:00 → next 02:00 charge
+DAY_KPI_FIELDS = (
+    "grid_import_offpeak_kwh",
+    "grid_import_day_kwh",
+    "grid_import_peak_kwh",
+    "self_sufficiency_pct",
+    "avoidable_import_gbp",
+    "export_peak_kwh",
+    "export_peak_gbp",
+    "unused_charge_kwh",
+)
+
+
+def _snap(snapshots: dict[str, dict[str, Any]], time: str, key: str) -> float | None:
+    value = (snapshots.get(time) or {}).get(key)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _snap_delta(snapshots: dict[str, dict[str, Any]], start: str, end: str, key: str) -> float | None:
+    """Meter increase between two snapshots; None if either is missing or it went backwards."""
+    a, b = _snap(snapshots, start, key), _snap(snapshots, end, key)
+    if a is None or b is None or b < a:
+        return None
+    return b - a
+
+
+def _mul(*values: float | None) -> float | None:
+    if any(v is None for v in values):
+        return None
+    return math.prod(values)
+
+
+def day_kpis(
+    snapshots: dict[str, dict[str, Any]],
+    prices_pence: dict[str, float | None],
+    battery_capacity_kwh: float,
+    late_load_kw: float | None,
+) -> dict[str, float | None]:
+    """Efficiency KPIs for 00:00-22:00 from the day's meter snapshots.
+
+    `snapshots` maps "HH:MM" → {grid_import_kwh, grid_export_kwh, load_kwh, soc}.
+    `prices_pence` has "offpeak", "day", "peak" (import) and "export_peak".
+    Any KPI whose inputs are missing is None, never 0 (do-not-break 11).
+
+    - Import bands: off-peak 02:00-05:00, peak 16:00-19:00, day = the rest
+      (00:00-02:00, 05:00-16:00, 19:00-22:00).
+    - Avoidable import £ = day + peak import at their prices (what a perfect
+      plan would have shifted to off-peak).
+    - Unused charge = overnight SOC added that was still spare at 16:00 above
+      the evening need (reserve + 16:00-22:00 load in hindsight + 22:00-02:00
+      at `late_load_kw`), capped at what the night added.
+    """
+    imp = "grid_import_kwh"
+    offpeak = _snap_delta(snapshots, "02:00", "05:00", imp)
+    peak = _snap_delta(snapshots, "16:00", "19:00", imp)
+    parts = (
+        _snap(snapshots, "02:00", imp),
+        _snap_delta(snapshots, "05:00", "16:00", imp),
+        _snap_delta(snapshots, "19:00", "22:00", imp),
+    )
+    day = None if any(p is None for p in parts) else sum(parts)
+
+    load22, imp22 = _snap(snapshots, "22:00", "load_kwh"), _snap(snapshots, "22:00", imp)
+    self_sufficiency = None
+    if load22 is not None and imp22 is not None and load22 > 0:
+        self_sufficiency = max(0.0, min(100.0, 100.0 * (1 - imp22 / load22)))
+
+    avoidable_pence = None
+    if day is not None and peak is not None:
+        avoidable_pence = _mul(day, prices_pence.get("day"))
+        peak_pence = _mul(peak, prices_pence.get("peak"))
+        avoidable_pence = None if avoidable_pence is None or peak_pence is None else avoidable_pence + peak_pence
+
+    export_peak = _snap_delta(snapshots, "16:00", "19:00", "grid_export_kwh")
+    export_peak_pence = _mul(export_peak, prices_pence.get("export_peak"))
+
+    unused = None
+    soc02, soc05, soc16 = (_snap(snapshots, t, "soc") for t in ("02:00", "05:00", "16:00"))
+    evening_load = _snap_delta(snapshots, "16:00", "22:00", "load_kwh")
+    if None not in (soc02, soc05, soc16, evening_load, late_load_kw) and battery_capacity_kwh > 0:
+        added_kwh = max(0.0, soc05 - soc02) / 100 * battery_capacity_kwh
+        need_soc = KPI_RESERVE_SOC + (evening_load + late_load_kw * KPI_LATE_LOAD_HOURS) / battery_capacity_kwh * 100
+        spare_kwh = max(0.0, soc16 - need_soc) / 100 * battery_capacity_kwh
+        unused = min(added_kwh, spare_kwh)
+
+    return {
+        "grid_import_offpeak_kwh": round_or_none(offpeak),
+        "grid_import_day_kwh": round_or_none(day),
+        "grid_import_peak_kwh": round_or_none(peak),
+        "self_sufficiency_pct": round_or_none(self_sufficiency, 1),
+        "avoidable_import_gbp": round_or_none(None if avoidable_pence is None else avoidable_pence / 100),
+        "export_peak_kwh": round_or_none(export_peak),
+        "export_peak_gbp": round_or_none(None if export_peak_pence is None else export_peak_pence / 100),
+        "unused_charge_kwh": round_or_none(unused),
+    }
+
+
+def week_kpis(days: list[dict[str, Any]]) -> dict[str, float | None]:
+    """Weekly roll-up: kWh/£ fields summed, self-sufficiency averaged over days that have it."""
+    out = {f"week_{key}": sum_field(days, key) for key in DAY_KPI_FIELDS if key != "self_sufficiency_pct"}
+    ss = [d["self_sufficiency_pct"] for d in days if d.get("self_sufficiency_pct") is not None]
+    out["week_self_sufficiency_pct"] = round(sum(ss) / len(ss), 1) if ss else None
+    out["week_kpi_days"] = len(ss)
+    return out
+
+
 def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cost: float | None) -> float | None:
     """import - export + gas, or None if any input is missing (never treat missing as £0)."""
     if import_cost is None or export_income is None or gas_cost is None:

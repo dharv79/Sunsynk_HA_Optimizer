@@ -75,30 +75,49 @@ def _minutes_in_range(minutes: int, start: str | None, end: str | None) -> bool:
     return start_min <= minutes < end_min
 
 
+def band_price_pence_per_kwh(
+    charges: list[dict[str, Any]],
+    window_start: str,
+    window_end: str,
+    status: str = "import",
+) -> float | None:
+    """Find the `status` ("import"/"export") price (pence/kWh) for a time window.
+
+    Prefers an exact row matching window_start/window_end; if none matches
+    exactly (e.g. the user has edited their charges to a different window
+    shape), falls back to the row whose range contains the window's midpoint.
+    Returns None if no row matches either way — callers must treat that as
+    "no price", not as a price of zero.
+    """
+    rows = [row for row in charges if row.get("status") == status]
+    for row in rows:
+        if row.get("startRange") == window_start and row.get("endRange") == window_end:
+            return float(row["price"])
+
+    midpoint = _range_midpoint_minutes(window_start, window_end)
+    for row in rows:
+        if _minutes_in_range(midpoint, row.get("startRange"), row.get("endRange")):
+            return float(row["price"])
+    return None
+
+
 def peak_import_price_pence_per_kwh(
     charges: list[dict[str, Any]],
     window_start: str = "16:00",
     window_end: str = "19:00",
 ) -> float | None:
-    """Find the import price (pence/kWh) that applies to the given time window.
+    """Import price for the peak window; None when no import row matches (never 0p)."""
+    return band_price_pence_per_kwh(charges, window_start, window_end, "import")
 
-    Prefers an exact `status == "import"` row matching window_start/window_end;
-    if none matches exactly (e.g. the user has edited their charges to a
-    different window shape), falls back to the import row whose range contains
-    the window's midpoint. Returns None if no import row matches either way —
-    callers must treat that as "can't compute a cost trigger right now", not
-    as a price of zero.
-    """
-    import_rows = [row for row in charges if row.get("status") == "import"]
-    for row in import_rows:
-        if row.get("startRange") == window_start and row.get("endRange") == window_end:
-            return float(row["price"])
 
-    midpoint = _range_midpoint_minutes(window_start, window_end)
-    for row in import_rows:
-        if _minutes_in_range(midpoint, row.get("startRange"), row.get("endRange")):
-            return float(row["price"])
-    return None
+def kpi_prices_pence(charges: list[dict[str, Any]]) -> dict[str, float | None]:
+    """Prices the phase 14 KPIs need, keyed as `planning.day_kpis` expects."""
+    return {
+        "offpeak": band_price_pence_per_kwh(charges, "02:00", "05:00"),
+        "day": band_price_pence_per_kwh(charges, "05:00", "16:00"),
+        "peak": band_price_pence_per_kwh(charges, "16:00", "19:00"),
+        "export_peak": band_price_pence_per_kwh(charges, "16:00", "19:00", "export"),
+    }
 
 
 def merge_entry_data(data: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:

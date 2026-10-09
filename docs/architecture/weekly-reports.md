@@ -15,3 +15,8 @@ A third guarded sub-call from the Sunday 18:00 listener, `_async_send_ai_weekly_
 - **Fix:** `planning.trailing_week(today)` returns the 7 complete days ending yesterday (Sun–Sat); both `_async_send_weekly_cost_summary` and `_async_send_ai_weekly_insight` load `WEEK_HISTORY_DAYS = 9` and filter with `planning.days_in_period`. The digest now carries `period_start` / `period_end`.
 - **Verification:** `tests/test_planning.py` (window dates, filter, history depth). In production: next Sunday digest in `#sunsynkdebug` shows `days_in_period: 7` with the period dates.
 - **Note:** a day whose Octopus cost settles after the digest (e.g. Saturday's, landing Sunday 22:00) still counts in `days_in_period` but not `days_with_cost_data`.
+
+
+## Efficiency KPIs in the digest (09/10/2026, phase 14)
+
+The `weekly_cost_summary` line also carries `planning.week_kpis` over the same trailing week: `week_grid_import_{offpeak,day,peak}_kwh`, `week_avoidable_import_gbp`, `week_export_peak_{kwh,gbp}`, `week_unused_charge_kwh` (summed; `None` when no day has the field), `week_self_sufficiency_pct` (mean over days that have it) and `week_kpi_days`. See data-logging.md.
