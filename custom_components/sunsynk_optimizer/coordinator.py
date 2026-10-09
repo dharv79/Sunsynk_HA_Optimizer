@@ -93,6 +93,12 @@ class OptimizerState:
     # value. Cleared once the event finishes or is cancelled.
     free_event_manual_start: str | None = None
     free_event_manual_end: str | None = None
+    # Octopus Saving Session (phase 21): source, times, floor, plan and phase
+    # (scheduled / precharging / exporting / done / cancelled). Persisted for
+    # restart resume, like free_event — see SunsynkOptimizer._arm_saving_session_timers.
+    saving_session: dict[str, Any] = field(default_factory=dict)
+    saving_session_manual_start: str | None = None
+    saving_session_manual_end: str | None = None
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
