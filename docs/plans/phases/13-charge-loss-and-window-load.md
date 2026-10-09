@@ -1,6 +1,8 @@
 # Phase 13 — Charge losses and in-window load in Flux 1 sizing
 
-**Status:** Planned, not built. **Size:** XS–S, ~15-30k est. **Origin:** improvement list 06/10/2026 (item 4).
+**Status:** Done, merged (2c0833b, PR #37). **Size:** XS, ~25k actual.
+
+**As built:** The learned charge rate is measured as SOC gained per window hour, so it already embeds losses. `planning.charge_efficiency` therefore applies 0.92 only when the nameplate rate is used and 1.0 otherwise. The window is `flux1_end_minutes(energy_needed / efficiency, rate)`, still clamped to 02:15–05:00. In-window load is served from the grid in parallel with the charge, so it does not lengthen the window (no iteration needed). `planning.window_grid_kwh` adds it to the logged `grid_kwh_needed` instead. The plan logs `charge_efficiency`, `energy_needed_kwh`, `window_load_kwh` and `grid_kwh_needed`. Details: `docs/architecture/import-plan.md`. **Origin:** improvement list 06/10/2026 (item 4).
 
 ## Goal
 
