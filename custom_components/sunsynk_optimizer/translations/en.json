@@ -34,6 +34,8 @@
           "octopus_import_cost_sensor": "Octopus import cost sensor (optional)",
           "octopus_export_income_sensor": "Octopus export income sensor (optional)",
           "octopus_gas_cost_sensor": "Octopus gas cost sensor (optional)",
+          "octopus_import_rates_entity": "Octopus import rates entity (optional; current rate sensor or day rates event)",
+          "octopus_export_rates_entity": "Octopus export rates entity (optional; current rate sensor or day rates event)",
           "data_report_target": "Daily data report notify target (optional, developer)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
         }
@@ -83,6 +85,8 @@
           "octopus_import_cost_sensor": "Octopus import cost sensor (optional)",
           "octopus_export_income_sensor": "Octopus export income sensor (optional)",
           "octopus_gas_cost_sensor": "Octopus gas cost sensor (optional)",
+          "octopus_import_rates_entity": "Octopus import rates entity (optional; current rate sensor or day rates event)",
+          "octopus_export_rates_entity": "Octopus export rates entity (optional; current rate sensor or day rates event)",
           "data_report_target": "Daily data report notify target (optional, developer)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
         }

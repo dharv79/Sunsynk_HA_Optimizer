@@ -75,6 +75,11 @@ CONF_OCTOPUS_IMPORT_COST_SENSOR = "octopus_import_cost_sensor"
 CONF_OCTOPUS_EXPORT_INCOME_SENSOR = "octopus_export_income_sensor"
 CONF_OCTOPUS_GAS_COST_SENSOR = "octopus_gas_cost_sensor"
 
+# Phase 18: optional Octopus Energy rate entities (current-rate sensor or the
+# current-day-rates event). Blank keeps pricing on the configured `charges`.
+CONF_OCTOPUS_IMPORT_RATES_ENTITY = "octopus_import_rates_entity"
+CONF_OCTOPUS_EXPORT_RATES_ENTITY = "octopus_export_rates_entity"
+
 # Cost-aware export-disable threshold (v1.0.11 Part 3). Ships in shadow mode
 # by default — the cost trigger is computed and logged alongside the existing
 # Watt trigger, but the real decision keeps using the Watt trigger until the

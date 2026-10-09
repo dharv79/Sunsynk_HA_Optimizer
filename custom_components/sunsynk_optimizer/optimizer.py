@@ -56,6 +56,8 @@ from .const import (
     CONF_OCTOPUS_IMPORT_COST_SENSOR,
     CONF_OCTOPUS_EXPORT_INCOME_SENSOR,
     CONF_OCTOPUS_GAS_COST_SENSOR,
+    CONF_OCTOPUS_IMPORT_RATES_ENTITY,
+    CONF_OCTOPUS_EXPORT_RATES_ENTITY,
     CONF_WEATHER_ENTITY,
     CONF_TOMORROW_FORECAST_SENSOR,
     DEFAULT_AVG_CONSUMPTION_KW,
@@ -78,9 +80,11 @@ from .data_logger import DAILY_COST_FIELDS, DataLogger
 from .flux_helpers import (
     apply_flux_override,
     build_payload,
-    kpi_prices_pence,
+    TARIFF_BANDS,
     merge_entry_data,
-    peak_import_price_pence_per_kwh,
+    octopus_rate_pence_per_kwh,
+    price_source,
+    tariff_prices_pence,
 )
 from .planning import (
     manual_free_event_error,
@@ -1043,7 +1047,9 @@ class SunsynkOptimizer:
         cost_pence_per_hour: float | None = None
         cost_trigger: bool | None = None
         if in_peak_window:
-            peak_price = peak_import_price_pence_per_kwh(cfg.get(CONF_CHARGES, []))
+            prices, sources = self._tariff_prices(now_local.date())
+            peak_price = prices["peak"]
+            base_action["price_source"] = sources["peak"]
             if peak_price is not None:
                 cost_pence_per_hour = (grid_pac / 1000) * peak_price
                 cost_trigger = cost_pence_per_hour > cost_threshold
@@ -1549,9 +1555,10 @@ class SunsynkOptimizer:
         late_load_kw = plan.get("avg_consumption_kw") if plan.get("date") == date else None
         if late_load_kw is None:
             late_load_kw = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        prices, sources = self._tariff_prices(dt_util.parse_date(date))
         kpis = day_kpis(
             snapshots,
-            kpi_prices_pence(cfg.get(CONF_CHARGES, [])),
+            prices,
             max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))),
             late_load_kw,
         )
@@ -1559,6 +1566,7 @@ class SunsynkOptimizer:
             "date": date,
             "snapshot_times": sorted(snapshots),
             **kpis,
+            "price_source": price_source(sources, *TARIFF_BANDS),
             "evening_reserve_soc": self._evening_reserve_soc(),
         }
         await self.data_logger.async_log_day_kpis(**record)
@@ -1584,7 +1592,7 @@ class SunsynkOptimizer:
         cfg = self.cfg
         now = dt_util.now()
         reserve = self._evening_reserve_soc()
-        prices = kpi_prices_pence(cfg.get(CONF_CHARGES, []))
+        prices, sources = self._tariff_prices(now.date())
         plan = peak_export_plan(
             soc,
             reserve,
@@ -1615,12 +1623,29 @@ class SunsynkOptimizer:
             "soc": soc,
             "evening_reserve_soc": reserve,
             **plan,
+            "price_source": price_source(sources, "export_peak", "offpeak"),
             "live": live,
             "api_ok": api_ok,
         }
         await self.data_logger.async_log_peak_export(
             **{k: v for k, v in self._peak_export.items() if k != "type"}
         )
+
+    def _tariff_prices(self, on_date=None) -> tuple[dict[str, float | None], dict[str, str | None]]:
+        """Band prices (p/kWh) + per-band source: Octopus rate entities first, then `charges` (phase 18)."""
+        cfg = self.cfg
+        entities = {
+            "import": self._cfg_str(CONF_OCTOPUS_IMPORT_RATES_ENTITY, cfg),
+            "export": self._cfg_str(CONF_OCTOPUS_EXPORT_RATES_ENTITY, cfg),
+        }
+        octopus: dict[str, float | None] = {}
+        for key, (start, end, status) in TARIFF_BANDS.items():
+            state = self.hass.states.get(entities[status]) if entities[status] else None
+            if state is not None:
+                octopus[key] = octopus_rate_pence_per_kwh(
+                    state.state, dict(state.attributes), start, end, on_date, dt_util.DEFAULT_TIME_ZONE
+                )
+        return tariff_prices_pence(cfg.get(CONF_CHARGES, []), octopus)
 
     def _peak_export_holds_flux2(self, now_local) -> bool:
         """True while today's live peak export window owns Flux 2 (16:00-19:00)."""

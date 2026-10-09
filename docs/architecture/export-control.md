@@ -65,3 +65,39 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 - record dedup and export-only pairing.
 
 The free-event, monitor-mode and export-disable gates are early returns in the HA-only listener. In HA, the 22:00 bundle shows a `peak_export` line with `live: false`.
+
+## Tariff rates from the Octopus integration (09/10/2026, phase 18)
+
+**Design.** Two optional config fields, `octopus_import_rates_entity` and `octopus_export_rates_entity`, take either of these Octopus Energy integration entities:
+
+- the current-rate sensor (its `start`/`end` attributes, with the state as the rate);
+- the `…_current_day_rates` event (its `rates` list; the legacy `all_rates` also works).
+
+Rates are £/kWh inc VAT.
+
+`flux_helpers.octopus_rate_pence_per_kwh` returns the time-weighted pence for an HH:MM window. It uses the decision date's window, or the latest date the entity covers. `tariff_prices_pence` overlays these on `kpi_prices_pence(charges)` per `TARIFF_BANDS` band, giving `(prices, sources)` where each source is `"octopus"`, `"charges"` or `None`. `optimizer._tariff_prices` feeds three callers:
+
+- the cost trigger (peak);
+- the 22:00 KPIs;
+- the phase 17 peak export.
+
+A blank or unusable entity falls back to `charges` per band. A price missing everywhere stays `None`, never 0p (do-not-break 14).
+
+**Logged.** `price_source` (`octopus` / `charges` / `mixed` / `None`) is recorded in three places:
+
+- on `last_flux2_action` during the peak window;
+- on `day_kpis`;
+- on `peak_export`.
+
+Shadow mode is unchanged: the watt trigger still drives the decision.
+
+**Verification.** `tests/test_octopus_rates.py` covers:
+
+- window pricing from the rates list, including time weighting;
+- date preference;
+- the current-rate block;
+- unusable entities → `None`;
+- sensor rates overriding `charges`, with per-band fallback and source labels;
+- missing everywhere → `None`.
+
+In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `price_source: "octopus"` (or `"mixed"` if only import is set).
