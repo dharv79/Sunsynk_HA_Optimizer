@@ -39,6 +39,7 @@ from .const import (
     CONF_EXPORT_DISABLE_THRESHOLD,
     CONF_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
+    CONF_IMPORT_FEEDBACK_LIVE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
     CONF_FREE_EVENT_EXPORT_RATE_KW,
@@ -64,6 +65,7 @@ from .const import (
     DEFAULT_ENABLE_AI_WEEKLY_INSIGHT,
     DEFAULT_EXPORT_DISABLE_COST_THRESHOLD_PENCE_PER_HOUR,
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
+    DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
@@ -95,6 +97,7 @@ from .planning import (
     forecast_band,
     full_charge_day_move,
     hhmm_to_minutes,
+    import_feedback_adjustment,
     latest_complete_cost_day,
     learned_load_kw,
     minutes_to_hhmm,
@@ -761,12 +764,20 @@ class SunsynkOptimizer:
 
         overnight_drain_adjustment = 0
         soc_adjustment = 0
+        feedback_adj, feedback_days, feedback_reason = 0, 0, "target_full"
+        feedback_live = bool(cfg.get(CONF_IMPORT_FEEDBACK_LIVE, DEFAULT_IMPORT_FEEDBACK_LIVE))
         if target_soc < 100:
             # Drain and evening-nudge corrections apply whenever the target has
             # headroom — regular nights and full-charge-day solar-bridge plans.
             overnight_drain_adjustment = self.data_logger.compute_overnight_drain_adjustment(paired_days, away)
             soc_adjustment = self.data_logger.compute_soc_target_adjustment(paired_days, band, away)
-            target_soc = apply_soc_adjustments(target_soc, overnight_drain_adjustment, soc_adjustment)
+            # Phase 15: day-rate import feedback; logged only (shadow) unless
+            # the live option is on, where it replaces the evening-SOC nudge.
+            feedback_adj, feedback_days, feedback_reason = import_feedback_adjustment(
+                paired_days, now.date(), band, away
+            )
+            nudge = feedback_adj if feedback_live else soc_adjustment
+            target_soc = apply_soc_adjustments(target_soc, overnight_drain_adjustment, nudge)
 
         computed_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
             paired_days, battery_capacity_kwh, overnight_drain_adjustment
@@ -836,6 +847,10 @@ class SunsynkOptimizer:
             "overnight_drain_days": self.data_logger.count_drain_adjustment_days(paired_days, away),
             "soc_adjustment": soc_adjustment,
             "soc_adjustment_days": self.data_logger.count_soc_adjustment_days(paired_days, band, away),
+            "import_feedback_adjustment": feedback_adj,
+            "import_feedback_days": feedback_days,
+            "import_feedback_reason": feedback_reason,
+            "import_feedback_live": feedback_live,
             "forecast_correction_days": self.data_logger.count_forecast_correction_days(paired_days),
             "effective_charge_rate_kw": effective_charge_rate,
             "charge_rate_from_cache": computed_charge_rate is None,

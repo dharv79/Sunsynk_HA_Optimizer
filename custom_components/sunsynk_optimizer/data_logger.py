@@ -53,6 +53,9 @@ _IMPORT_PLAN_FIELDS = (
     "window_load_kwh",
     "grid_kwh_needed",
     "hours_to_solar",
+    "import_feedback_adjustment",
+    "import_feedback_reason",
+    "import_feedback_live",
 )
 
 

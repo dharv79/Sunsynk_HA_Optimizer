@@ -22,3 +22,9 @@ The options flow is multi-step: `init` → `charges_1` (import tariff rows 1–4
 
 `auto` — full optimizer behaviour, API writes enabled.  
 `monitor` — all three main logic paths (`async_run_import_plan`, `async_run_flux2_check`, `async_choose_best_full_charge_day`) return early without making API calls.
+
+
+## Shadow-first options
+
+- `cost_aware_export_shadow_mode` (default on, phase 3): see export-control.md.
+- `import_feedback_live` (default off, phase 15): when off, the day-rate import feedback is only logged; when on, it replaces the evening SOC nudge. See import-plan.md.

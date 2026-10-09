@@ -39,7 +39,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_day_actuals.py` | day_actuals / peak_window_usage logging and dedup; unavailable meters log None; charge_watchdog dedup |
 | `tests/test_daily_cost.py` | daily_cost pairing, net cost, fill-only merge, month-boundary catch-up |
 | `tests/test_planning.py` | `planning.py` target-SOC tree, bridge/ramp, charge rate, Flux 1 window, scoring, weekly period window, latest complete cost day, full-charge-day re-check, weighted forecast correction, learned household load, charge watchdog progress, charge efficiency and window grid kWh |
-| `tests/test_kpis.py` | Phase 14 `day_kpis` / `week_kpis`, KPI prices, meter_snapshot dedup and pairing, `tools/backtest.py` replay and forecast-error report |
+| `tests/test_kpis.py` | Phase 14 `day_kpis` / `week_kpis`, KPI prices, meter_snapshot dedup and pairing, `tools/backtest.py` replay and forecast-error report; phase 15 `import_feedback_adjustment` |
 | `tests/test_flux_helpers_cost.py` | `peak_import_price_pence_per_kwh` cost-trigger helper |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |

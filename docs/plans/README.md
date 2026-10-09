@@ -2,7 +2,7 @@
 
 ## Context
 
-Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b2 (beta) adds phases 11, 19 and 20; phases 12, 13 and 22 are merged but not yet released. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
+Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b2 (beta) adds phases 11, 19 and 20; phases 12–14 and 22 are merged but not yet released. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
 
 ## Phase status
 
@@ -21,7 +21,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 11. Latest complete cost day in the 22:00 bundle (1.0.12b1) | Done, merged (af7d6ac, PR #30) | XS, ~25k actual |
 | 12. Learned household load (+ zero day_actuals guard) | Done, merged (7a1809a, PR #35) | S, ~35k actual |
 | 13. Charge losses and in-window load in Flux 1 sizing | Done, merged (2c0833b, PR #37) | XS, ~25k actual |
-| 14. Efficiency KPIs and backtest harness | Planned, not built | M, ~50-80k |
+| 14. Efficiency KPIs and backtest harness | Done, merged (166f29f, PR #38) | M, ~45k actual |
 | 15. Day-rate import feedback for the overnight target | Planned, not built | S–M, ~35-60k |
 | 16. Evening reserve to 02:00 | Planned, not built | S, ~25-45k |
 | 17. Sell the expected surplus at the peak rate | Planned, not built | M, ~50-80k |

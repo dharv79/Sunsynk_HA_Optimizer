@@ -116,3 +116,24 @@ Catches a night where the Flux 1 charge silently fails (cloud write lost, invert
 **Logged.** The plan carries `charge_efficiency`, `energy_needed_kwh`, `window_load_kwh` and `grid_kwh_needed`. `charge_efficiency`, `window_load_kwh` and `grid_kwh_needed` are in `_IMPORT_PLAN_FIELDS`, so the JSONL record keeps them for the phase 14 KPIs.
 
 **Verification.** `tests/test_planning.py` checks that efficiency 1.0 with zero load reproduces the old minutes, that losses lengthen the window (2.9 kWh at 3 kW goes from 03:00 to 03:15), that the clamp holds, that the learned-rate path uses 1.0, and the grid kWh arithmetic. In HA, the Test plan button shows the new fields.
+
+
+## Day-rate import feedback (09/10/2026, phase 15)
+
+**Problem.** The evening SOC nudge uses fixed 35%/20% thresholds at 22:00. They were set for 80–85% targets and are a weak proxy for cost (see logic.md §8).
+
+**Design.** `planning.import_feedback_adjustment(paired_days, today, band, away)` uses the phase 14 KPIs.
+
+- It looks at the last 14 days in tonight's band and regime. It excludes full-charge days, export-disabled days, nights already at a 100% target, and days with no `grid_import_morning_kwh`. It needs at least 5 days.
+- If the median 05:00–16:00 import is above 0.3 kWh, the result is +5.
+- Otherwise, if the median `unused_charge_kwh` is above 0.5 kWh, the result is −5.
+- Otherwise the result is 0.
+- It returns `(adjustment, days, reason)` with reason `day_rate_import` / `unused_charge` / `on_target` / `insufficient_days`, or `target_full` when the plan is already at 100%.
+- `day_kpis` gains `grid_import_morning_kwh` (05:00–16:00) for this.
+
+**Shadow.** The plan logs `import_feedback_adjustment`, `import_feedback_days`, `import_feedback_reason` and `import_feedback_live`. The first, third and fourth are in `_IMPORT_PLAN_FIELDS`. The 22:00 bundle plan line shows them.
+
+- The new option `import_feedback_live` defaults off. When it is on, the feedback replaces the evening SOC nudge in `apply_soc_adjustments`. The drain adjustment is unchanged.
+- Turn it on once a week or two of KPIs exists and the backtest agrees.
+
+**Verification.** `tests/test_kpis.py` covers import raising the target, unused charge lowering it, on-target, the minimum days, each exclusion, and the away regime.

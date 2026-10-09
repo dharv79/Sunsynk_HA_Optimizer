@@ -501,6 +501,7 @@ KPI_LATE_LOAD_HOURS = 4.0  # 22:00 → next 02:00 charge
 DAY_KPI_FIELDS = (
     "grid_import_offpeak_kwh",
     "grid_import_day_kwh",
+    "grid_import_morning_kwh",
     "grid_import_peak_kwh",
     "self_sufficiency_pct",
     "avoidable_import_gbp",
@@ -542,7 +543,8 @@ def day_kpis(
     Any KPI whose inputs are missing is None, never 0 (do-not-break 11).
 
     - Import bands: off-peak 02:00-05:00, peak 16:00-19:00, day = the rest
-      (00:00-02:00, 05:00-16:00, 19:00-22:00).
+      (00:00-02:00, 05:00-16:00, 19:00-22:00). Morning = 05:00-16:00, the
+      part of the day band an overnight shortfall shows up in (phase 15).
     - Avoidable import £ = day + peak import at their prices (what a perfect
       plan would have shifted to off-peak).
     - Unused charge = overnight SOC added that was still spare at 16:00 above
@@ -552,11 +554,8 @@ def day_kpis(
     imp = "grid_import_kwh"
     offpeak = _snap_delta(snapshots, "02:00", "05:00", imp)
     peak = _snap_delta(snapshots, "16:00", "19:00", imp)
-    parts = (
-        _snap(snapshots, "02:00", imp),
-        _snap_delta(snapshots, "05:00", "16:00", imp),
-        _snap_delta(snapshots, "19:00", "22:00", imp),
-    )
+    morning = _snap_delta(snapshots, "05:00", "16:00", imp)
+    parts = (_snap(snapshots, "02:00", imp), morning, _snap_delta(snapshots, "19:00", "22:00", imp))
     day = None if any(p is None for p in parts) else sum(parts)
 
     load22, imp22 = _snap(snapshots, "22:00", "load_kwh"), _snap(snapshots, "22:00", imp)
@@ -585,6 +584,7 @@ def day_kpis(
     return {
         "grid_import_offpeak_kwh": round_or_none(offpeak),
         "grid_import_day_kwh": round_or_none(day),
+        "grid_import_morning_kwh": round_or_none(morning),
         "grid_import_peak_kwh": round_or_none(peak),
         "self_sufficiency_pct": round_or_none(self_sufficiency, 1),
         "avoidable_import_gbp": round_or_none(None if avoidable_pence is None else avoidable_pence / 100),
@@ -601,6 +601,56 @@ def week_kpis(days: list[dict[str, Any]]) -> dict[str, float | None]:
     out["week_self_sufficiency_pct"] = round(sum(ss) / len(ss), 1) if ss else None
     out["week_kpi_days"] = len(ss)
     return out
+
+
+# Phase 15: overnight-target feedback from real day-rate import (shadow first).
+IMPORT_FEEDBACK_WINDOW_DAYS = 14
+IMPORT_FEEDBACK_MIN_DAYS = 5
+IMPORT_FEEDBACK_TOLERANCE_KWH = 0.3
+IMPORT_FEEDBACK_UNUSED_KWH = 0.5
+IMPORT_FEEDBACK_STEP = 5
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def import_feedback_adjustment(
+    paired_days: list[dict[str, Any]], today: date, band: str, away: bool
+) -> tuple[int, int, str]:
+    """Return (adjustment %, days used, reason) for tonight's target.
+
+    Uses the last 14 days in tonight's forecast band and occupancy regime,
+    excluding full-charge days, export-disabled days and nights already at
+    100% (more charge wasn't possible). Needs 5 days.
+
+    - Median 05:00-16:00 grid import above 0.3 kWh → +5 (the night ran short
+      and the gap was bought at the day rate).
+    - Otherwise, median unused overnight charge above 0.5 kWh → -5 (charge
+      was still spare at 16:00).
+    - Otherwise 0.
+    """
+    cutoff = (today - timedelta(days=IMPORT_FEEDBACK_WINDOW_DAYS)).isoformat()
+    relevant = [
+        d for d in paired_days
+        if cutoff <= str(d.get("date", "")) < today.isoformat()
+        and d.get("forecast_band") == band
+        and not d.get("is_full_day")
+        and not d.get("evening_export_disabled")
+        and bool(d.get("away", False)) == away
+        and (d.get("target_soc") or 0) < 100
+        and d.get("grid_import_morning_kwh") is not None
+    ]
+    if len(relevant) < IMPORT_FEEDBACK_MIN_DAYS:
+        return 0, len(relevant), "insufficient_days"
+    if _median([d["grid_import_morning_kwh"] for d in relevant]) > IMPORT_FEEDBACK_TOLERANCE_KWH:
+        return IMPORT_FEEDBACK_STEP, len(relevant), "day_rate_import"
+    unused = [d["unused_charge_kwh"] for d in relevant if d.get("unused_charge_kwh") is not None]
+    if unused and _median(unused) > IMPORT_FEEDBACK_UNUSED_KWH:
+        return -IMPORT_FEEDBACK_STEP, len(relevant), "unused_charge"
+    return 0, len(relevant), "on_target"
 
 
 def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cost: float | None) -> float | None:
