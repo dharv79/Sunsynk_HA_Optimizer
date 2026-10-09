@@ -18,13 +18,14 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 |---|---|
 | `__init__.py` | Entry setup: builds coordinator → optimizer, forwards platforms |
 | `coordinator.py` | `OptimizerState` (single source of truth), `Store` persistence, `update_state`, 13-month log pruning |
-| `optimizer.py` | Business logic + HA listeners (01:55, 02:20, 06:00, 18:00 Sun, 22:00, 30-min, SOC change) |
+| `optimizer.py` | Business logic + HA listeners (01:55, 02:20, 06:00, 18:00 Sun, 22:00, 02/05/16/19:00 meter snapshots, 30-min, SOC change) |
 | `planning.py` | HA-free planning maths (target SOC tree, charge rate, Flux 1 window, scoring, cost helpers) |
 | `data_logger.py` | Monthly JSONL logging, pairing, adaptive `compute_*` corrections |
 | `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST |
 | `flux_helpers.py` | `fluxProducts` payload, `merge_entry_data`, peak-price helper |
 | `sensor.py` / `binary_sensor.py` / `button.py` / `switch.py` / `datetime.py` | Entities (event-driven, no polling) |
 | `dashboard_installer.py` | Generates Lovelace YAML |
+| `tools/backtest.py` (repo root) | Offline HA-free replay of logged nights with alternative parameters |
 | `config_flow.py` / `const.py` | Multi-step config/options flow; constants and defaults |
 
 ## Do-not-break (reasoning: `docs/architecture/do-not-break.md`)

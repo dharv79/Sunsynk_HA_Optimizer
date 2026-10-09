@@ -71,7 +71,13 @@ from .const import (
     FULL_CHARGE_DAY_OPTIONS,
 )
 from .data_logger import DAILY_COST_FIELDS, DataLogger
-from .flux_helpers import apply_flux_override, build_payload, merge_entry_data, peak_import_price_pence_per_kwh
+from .flux_helpers import (
+    apply_flux_override,
+    build_payload,
+    kpi_prices_pence,
+    merge_entry_data,
+    peak_import_price_pence_per_kwh,
+)
 from .planning import (
     manual_free_event_error,
     LOW_SOLAR_THRESHOLD_KWH,
@@ -83,6 +89,7 @@ from .planning import (
     charge_efficiency,
     charge_progress_ok,
     daily_report_plans,
+    day_kpis,
     days_in_period,
     flux1_end_minutes,
     forecast_band,
@@ -103,6 +110,7 @@ from .planning import (
     sum_field,
     synthetic_hourly_profile,
     trailing_week,
+    week_kpis,
     weighted_forecast_correction,
     window_grid_kwh,
 )
@@ -207,7 +215,12 @@ class SunsynkOptimizer:
             (1, 55, self._async_run_import_plan),
             (CHARGE_WATCHDOG_MINUTES // 60, CHARGE_WATCHDOG_MINUTES % 60, self._async_charge_watchdog),
             (6, 0, self._async_capture_morning_state),
-            (22, 0, self._async_capture_day_actuals),
+            (22, 0, self._async_capture_day_actuals),  # also takes the 22:00 meter snapshot
+            # Phase 14 KPI snapshots at the Flux band edges.
+            (2, 0, self._async_meter_snapshot),
+            (5, 0, self._async_meter_snapshot),
+            (16, 0, self._async_meter_snapshot),
+            (19, 0, self._async_meter_snapshot),
         )
         for hour, minute, callback in daily:
             self.unsubs.append(
@@ -1231,6 +1244,7 @@ class SunsynkOptimizer:
             "week_solar_kwh": _sum("actual_solar_kwh"),
             "year_to_date": self.coordinator.state.last_year_to_date_cost or {},
             "cost_aware_export_shadow_tally": shadow_mode_tally,
+            **week_kpis(paired_days),
         }
 
 
@@ -1467,6 +1481,44 @@ class SunsynkOptimizer:
                 },
             )
 
+    async def _async_meter_snapshot(self, now) -> None:
+        time = dt_util.as_local(now).strftime("%H:%M")
+        await self._guarded(lambda: self.async_capture_meter_snapshot(time), "Meter snapshot")
+
+    async def async_capture_meter_snapshot(self, time: str) -> None:
+        """Log the cumulative daily meters at a Flux band edge (phase 14).
+
+        Read-only, so it also runs in monitor mode. Unavailable meters log
+        None, so the KPIs that need them come out None, never 0.
+        """
+        await self.data_logger.async_log_meter_snapshot(
+            date=dt_util.now().date().isoformat(),
+            time=time,
+            grid_import_kwh=round_or_none(self._essential_state(self.day_grid_import_entity)),
+            grid_export_kwh=round_or_none(self._essential_state(self.day_grid_export_entity)),
+            load_kwh=round_or_none(self._essential_state(self.day_load_entity)),
+            soc=round_or_none(self._essential_state(self.battery_soc_entity), 1),
+        )
+
+    async def _async_capture_day_kpis(self, date: str) -> dict[str, Any]:
+        """22:00: close the day's snapshots and log the efficiency KPIs (phase 14)."""
+        await self.async_capture_meter_snapshot("22:00")
+        snapshots = await self.data_logger.async_load_meter_snapshots(date)
+        cfg = self.cfg
+        plan = self.coordinator.state.nightly_import_plan or {}
+        late_load_kw = plan.get("avg_consumption_kw") if plan.get("date") == date else None
+        if late_load_kw is None:
+            late_load_kw = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        kpis = day_kpis(
+            snapshots,
+            kpi_prices_pence(cfg.get(CONF_CHARGES, [])),
+            max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))),
+            late_load_kw,
+        )
+        record = {"date": date, "snapshot_times": sorted(snapshots), **kpis}
+        await self.data_logger.async_log_day_kpis(**record)
+        return {"type": "day_kpis", **record}
+
     def _read_daily_meters(self) -> dict[str, float]:
         """SolarSynkV3 cumulative daily load / grid import / grid export (kWh)."""
         return {
@@ -1674,6 +1726,7 @@ class SunsynkOptimizer:
             "day_grid_import_kwh": round_or_none(day_grid_import_kwh),
             "day_grid_export_kwh": round_or_none(day_grid_export_kwh),
         }
+        kpi_rec = await self._async_capture_day_kpis(date)
         # Persisted (not just logged/notified) so the dashboard's Consumption
         # sensor has today's actuals to display, the same way last_morning_state
         # and last_peak_window_usage are kept for their own dashboard fields.
@@ -1711,7 +1764,7 @@ class SunsynkOptimizer:
                 complete_rec = {}
             lines = "\n".join(
                 json.dumps(r)
-                for r in [*plan_recs, morning_rec, actuals_rec, peak_rec, cost_rec, complete_rec]
+                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, peak_rec, cost_rec, complete_rec]
                 if r
             )
             await self.async_notify(

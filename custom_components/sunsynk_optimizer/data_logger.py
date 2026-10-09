@@ -18,7 +18,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from .planning import net_cost_gbp, round_or_none
+from .planning import DAY_KPI_FIELDS, net_cost_gbp, round_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ _IMPORT_PLAN_FIELDS = (
     "charge_efficiency",
     "window_load_kwh",
     "grid_kwh_needed",
+    "hours_to_solar",
 )
 
 
@@ -228,6 +229,19 @@ class DataLogger:
         """Log the nightly charge watchdog outcome (phase 22): one record per night."""
         await self._async_append(_record("charge_watchdog", **fields))
 
+    async def async_log_meter_snapshot(self, **fields: Any) -> None:
+        """Log a cumulative daily-meter snapshot (phase 14): one per date+time."""
+        await self._async_append(_record("meter_snapshot", **fields))
+
+    async def async_log_day_kpis(self, **fields: Any) -> None:
+        """Log the 22:00 efficiency KPIs (phase 14): one per day."""
+        await self._async_append(_record("day_kpis", **fields))
+
+    async def async_load_meter_snapshots(self, date: str) -> dict[str, dict[str, Any]]:
+        """Return {"HH:MM": snapshot} for `date` (first record per time wins)."""
+        records = await self.hass.async_add_executor_job(self._read_recent, 2)
+        return snapshots_for_date(records, date)
+
     async def async_log_free_event(self, event: dict[str, Any]) -> None:
         """Log a free-electricity-event lifecycle point (scheduled / done / cancelled).
 
@@ -293,6 +307,7 @@ class DataLogger:
         """Join import_plan + day_actuals + morning_state + daily_cost records by date into unified dicts."""
         by_type: dict[str, dict[str, dict[str, Any]]] = {
             "import_plan": {}, "day_actuals": {}, "morning_state": {}, "daily_cost": {},
+            "day_kpis": {},
         }
         for r in records:
             bucket = by_type.get(r.get("type"))
@@ -302,6 +317,7 @@ class DataLogger:
         actuals = by_type["day_actuals"]
         mornings = by_type["morning_state"]
         costs = by_type["daily_cost"]
+        kpis = by_type["day_kpis"]
         paired = []
         for date in set(plans) & set(actuals):
             plan = plans[date]
@@ -344,6 +360,7 @@ class DataLogger:
                 "is_full_day": plan.get("is_full_day", False),
                 "initial_soc": plan.get("soc"),
                 "flux1_end": plan.get("flux1_end", ""),
+                **{key: kpis.get(date, {}).get(key) for key in DAY_KPI_FIELDS},
             })
         return paired
 
@@ -638,7 +655,10 @@ class DataLogger:
     # ------------------------------------------------------------------ #
 
     # daily_cost is not deduped here — it merges via async_merge_daily_cost.
-    _DEDUP_TYPES = ("import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog")
+    _DEDUP_TYPES = (
+        "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog",
+        "meter_snapshot", "day_kpis",
+    )
 
     async def _async_append(self, record: dict[str, Any]) -> None:
         """Offload the blocking file write to the executor so it doesn't block the event loop."""
@@ -658,7 +678,7 @@ class DataLogger:
         if (
             record.get("type") in self._DEDUP_TYPES
             and record.get("date")
-            and self._record_exists(month_file, record["type"], record["date"])
+            and self._record_exists(month_file, record["type"], record["date"], record.get("time"))
         ):
             _LOGGER.info(
                 "Skipping duplicate %s record for %s (already in %s)",
@@ -679,9 +699,19 @@ class DataLogger:
             _LOGGER.exception("Failed to write data log to %s", path)
 
     @staticmethod
-    def _record_exists(path: str, record_type: str, date: str) -> bool:
-        """Return True if a record with the given type and date already exists in the file."""
+    def _record_exists(path: str, record_type: str, date: str, time: str | None = None) -> bool:
+        """Return True if a record with the given type and date (and `time`, for
+        meter snapshots) already exists in the file."""
         return any(
-            rec.get("type") == record_type and rec.get("date") == date
+            rec.get("type") == record_type and rec.get("date") == date and rec.get("time") == time
             for rec in DataLogger._iter_jsonl(path)
         )
+
+
+def snapshots_for_date(records: list[dict[str, Any]], date: str) -> dict[str, dict[str, Any]]:
+    """{"HH:MM": meter_snapshot} for one date; the first record per time wins (dedup)."""
+    out: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        if rec.get("type") == "meter_snapshot" and rec.get("date") == date and rec.get("time"):
+            out.setdefault(rec["time"], rec)
+    return out
