@@ -213,6 +213,38 @@ def flux1_end_minutes(energy_needed_kwh: float, charge_rate_kw: float) -> int:
     return max(2 * 60 + 15, min(5 * 60, 2 * 60 + quarter_slots * 15))
 
 
+# Share of imported AC kWh that lands as battery SOC at the nameplate charge
+# rate (inverter conversion plus cell losses).
+CHARGE_EFFICIENCY = 0.92
+FLUX1_START_MINUTES = 2 * 60
+
+
+def charge_efficiency(config_rate_kw: float, effective_rate_kw: float | None) -> float:
+    """Losses to apply when sizing Flux 1.
+
+    The learned rate is measured as SOC gained per window hour, so it already
+    embeds losses; only the nameplate rate needs the efficiency factor. Same
+    "meaningfully lower" test as `resolve_used_charge_rate`.
+    """
+    if effective_rate_kw is not None and effective_rate_kw < config_rate_kw * 0.9:
+        return 1.0
+    return CHARGE_EFFICIENCY
+
+
+def window_grid_kwh(
+    energy_needed_kwh: float, efficiency: float, window_load_kw: float, end_minutes: int
+) -> tuple[float, float]:
+    """Return (window_load_kwh, grid_kwh_needed) for a 02:00→end window.
+
+    House load during the window is served from the grid in parallel with the
+    battery charge, so it adds grid kWh but not window time (the drain
+    adjustment already covers charge-end to 06:00). Losses lengthen the window
+    via `flux1_end_minutes(energy_needed_kwh / efficiency, rate)`.
+    """
+    window_load_kwh = window_load_kw * max(0, end_minutes - FLUX1_START_MINUTES) / 60
+    return round(window_load_kwh, 2), round(energy_needed_kwh / efficiency + window_load_kwh, 2)
+
+
 def minutes_to_hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 

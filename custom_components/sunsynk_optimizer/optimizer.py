@@ -80,6 +80,7 @@ from .planning import (
     CHARGE_WATCHDOG_MINUTES,
     CHARGE_WATCHDOG_RECHECK_MINUTES,
     apply_soc_adjustments,
+    charge_efficiency,
     charge_progress_ok,
     daily_report_plans,
     days_in_period,
@@ -103,6 +104,7 @@ from .planning import (
     synthetic_hourly_profile,
     trailing_week,
     weighted_forecast_correction,
+    window_grid_kwh,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -771,15 +773,22 @@ class SunsynkOptimizer:
             charge_rate_kw, effective_charge_rate, battery_temp_c
         )
 
+        # Phase 13: nameplate rate loses ~8% to conversion; in-window house load
+        # adds grid kWh (logged) but not window time.
+        efficiency = charge_efficiency(charge_rate_kw, effective_charge_rate)
+        energy_needed_kwh = max(0.0, (target_soc - soc) / 100.0 * battery_capacity_kwh)
         if low_solar:
             # Solar is scarce — take all the cheap import we can get.
-            flux1_end = "05:00"
+            end_minutes = 5 * 60
             logic_branch = "low_solar_full_window"
         else:
             # Physics-based window: charge exactly as long as needed to reach target.
-            energy_needed_kwh = max(0.0, (target_soc - soc) / 100.0 * battery_capacity_kwh)
-            flux1_end = minutes_to_hhmm(flux1_end_minutes(energy_needed_kwh, used_charge_rate))
+            end_minutes = flux1_end_minutes(energy_needed_kwh / efficiency, used_charge_rate)
             logic_branch = "adaptive_hourly" if decision.hourly_forecast_used else "adaptive"
+        flux1_end = minutes_to_hhmm(end_minutes)
+        window_load_kwh, grid_kwh_needed = window_grid_kwh(
+            energy_needed_kwh, efficiency, avg_consumption_kw, end_minutes
+        )
         next_import_window = f"02:00→{flux1_end}"
 
         payload = {
@@ -818,6 +827,10 @@ class SunsynkOptimizer:
             "effective_charge_rate_kw": effective_charge_rate,
             "charge_rate_from_cache": computed_charge_rate is None,
             "used_charge_rate_kw": used_charge_rate,
+            "charge_efficiency": efficiency,
+            "energy_needed_kwh": round(energy_needed_kwh, 2),
+            "window_load_kwh": window_load_kwh,
+            "grid_kwh_needed": grid_kwh_needed,
             "charge_rate_calibration_days": self.data_logger.count_charge_rate_calibration_days(paired_days),
             "flux1_end": flux1_end,
             "next_import_window": next_import_window,

@@ -1,6 +1,6 @@
 # Phase 22 — Charge watchdog
 
-**Status:** Planned, not built. **Size:** S, ~25-45k est. **Origin:** improvement list 2, 06/10/2026 (item 22).
+**Status:** Done, merged (3e59565, PR #36). **Size:** S, ~40k actual. **Origin:** improvement list 2, 06/10/2026 (item 22).
 
 ## Goal
 
@@ -17,3 +17,11 @@ Catch a night where the Flux 1 charge silently fails (cloud write lost, inverter
 
 - Tests for `charge_progress_ok` (rising SOC, flat SOC with import, flat SOC no import, missing sensors).
 - At most one retry per night; no push in monitor mode or dry run.
+
+## As built
+
+- 02:20 listener `_async_charge_watchdog` → `async_run_charge_watchdog` (`_guarded`); window start is fixed at 02:00, so no per-plan scheduling. Reads tonight's `nightly_import_plan` (the 01:55 plan) and skips monitor mode, an active free event, no push (`api_ok is None`), no charge planned, or the window already ended.
+- `planning.charge_progress_ok(..., target_soc)`: ok when SOC rose ≥25% of the expected rise (1% floor), grid import ≥50% of the expected charge power, or SOC is at target; `unknown` on missing inputs. Added `hhmm_to_minutes`.
+- Stalled → one re-push via `async_push_flux_override`, then a 15-min `async_call_later` re-check (cancelled on shutdown), judged from the retry-time SOC over the minutes the window was still open. Still stalled → notification, worded on the re-push bool.
+- `charge_watchdog` record: result ok / unknown / recovered / stalled, `retried`, `retry_api_ok`, SOC and grid figures, `first_check`; in `_DEDUP_TYPES`.
+- Design note in `docs/architecture/import-plan.md` ("Charge watchdog").

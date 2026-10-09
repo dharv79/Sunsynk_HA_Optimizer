@@ -2,7 +2,7 @@
 
 ## Context
 
-Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b2 (beta) adds phases 11, 19 and 20; phase 12 is merged but not yet released. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
+Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b2 (beta) adds phases 11, 19 and 20; phases 12 and 22 are merged but not yet released. Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
 
 ## Phase status
 
@@ -29,7 +29,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 19. Pick the full-charge day from the solar forecast (daily re-check) (1.0.12b2) | Done, merged (449434d, PR #32) | S, ~45k actual |
 | 20. Faster, seasonal forecast correction (shadow) (1.0.12b2) | Done, merged (6b1702b, PR #33) | XS, ~25k actual |
 | 21. Octopus Saving Sessions | Planned, not built | S–M, ~35-60k |
-| 22. Charge watchdog | Planned, not built | S, ~25-45k |
+| 22. Charge watchdog | Done, merged (3e59565, PR #36) | S, ~40k actual |
 | 23. Gentler charging across the cheap window | Planned, not built | S–M, ~35-60k |
 | 24. Battery wear cost in decisions | Planned, not built | S, ~20-40k |
 | 25. Spare solar sensor and appliance prompts | Planned, not built | S, ~20-40k |

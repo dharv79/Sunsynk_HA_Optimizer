@@ -122,6 +122,33 @@ def test_flux1_end_minutes(planning):
     assert planning.minutes_to_hhmm(planning.flux1_end_minutes(30.0, 3.0)) == "05:00"
 
 
+def test_charge_efficiency_only_on_nameplate_rate(planning):
+    assert planning.charge_efficiency(3.0, None) == planning.CHARGE_EFFICIENCY
+    assert planning.charge_efficiency(3.0, 2.8) == planning.CHARGE_EFFICIENCY  # nameplate used
+    assert planning.charge_efficiency(3.0, 2.0) == 1.0  # learned rate already embeds losses
+
+
+def test_flux1_sizing_unit_efficiency_and_no_load_matches_old(planning):
+    for kwh in (0.0, 1.6, 3.0, 30.0):
+        end = planning.flux1_end_minutes(kwh / 1.0, 3.0)
+        assert end == planning.flux1_end_minutes(kwh, 3.0)
+        assert planning.window_grid_kwh(kwh, 1.0, 0.0, end) == (0.0, round(kwh, 2))
+
+
+def test_flux1_sizing_losses_lengthen_window_and_clamp_holds(planning):
+    # 2.9 kWh at 3 kW: 58 min → 03:00 without losses; 63 min → 03:15 with 0.92.
+    assert planning.flux1_end_minutes(2.9, 3.0) == 3 * 60
+    assert planning.flux1_end_minutes(2.9 / 0.92, 3.0) == 3 * 60 + 15
+    assert planning.flux1_end_minutes(30.0 / 0.92, 3.0) == 5 * 60
+    assert planning.flux1_end_minutes(0.0 / 0.92, 3.0) == 2 * 60 + 15
+
+
+def test_window_grid_kwh_adds_load_over_window(planning):
+    # 75 min window at 0.8 kW = 1.0 kWh load; 4.6 kWh / 0.92 = 5.0 kWh stored need.
+    assert planning.window_grid_kwh(4.6, 0.92, 0.8, 3 * 60 + 15) == (1.0, 6.0)
+    assert planning.window_grid_kwh(0.0, 0.92, 0.6, 5 * 60) == (1.8, 1.8)
+
+
 def test_score_full_charge_day(planning):
     sunny = {"condition": "sunny", "cloud_coverage": 10, "precipitation_probability": 0, "temperature": 20}
     assert planning.score_full_charge_day(sunny, "Monday") == 118.0

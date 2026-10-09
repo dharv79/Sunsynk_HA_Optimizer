@@ -147,13 +147,16 @@ See [Section 6](#6-adaptive-learning-corrections) for how each adjustment is der
 
 ```
 energy_needed = max(0, (target_soc − current_soc) / 100 × battery_capacity_kwh)
-raw_minutes   = energy_needed / charge_rate_kw × 60
+efficiency    = 0.92 at the nameplate rate, 1.0 when the learned rate is used (it already embeds losses)
+raw_minutes   = energy_needed / efficiency / charge_rate_kw × 60
 quarter_slots = ceil(raw_minutes / 15)            ← rounds up to next 15-min slot
 flux1_end     = 02:00 + quarter_slots × 15 min
 flux1_end     = clamp(flux1_end, 02:15, 05:00)
 ```
 
 The 02:15 minimum ensures the window is never shorter than 15 minutes from the fixed 02:00 start, which is not worth an API call.
+
+The plan also logs `window_load_kwh` (house load × window hours, served from the grid alongside the charge) and `grid_kwh_needed` (`energy_needed / efficiency + window_load_kwh`). Window load adds grid kWh, not window time.
 
 ### Step 5 — API push
 
