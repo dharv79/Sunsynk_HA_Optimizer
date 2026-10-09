@@ -41,6 +41,8 @@ from .const import (
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_IMPORT_FEEDBACK_LIVE,
     CONF_PEAK_EXPORT_LIVE,
+    CONF_GENTLE_CHARGE_LIVE,
+    CONF_BATTERY_VOLTAGE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
     CONF_FREE_EVENT_EXPORT_RATE_KW,
@@ -72,11 +74,13 @@ from .const import (
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_PEAK_EXPORT_LIVE,
+    DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
     DEFAULT_TOMORROW_FORECAST_SENSOR,
     FULL_CHARGE_DAY_OPTIONS,
+    GENTLE_CHARGE_SETTING,
 )
 from .data_logger import DAILY_COST_FIELDS, DataLogger
 from .flux_helpers import (
@@ -91,6 +95,9 @@ from .flux_helpers import (
 )
 from .planning import (
     manual_free_event_error,
+    CHEAP_WINDOW_END,
+    CHEAP_WINDOW_HOURS,
+    DEFAULT_BATTERY_VOLTAGE,
     LOW_SOLAR_THRESHOLD_KWH,
     STARTUP_PLAN_SOURCE,
     WEEK_HISTORY_DAYS,
@@ -106,10 +113,12 @@ from .planning import (
     flux1_end_minutes,
     forecast_band,
     full_charge_day_move,
+    gentle_charge_current_a,
     hhmm_to_minutes,
     import_feedback_adjustment,
     latest_complete_cost_day,
     learned_load_kw,
+    max_charge_current_a,
     minutes_to_hhmm,
     net_cost_gbp,
     next_joined_saving_session,
@@ -163,6 +172,13 @@ def _pence(value: float | None) -> str:
     return "?" if value is None else f"{round(value, 1)}p"
 
 
+def _watchdog_rate_kw(plan: dict[str, Any]) -> float | None:
+    """Rate the charge watchdog expects: the gentle rate on a live gentle night (phase 23)."""
+    if plan.get("gentle_charge_applied") and plan.get("gentle_charge_rate_kw"):
+        return plan["gentle_charge_rate_kw"]
+    return plan.get("used_charge_rate_kw")
+
+
 def _pct(value: float | None) -> str:
     return "?" if value is None else f"{round(value)}%"
 
@@ -204,6 +220,9 @@ class SunsynkOptimizer:
         # Saving session (phase 21) callback handles; re-armed from
         # coordinator.state.saving_session on restart, same as the free event.
         self._saving_session_unsubs: list[Any] = []
+        # Gentler charging (phase 23) 05:00 restore handle; re-armed from
+        # coordinator.state.gentle_charge on restart.
+        self._gentle_restore_unsub = None
         # Charge watchdog (phase 22) 15-minute re-check handle. Not persisted:
         # a restart mid-check just skips that night's re-check.
         self._charge_watchdog_recheck = None
@@ -297,6 +316,8 @@ class SunsynkOptimizer:
             self._arm_free_event_timers(self.coordinator.state.free_event)
         if self._saving_session_pending():
             self._arm_saving_session_timers(self.coordinator.state.saving_session)
+        if self.coordinator.state.gentle_charge.get("phase") == "applied":
+            self._arm_gentle_restore()
 
     async def async_shutdown(self) -> None:
         for unsub in self.unsubs:
@@ -304,6 +325,9 @@ class SunsynkOptimizer:
         self.unsubs.clear()
         self._clear_free_event_timers()
         self._clear_saving_session_timers()
+        if self._gentle_restore_unsub:
+            self._gentle_restore_unsub()
+            self._gentle_restore_unsub = None
         if self._charge_watchdog_recheck:
             self._charge_watchdog_recheck()
             self._charge_watchdog_recheck = None
@@ -866,6 +890,18 @@ class SunsynkOptimizer:
             end_minutes = flux1_end_minutes(energy_needed_kwh / efficiency, used_charge_rate)
             logic_branch = "adaptive_hourly" if decision.hourly_forecast_used else "adaptive"
         flux1_end = minutes_to_hhmm(end_minutes)
+        # Phase 23: the lowest grid-charge current that still reaches the target
+        # by 05:00. Logged only unless the live option is on; then the current
+        # is written first and the window stays open to 05:00.
+        battery_voltage = float(cfg.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE)
+        gentle_max_a = max_charge_current_a(charge_rate_kw, battery_voltage)
+        gentle_current_a = gentle_charge_current_a(energy_needed_kwh, CHEAP_WINDOW_HOURS, battery_voltage, gentle_max_a)
+        gentle_charge_applied = False
+        if not dry_run and self._gentle_charge_due(cfg, now, gentle_current_a, gentle_max_a):
+            gentle_charge_applied = await self._async_apply_gentle_charge(gentle_current_a, now)
+            if gentle_charge_applied:
+                end_minutes = hhmm_to_minutes(CHEAP_WINDOW_END)
+                flux1_end = CHEAP_WINDOW_END
         window_load_kwh, grid_kwh_needed = window_grid_kwh(
             energy_needed_kwh, efficiency, avg_consumption_kw, end_minutes
         )
@@ -924,6 +960,13 @@ class SunsynkOptimizer:
             "held_by_free_event": held_by == "free_event",
             "held_by_saving_session": held_by == "saving_session",
             "saving_session_boost": saving_session_boost,
+            "battery_voltage": battery_voltage,
+            "gentle_current_a": gentle_current_a,
+            "gentle_max_current_a": round(gentle_max_a, 1),
+            "gentle_charge_rate_kw": (
+                round(gentle_current_a * battery_voltage / 1000, 2) if gentle_current_a is not None else None
+            ),
+            "gentle_charge_applied": gentle_charge_applied,
             "forecast_fallback": forecast_fallback,
             "is_weekend": is_weekend,
             "away": away,
@@ -1004,6 +1047,8 @@ class SunsynkOptimizer:
         if plan["soc_adjustment"]:
             adjustment_parts.append(f"eve {plan['soc_adjustment']:+d}%")
         adjustment_note = f" ({', '.join(adjustment_parts)})" if adjustment_parts else ""
+        if plan.get("gentle_charge_applied"):
+            adjustment_note += f" at {plan['gentle_current_a']} A"
         api_ok = plan["api_ok"]
         if plan.get("held_by_free_event"):
             title = "🔋 Sunsynk: import plan computed (held for free event)"
@@ -1461,14 +1506,14 @@ class SunsynkOptimizer:
         soc_now = self._essential_state(self.battery_soc_entity)
         grid_import_w = self._essential_state(self.grid_pac_entity)
         result = charge_progress_ok(
-            plan["soc"], soc_now, now_minutes - 2 * 60, plan.get("used_charge_rate_kw"),
+            plan["soc"], soc_now, now_minutes - 2 * 60, _watchdog_rate_kw(plan),
             capacity, grid_import_w, plan["target_soc"],
         )
         record = {
             "date": plan["date"],
             "soc_start": plan["soc"],
             "target_soc": plan["target_soc"],
-            "expected_rate_kw": plan.get("used_charge_rate_kw"),
+            "expected_rate_kw": _watchdog_rate_kw(plan),
             "first_check": {"soc_now": soc_now, "grid_import_w": grid_import_w, "result": result},
         }
         if result != "stalled":
@@ -1501,7 +1546,7 @@ class SunsynkOptimizer:
         end_minutes = hhmm_to_minutes(plan.get("flux1_end")) or 0
         elapsed = min(now.hour * 60 + now.minute, end_minutes) - retry["retry_minutes"]
         result = charge_progress_ok(
-            retry["retry_soc"], soc_now, elapsed, plan.get("used_charge_rate_kw"),
+            retry["retry_soc"], soc_now, elapsed, _watchdog_rate_kw(plan),
             capacity, grid_import_w, plan["target_soc"],
         )
         fields = {k: v for k, v in retry.items() if k not in ("retry_minutes", "retry_soc")}
@@ -1531,6 +1576,7 @@ class SunsynkOptimizer:
         await self._guarded(self.async_run_flux2_check, "Periodic Flux 2 check")
         await self._guarded(self._async_track_peak_window_usage, "Peak-window usage tracking")
         await self._guarded(self.async_check_octopus_saving_session, "Saving session auto-detect")
+        await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
 
     async def _async_track_peak_window_usage(self) -> None:
         """Snapshot load/grid meters at the 16:00-19:00 window edges and log the delta.
@@ -2461,3 +2507,99 @@ class SunsynkOptimizer:
             await self._async_restore_normal_plan()
         await self.data_logger.async_log_saving_session({"phase": "cancelled", **session})
         await self.async_notify("🔋 Sunsynk: saving session cancelled", "The saving session was cancelled.")
+
+    # ------------------------------------------------------------------ #
+    # Gentler charging (phase 23)                                          #
+    # ------------------------------------------------------------------ #
+
+    def _gentle_charge_due(self, cfg: dict[str, Any], now: datetime, current_a: int | None, max_a: float) -> bool:
+        """Live gentle charge applies before 05:00 when it actually lowers the current."""
+        return (
+            bool(cfg.get(CONF_GENTLE_CHARGE_LIVE, DEFAULT_GENTLE_CHARGE_LIVE))
+            and current_a is not None
+            and current_a < max_a
+            and not self._slots_held()
+            and now.hour * 60 + now.minute < hhmm_to_minutes(CHEAP_WINDOW_END)
+        )
+
+    async def _async_write_setting(self, key: str, value: Any) -> tuple[bool, float | None]:
+        """Read the inverter settings, change one key, write them all back.
+
+        The settings-endpoint twin of _async_post_with_status (do-not-break 5):
+        surfaces failures via last_api_result / last_error and returns
+        (ok, previous value). Refuses to write when the current value can't be
+        read as a number, so there is always something to restore.
+        """
+        serial = self.inverter_serial
+        try:
+            settings = await self.coordinator.api.async_read_settings(serial)
+            previous = float(settings[key])
+            await self.coordinator.api.async_write_settings(serial, {**settings, key: str(value)})
+        except Exception as exc:  # pragma: no cover
+            _LOGGER.exception("Sunsynk settings write failed (%s)", key)
+            self.coordinator.update_state(
+                last_api_result={"ok": False, "error": str(exc)},
+                last_error=f"Settings write failed ({key}): {exc}",
+            )
+            return False, None
+        self.coordinator.update_state(last_api_result={"ok": True, "setting": key, "value": value})
+        return True, previous
+
+    async def _async_apply_gentle_charge(self, current_a: int, now: datetime) -> bool:
+        """Write the gentle grid-charge current and arm its 05:00 restore."""
+        pending = self.coordinator.state.gentle_charge
+        ok, previous = await self._async_write_setting(GENTLE_CHARGE_SETTING, current_a)
+        if not ok:
+            return False
+        # A re-plan before 05:00 (reload) reads back our own gentle value; keep
+        # the original one to restore.
+        restore = pending["restore_current_a"] if pending.get("phase") == "applied" else previous
+        restore_at = now.replace(hour=5, minute=0, second=0, microsecond=0)
+        self.coordinator.update_state(
+            gentle_charge={
+                "phase": "applied",
+                "date": now.date().isoformat(),
+                "current_a": current_a,
+                "restore_current_a": restore,
+                "restore_at": restore_at.isoformat(),
+                "restore_failures": 0,
+            }
+        )
+        self._arm_gentle_restore()
+        return True
+
+    def _arm_gentle_restore(self) -> None:
+        if self._gentle_restore_unsub:
+            self._gentle_restore_unsub()
+        restore_at = dt_util.as_local(dt_util.parse_datetime(self.coordinator.state.gentle_charge["restore_at"]))
+        delay = max(0, (restore_at - dt_util.now()).total_seconds())
+        self._gentle_restore_unsub = async_call_later(self.hass, delay, self._async_gentle_restore)
+
+    async def _async_gentle_restore(self, _now) -> None:
+        self._gentle_restore_unsub = None
+        await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
+
+    async def async_restore_charge_current(self) -> None:
+        """05:00: put the inverter's grid-charge current back; retried every 30 minutes until it sticks.
+
+        Runs in monitor mode too — it only undoes this integration's own write.
+        """
+        gentle = dict(self.coordinator.state.gentle_charge)
+        if gentle.get("phase") != "applied":
+            return
+        restore_at = dt_util.parse_datetime(gentle.get("restore_at") or "")
+        if restore_at is not None and dt_util.now() < dt_util.as_local(restore_at):
+            return
+        ok, _ = await self._async_write_setting(GENTLE_CHARGE_SETTING, gentle["restore_current_a"])
+        if ok:
+            gentle["phase"] = "restored"
+            self.coordinator.update_state(gentle_charge=gentle)
+            return
+        gentle["restore_failures"] = gentle.get("restore_failures", 0) + 1
+        self.coordinator.update_state(gentle_charge=gentle)
+        if gentle["restore_failures"] == 1:
+            await self.async_notify(
+                "⚠️ Sunsynk: grid charge current NOT restored",
+                f"Still {gentle['current_a']} A after the gentle overnight charge; retrying every 30 minutes. "
+                f"If this persists, set Grid charge back to {gentle['restore_current_a']} A in the Sunsynk app.",
+            )

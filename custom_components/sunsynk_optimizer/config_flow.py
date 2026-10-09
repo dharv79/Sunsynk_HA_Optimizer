@@ -36,6 +36,8 @@ from .const import (
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_IMPORT_FEEDBACK_LIVE,
     CONF_PEAK_EXPORT_LIVE,
+    CONF_GENTLE_CHARGE_LIVE,
+    CONF_BATTERY_VOLTAGE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
     CONF_FREE_EVENT_EXPORT_RATE_KW,
@@ -72,6 +74,7 @@ from .const import (
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_PEAK_EXPORT_LIVE,
+    DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_FULL_CHARGE_DAY,
     DEFAULT_INVEST,
     DEFAULT_NOTIFY_SERVICE,
@@ -87,6 +90,7 @@ from .const import (
     OPERATION_MODE_OPTIONS,
 )
 from .flux_helpers import default_charges, default_flux_products, merge_entry_data
+from .planning import DEFAULT_BATTERY_VOLTAGE
 
 _LOGGER = logging.getLogger(__name__)
 STATUS_OPTIONS = ["import", "export"]
@@ -161,6 +165,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 default=values.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE),
             ): selector.BooleanSelector(),
             vol.Required(
+                CONF_GENTLE_CHARGE_LIVE,
+                default=values.get(CONF_GENTLE_CHARGE_LIVE, DEFAULT_GENTLE_CHARGE_LIVE),
+            ): selector.BooleanSelector(),
+            vol.Required(
                 CONF_DEFAULT_FULL_CHARGE_DAY,
                 default=values.get(CONF_DEFAULT_FULL_CHARGE_DAY, DEFAULT_FULL_CHARGE_DAY),
             ): selector.SelectSelector(
@@ -171,6 +179,12 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             ),
             vol.Required(CONF_CHARGE_RATE, default=values.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
+            ),
+            vol.Required(
+                CONF_BATTERY_VOLTAGE,
+                default=values.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE,
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=12, max=1000, step=0.1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="V")
             ),
             vol.Optional(
                 CONF_FREE_EVENT_CHARGE_RATE_KW,

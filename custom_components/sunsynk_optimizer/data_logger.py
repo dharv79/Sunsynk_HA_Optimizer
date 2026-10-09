@@ -56,6 +56,9 @@ _IMPORT_PLAN_FIELDS = (
     "import_feedback_adjustment",
     "import_feedback_reason",
     "import_feedback_live",
+    "saving_session_boost",
+    "gentle_current_a",
+    "gentle_charge_applied",
 )
 
 

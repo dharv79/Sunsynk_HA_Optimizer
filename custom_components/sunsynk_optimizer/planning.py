@@ -245,6 +245,41 @@ def window_grid_kwh(
     return round(window_load_kwh, 2), round(energy_needed_kwh / efficiency + window_load_kwh, 2)
 
 
+# Phase 23: gentler charging — the lowest grid-charge current that still
+# reaches the target by the end of the 02:00-05:00 cheap window.
+CHEAP_WINDOW_HOURS = 3.0
+CHEAP_WINDOW_END = "05:00"
+GENTLE_CHARGE_MARGIN = 1.2
+GENTLE_CHARGE_MIN_CURRENT_A = 10
+DEFAULT_BATTERY_VOLTAGE = 51.2
+
+
+def gentle_charge_current_a(
+    kwh_needed: float,
+    window_hours: float,
+    battery_voltage: float,
+    max_current_a: float,
+    margin: float = GENTLE_CHARGE_MARGIN,
+    min_current_a: float = GENTLE_CHARGE_MIN_CURRENT_A,
+) -> int | None:
+    """Battery current (A, rounded up) that delivers kwh_needed over window_hours.
+
+    `margin` covers in-window house load and calibration error (phase 22's
+    watchdog covers a night that still runs slow). Clamped to
+    [min_current_a, max_current_a]; None when there is nothing to charge or an
+    input is unusable — the caller then leaves the inverter's current alone.
+    """
+    if kwh_needed <= 0 or window_hours <= 0 or battery_voltage <= 0 or max_current_a <= 0:
+        return None
+    amps = math.ceil(kwh_needed * 1000 * margin / (battery_voltage * window_hours))
+    return int(max(min(min_current_a, max_current_a), min(max_current_a, amps)))
+
+
+def max_charge_current_a(charge_rate_kw: float, battery_voltage: float) -> float:
+    """Nameplate charge rate as a battery current (A)."""
+    return charge_rate_kw * 1000 / battery_voltage if battery_voltage > 0 else 0.0
+
+
 def minutes_to_hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
