@@ -40,3 +40,15 @@ def test_gentle_fields_are_logged_on_the_import_plan(DataLogger):
 
     fields = sys.modules["sunsynk_optimizer.data_logger"]._IMPORT_PLAN_FIELDS
     assert {"gentle_current_a", "gentle_charge_applied", "saving_session_boost"} <= set(fields)
+
+
+def test_gentle_current_only_ever_lowers_the_users_setting(planning):
+    # Grid Amps 60 A: a light night's 25 A is written, a heavy night's 58 A is too (still lower).
+    assert planning.gentle_current_lowers(25, 60.0)
+    assert planning.gentle_current_lowers(58, 60.0)
+    # Grid Amps 40 A: a computed 58 A would raise it — never written.
+    assert not planning.gentle_current_lowers(58, 40.0)
+    assert not planning.gentle_current_lowers(40, 40.0)
+    # Unknown either side → no write.
+    assert not planning.gentle_current_lowers(None, 60.0)
+    assert not planning.gentle_current_lowers(25, None)
