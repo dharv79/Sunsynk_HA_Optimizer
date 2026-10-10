@@ -22,3 +22,5 @@ Charge at the lowest current that still reaches the target by window end, instea
 ## Outcome (09/10/2026)
 
 API check passed: settings at `common/setting/{inverter sn}/read|set`; the grid-charge current `sdBatteryCurrent` is global, not per slot (key inferred from SolarSynkV3 — verify on the first live night). `gentle_charge_current_a` logged on every plan; `gentle_charge_live` (default off) writes it at 01:55, keeps Flux 1 open to 05:00 and restores the original at 05:00 (30-minute retries). Watchdog uses the gentle rate on live nights. Details: `docs/architecture/import-plan.md`.
+
+Follow-up (10/10/2026): the user's Grid Amps is now the ceiling — the live write only ever lowers it (`gentle_current_lowers`), found from the debug data (Grid Amps was 40 A, nameplate maths gave ~58 A).

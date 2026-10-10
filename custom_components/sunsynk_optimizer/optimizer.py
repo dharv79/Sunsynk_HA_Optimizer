@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant
@@ -114,6 +114,7 @@ from .planning import (
     forecast_band,
     full_charge_day_move,
     gentle_charge_current_a,
+    gentle_current_lowers,
     hhmm_to_minutes,
     import_feedback_adjustment,
     latest_complete_cost_day,
@@ -896,9 +897,9 @@ class SunsynkOptimizer:
         battery_voltage = float(cfg.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE)
         gentle_max_a = max_charge_current_a(charge_rate_kw, battery_voltage)
         gentle_current_a = gentle_charge_current_a(energy_needed_kwh, CHEAP_WINDOW_HOURS, battery_voltage, gentle_max_a)
-        gentle_charge_applied = False
+        gentle_charge_applied, inverter_grid_current_a = False, None
         if not dry_run and self._gentle_charge_due(cfg, now, gentle_current_a, gentle_max_a):
-            gentle_charge_applied = await self._async_apply_gentle_charge(gentle_current_a, now)
+            gentle_charge_applied, inverter_grid_current_a = await self._async_apply_gentle_charge(gentle_current_a, now)
             if gentle_charge_applied:
                 end_minutes = hhmm_to_minutes(CHEAP_WINDOW_END)
                 flux1_end = CHEAP_WINDOW_END
@@ -967,6 +968,7 @@ class SunsynkOptimizer:
                 round(gentle_current_a * battery_voltage / 1000, 2) if gentle_current_a is not None else None
             ),
             "gentle_charge_applied": gentle_charge_applied,
+            "inverter_grid_current_a": inverter_grid_current_a,
             "forecast_fallback": forecast_fallback,
             "is_weekend": is_weekend,
             "away": away,
@@ -2522,18 +2524,23 @@ class SunsynkOptimizer:
             and now.hour * 60 + now.minute < hhmm_to_minutes(CHEAP_WINDOW_END)
         )
 
-    async def _async_write_setting(self, key: str, value: Any) -> tuple[bool, float | None]:
+    async def _async_write_setting(
+        self, key: str, value: Any, write_if: Callable[[float], bool] | None = None
+    ) -> tuple[bool | None, float | None]:
         """Read the inverter settings, change one key, write them all back.
 
         The settings-endpoint twin of _async_post_with_status (do-not-break 5):
         surfaces failures via last_api_result / last_error and returns
         (ok, previous value). Refuses to write when the current value can't be
-        read as a number, so there is always something to restore.
+        read as a number, so there is always something to restore. When
+        `write_if(previous)` is False nothing is written: (None, previous).
         """
         serial = self.inverter_serial
         try:
             settings = await self.coordinator.api.async_read_settings(serial)
             previous = float(settings[key])
+            if write_if is not None and not write_if(previous):
+                return None, previous
             await self.coordinator.api.async_write_settings(serial, {**settings, key: str(value)})
         except Exception as exc:  # pragma: no cover
             _LOGGER.exception("Sunsynk settings write failed (%s)", key)
@@ -2545,15 +2552,25 @@ class SunsynkOptimizer:
         self.coordinator.update_state(last_api_result={"ok": True, "setting": key, "value": value})
         return True, previous
 
-    async def _async_apply_gentle_charge(self, current_a: int, now: datetime) -> bool:
-        """Write the gentle grid-charge current and arm its 05:00 restore."""
+    async def _async_apply_gentle_charge(self, current_a: int, now: datetime) -> tuple[bool, float | None]:
+        """Write the gentle grid-charge current and arm its 05:00 restore.
+
+        Returns (applied, the user's own grid-charge current). The user's value
+        is the ceiling: nothing is written unless the gentle current is lower.
+        """
         pending = self.coordinator.state.gentle_charge
-        ok, previous = await self._async_write_setting(GENTLE_CHARGE_SETTING, current_a)
+        # A re-plan before 05:00 (reload) reads back our own gentle value; the
+        # original one stays both the ceiling and the value to restore.
+        held = pending.get("restore_current_a") if pending.get("phase") == "applied" else None
+        ok, previous = await self._async_write_setting(
+            GENTLE_CHARGE_SETTING,
+            current_a,
+            write_if=lambda inverter_a: gentle_current_lowers(current_a, held if held is not None else inverter_a),
+        )
+        user_a = held if held is not None else previous
         if not ok:
-            return False
-        # A re-plan before 05:00 (reload) reads back our own gentle value; keep
-        # the original one to restore.
-        restore = pending["restore_current_a"] if pending.get("phase") == "applied" else previous
+            return False, user_a
+        restore = user_a
         restore_at = now.replace(hour=5, minute=0, second=0, microsecond=0)
         self.coordinator.update_state(
             gentle_charge={
@@ -2566,7 +2583,7 @@ class SunsynkOptimizer:
             }
         )
         self._arm_gentle_restore()
-        return True
+        return True, user_a
 
     def _arm_gentle_restore(self) -> None:
         if self._gentle_restore_unsub:

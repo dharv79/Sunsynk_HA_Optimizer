@@ -275,6 +275,12 @@ def gentle_charge_current_a(
     return int(max(min(min_current_a, max_current_a), min(max_current_a, amps)))
 
 
+def gentle_current_lowers(gentle_a: int | None, inverter_a: float | None) -> bool:
+    """Gentle charging may only ever lower the inverter's own grid-charge
+    current, never raise it (the user's setting is the ceiling)."""
+    return gentle_a is not None and inverter_a is not None and gentle_a < inverter_a
+
+
 def max_charge_current_a(charge_rate_kw: float, battery_voltage: float) -> float:
     """Nameplate charge rate as a battery current (A)."""
     return charge_rate_kw * 1000 / battery_voltage if battery_voltage > 0 else 0.0
