@@ -2,7 +2,7 @@
 
 ## Context
 
-Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b3 (beta) adds phases 11–17, 19, 20 and 22 (1.0.12b2 had 11, 19 and 20). Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
+Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, weekly digest, cost-aware export in shadow mode, optional AI insight, startup re-plan labelling; promoted from 1.0.11b15); 1.0.12b4 (beta) adds phases 11–23 (1.0.12b3 had 11–17, 19, 20 and 22; 1.0.12b2 had 11, 19 and 20). Remaining work is follow-ups surfaced by the `#sunsynkdebug` Slack stream.
 
 ## Phase status
 
@@ -25,12 +25,12 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 15. Day-rate import feedback for the overnight target (1.0.12b3) | Done, merged (18667e7, PR #39) | S, ~25k actual |
 | 16. Evening reserve to 02:00 (1.0.12b3) | Done, merged (f739100, PR #40) | S, ~20k actual |
 | 17. Sell the expected surplus at the peak rate (1.0.12b3) | Done, merged (c8ba7d9, PR #41) | S, ~30k actual |
-| 18. Read tariff rates from the Octopus integration | Done, merged (b4adfc9, PR #43) | S, ~30k actual |
+| 18. Read tariff rates from the Octopus integration (1.0.12b4) | Done, merged (b4adfc9, PR #43) | S, ~30k actual |
 | 19. Pick the full-charge day from the solar forecast (daily re-check) (1.0.12b2) | Done, merged (449434d, PR #32) | S, ~45k actual |
 | 20. Faster, seasonal forecast correction (shadow) (1.0.12b2) | Done, merged (6b1702b, PR #33) | XS, ~25k actual |
-| 21. Octopus Saving Sessions | Done, merged (e24e307, PR #44) | M, ~55k actual |
+| 21. Octopus Saving Sessions (1.0.12b4) | Done, merged (e24e307, PR #44) | M, ~55k actual |
 | 22. Charge watchdog (1.0.12b3) | Done, merged (3e59565, PR #36) | S, ~40k actual |
-| 23. Gentler charging across the cheap window | Done, merged (dff4259, PR #45) | S, ~40k actual |
+| 23. Gentler charging across the cheap window (1.0.12b4) | Done, merged (dff4259, PR #45) | S, ~40k actual |
 | 24. Battery wear cost in decisions | Planned, not built | S, ~20-40k |
 | 25. Spare solar sensor and appliance prompts | Planned, not built | S, ~20-40k |
 | 26. Overnight baseload alert | Planned, not built | S, ~20-40k |
