@@ -28,6 +28,7 @@ from .const import (
     CONF_AUTO_AWAY_MIN_HOURS,
     CONF_AUTO_AWAY_PERSONS,
     CONF_AWAY_AVG_CONSUMPTION_KW,
+    CONF_EXPORT_LIMIT_W,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGES,
     CONF_CHARGE_RATE,
@@ -77,6 +78,7 @@ from .const import (
     DEFAULT_AUTO_AWAY_KEYWORD,
     DEFAULT_AUTO_AWAY_MIN_HOURS,
     DEFAULT_AWAY_AVG_CONSUMPTION_KW,
+    DEFAULT_EXPORT_LIMIT_W,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
     DEFAULT_CURRENCY,
@@ -257,6 +259,9 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Optional(CONF_AUTO_AWAY_KEYWORD, default=values.get(CONF_AUTO_AWAY_KEYWORD, DEFAULT_AUTO_AWAY_KEYWORD)): selector.TextSelector(),
             vol.Optional(CONF_AUTO_AWAY_MIN_HOURS, default=values.get(CONF_AUTO_AWAY_MIN_HOURS, DEFAULT_AUTO_AWAY_MIN_HOURS)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=1, max=168, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="h")
+            ),
+            vol.Optional(CONF_EXPORT_LIMIT_W, default=values.get(CONF_EXPORT_LIMIT_W, DEFAULT_EXPORT_LIMIT_W)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=30000, step=100, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="W")
             ),
             vol.Required(CONF_SOLAR_START_OFFSET_HOURS, default=values.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=6.0, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="h")

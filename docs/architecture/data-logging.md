@@ -47,3 +47,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 - It also reports the forecast MAE of the live vs weighted (phase 20) correction.
 
 **Verification.** `tests/test_kpis.py` covers the bands, prices, unused charge cap, `None` on missing inputs, the week roll-up, snapshot dedup and pairing, and the backtest against a fixture data dir including the CLI. In HA, the 22:00 bundle gains a `day_kpis` line once all five snapshots exist (the first full day after install).
+
+## Clipped solar (13/10/2026, phase 29)
+
+Option `export_limit_w` (0 = off). The 30-min tick (`optimizer._async_track_clipped_solar`) counts a period as clipped when SOC ≥ 99 and export ≥ 95% of the limit (`planning.is_clipping`; `grid_pac < 0` is export) and adds `estimate_clipped_kwh` (hourly forecast − PV from the two MPPT sensors, floored at 0; `None` if either is missing, never 0). The tally is unpersisted. `day_actuals` gains `clipped_solar_kwh` and `overnight_target_too_high` (clipped and first seen full before 11:00), both passed through `_pair_records`; the weekly digest carries `week_clipped_solar_kwh`. No inverter writes; phases 15/20 may consume the flag later.

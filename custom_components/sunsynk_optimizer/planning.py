@@ -1301,3 +1301,42 @@ def auto_away(
     if calendar_away is False:
         return False
     return None
+
+
+# Phase 29: clipped solar (battery full, export pinned at the inverter limit).
+CLIPPED_SOC_PCT = 99.0
+CLIPPED_EXPORT_FRACTION = 0.95
+CLIPPED_EARLY_FULL_HOUR = 11
+
+
+def is_clipping(soc: float | None, grid_pac_w: float | None, export_limit_w: float | None) -> bool:
+    """True when the battery is full and export sits at ≥95% of the limit (grid_pac < 0 is export).
+
+    Any missing input or a non-positive limit (feature off) is False, never a guess.
+    """
+    if soc is None or grid_pac_w is None or not export_limit_w or export_limit_w <= 0:
+        return False
+    return soc >= CLIPPED_SOC_PCT and -grid_pac_w >= CLIPPED_EXPORT_FRACTION * export_limit_w
+
+
+def estimate_clipped_kwh(
+    forecast_hour_kwh: float | None, actual_pv_w: float | None, period_hours: float = 0.5
+) -> float | None:
+    """Solar lost over one clipped period: forecast minus actual PV, floored at 0.
+
+    ``forecast_hour_kwh`` is the forecast for the current hour (kWh); None when
+    the forecast or PV reading is missing — never counted as 0 (rules 11/14).
+    """
+    if forecast_hour_kwh is None or actual_pv_w is None or period_hours <= 0:
+        return None
+    return round(max(0.0, forecast_hour_kwh * period_hours - actual_pv_w / 1000.0 * period_hours), 3)
+
+
+def overnight_target_too_high(clipped_kwh: float | None, first_full_hour: float | None) -> bool | None:
+    """Flag a day that clipped after the battery was already full before 11:00 (target too high).
+
+    None when there is nothing to judge (no clipping data or never seen full).
+    """
+    if clipped_kwh is None or first_full_hour is None:
+        return None
+    return clipped_kwh > 0 and first_full_hour < CLIPPED_EARLY_FULL_HOUR

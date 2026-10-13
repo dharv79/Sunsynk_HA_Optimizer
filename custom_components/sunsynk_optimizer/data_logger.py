@@ -211,6 +211,8 @@ class DataLogger:
         day_load_kwh: float | None = None,
         day_grid_import_kwh: float | None = None,
         day_grid_export_kwh: float | None = None,
+        clipped_solar_kwh: float | None = None,
+        overnight_target_too_high: bool | None = None,
     ) -> None:
         """Log end-of-day actuals captured at 22:00.
 
@@ -228,6 +230,8 @@ class DataLogger:
                 day_load_kwh=round_or_none(day_load_kwh),
                 day_grid_import_kwh=round_or_none(day_grid_import_kwh),
                 day_grid_export_kwh=round_or_none(day_grid_export_kwh),
+                clipped_solar_kwh=round_or_none(clipped_solar_kwh),
+                overnight_target_too_high=overnight_target_too_high,
             )
         )
 
@@ -394,6 +398,8 @@ class DataLogger:
                 "day_load_kwh": actual.get("day_load_kwh"),
                 "day_grid_import_kwh": actual.get("day_grid_import_kwh"),
                 "day_grid_export_kwh": actual.get("day_grid_export_kwh"),
+                "clipped_solar_kwh": actual.get("clipped_solar_kwh"),
+                "overnight_target_too_high": actual.get("overnight_target_too_high"),
                 "actual_import_cost_gbp": import_cost,
                 "actual_export_income_gbp": export_income,
                 "actual_gas_cost_gbp": gas_cost,
