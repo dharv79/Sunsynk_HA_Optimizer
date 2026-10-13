@@ -23,6 +23,10 @@ from .api import SunsynkApiClient
 from .const import (
     CONF_AVG_CONSUMPTION_KW,
     CONF_WEEKEND_AVG_CONSUMPTION_KW,
+    CONF_AUTO_AWAY_CALENDAR,
+    CONF_AUTO_AWAY_KEYWORD,
+    CONF_AUTO_AWAY_MIN_HOURS,
+    CONF_AUTO_AWAY_PERSONS,
     CONF_AWAY_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGES,
@@ -70,6 +74,8 @@ from .const import (
     CONF_WEATHER_ENTITY,
     DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
+    DEFAULT_AUTO_AWAY_KEYWORD,
+    DEFAULT_AUTO_AWAY_MIN_HOURS,
     DEFAULT_AWAY_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
@@ -245,6 +251,12 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             ),
             vol.Optional(CONF_AWAY_AVG_CONSUMPTION_KW, default=values.get(CONF_AWAY_AVG_CONSUMPTION_KW, DEFAULT_AWAY_AVG_CONSUMPTION_KW)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
+            ),
+            vol.Optional(CONF_AUTO_AWAY_PERSONS, default=values.get(CONF_AUTO_AWAY_PERSONS, "")): selector.TextSelector(),
+            vol.Optional(CONF_AUTO_AWAY_CALENDAR, default=values.get(CONF_AUTO_AWAY_CALENDAR, "")): selector.TextSelector(),
+            vol.Optional(CONF_AUTO_AWAY_KEYWORD, default=values.get(CONF_AUTO_AWAY_KEYWORD, DEFAULT_AUTO_AWAY_KEYWORD)): selector.TextSelector(),
+            vol.Optional(CONF_AUTO_AWAY_MIN_HOURS, default=values.get(CONF_AUTO_AWAY_MIN_HOURS, DEFAULT_AUTO_AWAY_MIN_HOURS)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=168, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="h")
             ),
             vol.Required(CONF_SOLAR_START_OFFSET_HOURS, default=values.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=6.0, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="h")

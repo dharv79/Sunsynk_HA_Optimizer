@@ -54,6 +54,13 @@ CONF_AVG_CONSUMPTION_KW = "avg_consumption_kw"
 CONF_WEEKEND_AVG_CONSUMPTION_KW = "weekend_avg_consumption_kw"
 CONF_AWAY_AVG_CONSUMPTION_KW = "away_avg_consumption_kw"
 CONF_SOLAR_START_OFFSET_HOURS = "solar_start_offset_hours"
+# Phase 27: automatic away mode. Comma-separated person.* entities and/or a calendar.* entity.
+CONF_AUTO_AWAY_PERSONS = "auto_away_persons"
+CONF_AUTO_AWAY_CALENDAR = "auto_away_calendar"
+CONF_AUTO_AWAY_KEYWORD = "auto_away_keyword"
+CONF_AUTO_AWAY_MIN_HOURS = "auto_away_min_hours"
+DEFAULT_AUTO_AWAY_KEYWORD = "holiday"
+DEFAULT_AUTO_AWAY_MIN_HOURS = 24
 CONF_HOURLY_FORECAST_SENSOR = "hourly_forecast_sensor"
 CONF_HOURLY_FORECAST_ATTRIBUTE = "hourly_forecast_attribute"
 DEFAULT_HOURLY_FORECAST_ATTRIBUTE = "hourly"

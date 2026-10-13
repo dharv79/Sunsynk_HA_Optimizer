@@ -40,3 +40,7 @@ The options flow is multi-step: `init` → `charges_1` (import tariff rows 1–4
 ## Saving sessions (phase 21)
 
 `saving_session_reward_pence` (optional, p/kWh) prices manual sessions; blank = unknown reward (the plan keeps the evening reserve and doesn't top up). `octopus_saving_session_entity` (optional, free text): the Octopus Energy `event.…_octoplus_saving_session_events` or `event.…_octoplus_power_down_events` entity; blank disables auto-detect. Charge/export rates reuse `free_event_charge_rate_kw` / `free_event_export_rate_kw`. See free-electricity.md.
+
+## Automatic away mode (13/10/2026, phase 27)
+
+Optional: `auto_away_persons` (comma-separated `person.*`), `auto_away_calendar` + `auto_away_keyword`, `auto_away_min_hours` (default 24). `planning.auto_away` returns True/False/None; `optimizer._async_auto_away` runs at 22:00 and before the 01:55 plan, sets `away_mode` via `update_state` only on a change, and notifies. Anyone home → home at once; away needs all known persons away ≥ N hours (from the state's `last_changed`) or an active matching calendar event. Unavailable persons are ignored; no signal (None) leaves the manual switch alone. No config → no-op.

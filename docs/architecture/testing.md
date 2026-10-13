@@ -43,6 +43,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_flux_helpers_cost.py` | `peak_import_price_pence_per_kwh` cost-trigger helper |
 | `tests/test_octopus_rates.py` | Phase 18 Octopus rate-entity window pricing, `tariff_prices_pence` fallback to `charges`, `price_source` labels |
 | `tests/test_saving_session.py` | Phase 21 `plan_saving_session` (floor, off-peak boost, day-rate top-up, missing prices), Octopoints conversion, labelled manual validation, `next_joined_saving_session` parsing |
+| `tests/test_planning_auto_away.py` | Phase 27 `auto_away` (anyone home, min hours away, unavailable persons, calendar only, no signal) |
 | `tests/test_gentle_charging.py` | Phase 23 `gentle_charge_current_a` (margin, clamps, zero need), `max_charge_current_a`, `gentle_current_lowers` (never above the user's Grid Amps), gentle/saving-session fields on the logged import plan |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh` |
 | `tests/test_dashboard.py` | Dashboard YAML structure |

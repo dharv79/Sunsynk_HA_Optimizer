@@ -1268,3 +1268,36 @@ def baseload_anomaly(
     if tonight_kwh >= usual * factor and tonight_kwh - usual >= min_extra_kwh:
         return {"tonight_kwh": round(tonight_kwh, 2), "usual_kwh": round(usual, 2), "nights": len(values)}
     return None
+
+
+DEFAULT_AUTO_AWAY_MIN_HOURS = 24.0
+
+
+def auto_away(
+    persons_home: list[bool | None],
+    calendar_away: bool | None,
+    min_hours_away: float = DEFAULT_AUTO_AWAY_MIN_HOURS,
+    persons_away_hours: list[float | None] | None = None,
+) -> bool | None:
+    """Decide away mode from presence and calendar signals (phase 27).
+
+    ``persons_home`` is one entry per configured person (True home, False away,
+    None unknown/unavailable); ``persons_away_hours`` is how long each has been
+    away. Returns True (away), False (home) or None (no usable signal, or not
+    away long enough yet) — None means leave the manual switch alone.
+    Anyone home wins immediately; away needs every known person away for
+    ``min_hours_away`` or an active calendar event.
+    """
+    known = [(h, i) for i, h in enumerate(persons_home) if h is not None]
+    if any(h for h, _ in known):
+        return False
+    if calendar_away:
+        return True
+    if known:
+        hours = persons_away_hours or []
+        if all(i < len(hours) and isinstance(hours[i], (int, float)) and hours[i] >= min_hours_away for _, i in known):
+            return True
+        return None
+    if calendar_away is False:
+        return False
+    return None
