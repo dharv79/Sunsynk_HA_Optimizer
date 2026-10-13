@@ -1,6 +1,6 @@
 # Phase 26 — Overnight baseload alert
 
-**Status:** Planned, not built. **Size:** S, ~20-40k est. **Origin:** improvement list 2, 06/10/2026 (item 27).
+**Status:** Done, merged (4fcff5b, PR #50). **Size:** S, ~30k. **Origin:** improvement list 2, 06/10/2026 (item 27).
 
 ## Goal
 
