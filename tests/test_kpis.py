@@ -377,3 +377,35 @@ def test_empty_battery_refills_first(planning):
 def test_no_forecast_is_none_not_zero(planning):
     assert planning.expected_spare_solar(None, 1.0, 0.5, 0.0)["total_kwh"] is None
     assert planning.expected_spare_solar({}, 1.0, 0.5, 0.0)["window"] is None
+
+
+# ---- Phase 26: overnight baseload alert ----
+
+def _nights(*vals, away=False):
+    return [{"load_kwh": v, "away": away} for v in vals]
+
+
+def test_baseload_needs_history(planning):
+    assert planning.baseload_anomaly(_nights(2.0, 2.2, 2.1), 6.0) is None
+
+
+def test_baseload_normal_night_no_alert(planning):
+    assert planning.baseload_anomaly(_nights(*[2.2] * 8), 2.6) is None
+
+
+def test_baseload_anomaly_alerts(planning):
+    res = planning.baseload_anomaly(_nights(2.0, 2.2, 2.4, 2.2, 2.1, 2.3, 2.2, 2.2), 4.1)
+    assert res == {"tonight_kwh": 4.1, "usual_kwh": 2.2, "nights": 8}
+
+
+def test_baseload_small_base_needs_min_extra(planning):
+    # 2x but only +0.6 kWh: noise, no alert.
+    assert planning.baseload_anomaly(_nights(*[0.6] * 8), 1.2) is None
+
+
+def test_baseload_ignores_away_and_none(planning):
+    hist = _nights(*[2.2] * 6) + _nights(0.3, 0.3, 0.3, away=True) + [{"load_kwh": None, "away": False}]
+    # Only 6 usable home nights -> not enough history.
+    assert planning.baseload_anomaly(hist, 6.0) is None
+    assert planning.baseload_anomaly(hist + _nights(2.2), 6.0)["usual_kwh"] == 2.2
+    assert planning.baseload_anomaly(hist + _nights(2.2), None) is None

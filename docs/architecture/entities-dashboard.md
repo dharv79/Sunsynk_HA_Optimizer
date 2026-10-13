@@ -20,3 +20,7 @@ All entities extend `CoordinatorEntity` and read state from `coordinator.state` 
 ### Spare solar (phase 25, 13/10/2026)
 
 `planning.expected_spare_solar` (corrected hourly solar − house load, battery refilled first from the earliest surplus, 08:00–16:00) feeds `sensor.spare_solar_today` (kWh; attributes best 3-hour window start/end/kWh and a per-hour list). Refreshed ~90 s after startup and at 06:05; the 06:05 run sends "🔋 Sunsynk: spare solar today" only if `spare_solar_notify_kwh` is set and the total reaches it (blank = off). No forecast → total `None`, never 0. Read-only: no inverter writes. Tests: `tests/test_kpis.py`. Not refreshed on forecast change (06:05 and restart only).
+
+### Overnight baseload alert (phase 26, 13/10/2026)
+
+At 05:00 (after the meter snapshot) the day-load meter, which resets at midnight, gives the 00:00–05:00 house load. It is logged as `{"type":"overnight_load","date","load_kwh","away"}` (dedup per day). `planning.baseload_anomaly` compares it with the median of prior **home** nights (≥7 needed; away nights and `None`/≤0 readings ignored) and alerts when tonight ≥ 1.5× median and ≥ 1.0 kWh above it: "🔋 Sunsynk: overnight load high". Option `baseload_alert` (default on) disables the notification; logging continues. Read-only, so also runs in monitor mode. Missing meter → nothing logged, no alert.

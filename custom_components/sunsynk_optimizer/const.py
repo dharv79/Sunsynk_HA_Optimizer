@@ -120,6 +120,10 @@ CONF_BATTERY_COST_GBP = "battery_cost_gbp"
 CONF_BATTERY_LIFETIME_KWH = "battery_lifetime_kwh"
 CONF_SPARE_SOLAR_NOTIFY_KWH = "spare_solar_notify_kwh"  # blank = no morning notification
 
+# Overnight baseload alert (phase 26): 05:00 notification when 00:00-05:00 house load is well above normal.
+CONF_BASELOAD_ALERT = "baseload_alert"
+DEFAULT_BASELOAD_ALERT = True
+
 # Peak cover (phase 30). Off = shadow: the midday projection of SOC at 16:00 and
 # the top-up it would make are logged and nothing is pushed. On = a Flux 1 slot
 # now->16:00 holds the battery at the SOC the peak window needs, at the day rate.
