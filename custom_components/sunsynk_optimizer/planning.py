@@ -15,6 +15,7 @@ optimizer.py gathers the inputs from HA state/config and calls into these.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -1340,3 +1341,166 @@ def overnight_target_too_high(clipped_kwh: float | None, first_full_hour: float 
     if clipped_kwh is None or first_full_hour is None:
         return None
     return clipped_kwh > 0 and first_full_hour < CLIPPED_EARLY_FULL_HOUR
+
+
+# --- Tariff comparison (phase 28) -------------------------------------------
+
+# Approximate public unit rates in pence/kWh, last checked 13/10/2026. They drift
+# with Ofgem's cap, so users can override any rate via the options JSON.
+TARIFF_RATES_AS_OF = "13/10/2026"
+TARIFF_DEFAULT_RATES: dict[str, dict[str, float]] = {
+    "go": {"cheap": 8.5, "day": 28.0, "export": 12.0},
+    "cosy": {"cheap": 13.5, "peak": 40.5, "day": 27.0, "export": 12.0},
+}
+# (start "HH:MM", end "HH:MM", rate key); an end before its start wraps midnight.
+TARIFF_IMPORT_BANDS: dict[str, list[tuple[str, str, str]]] = {
+    "go": [("00:30", "05:30", "cheap"), ("05:30", "00:30", "day")],
+    "cosy": [
+        ("04:00", "07:00", "cheap"), ("13:00", "16:00", "cheap"),
+        ("16:00", "19:00", "peak"), ("07:00", "13:00", "day"), ("19:00", "04:00", "day"),
+    ],
+}
+TARIFF_LABELS = {"flux": "Flux", "go": "Octopus Go", "cosy": "Cosy Octopus"}
+HALF_HOURS_PER_DAY = 48
+
+
+def _hhmm_minutes(value: Any) -> int | None:
+    try:
+        hh, mm = str(value).split(":")[:2]
+        return int(hh) * 60 + int(mm)
+    except (ValueError, TypeError):
+        return None
+
+
+def band_price(bands: list[tuple[int, int, float]], minute: int) -> float | None:
+    """Price (p/kWh) of the band covering ``minute`` of the day; None when no band does."""
+    for start, end, price in bands:
+        inside = start <= minute < end if start < end else (minute >= start or minute < end)
+        if inside:
+            return price
+    return None
+
+
+def bands_from_rates(
+    spec: list[tuple[str, str, str]], rates: dict[str, float]
+) -> list[tuple[int, int, float]]:
+    """Resolve a (start, end, rate key) spec into minute bands; bands with a bad key or time are dropped."""
+    out: list[tuple[int, int, float]] = []
+    for start, end, key in spec:
+        s, e, price = _hhmm_minutes(start), _hhmm_minutes(end), rates.get(key)
+        if s is not None and e is not None and isinstance(price, (int, float)):
+            out.append((s, e, float(price)))
+    return out
+
+
+def flux_bands_from_charges(charges: Any, status: str) -> list[tuple[int, int, float]]:
+    """The user's configured Flux bands for ``status`` ("import"/"export") as minute bands."""
+    out: list[tuple[int, int, float]] = []
+    for row in charges if isinstance(charges, list) else []:
+        if not isinstance(row, dict) or row.get("status") != status:
+            continue
+        s, e = _hhmm_minutes(row.get("startRange")), _hhmm_minutes(row.get("endRange"))
+        price = row.get("price")
+        if s is not None and e is not None and isinstance(price, (int, float)):
+            out.append((s, e, float(price)))
+    return out
+
+
+def merge_tariff_rates(overrides: Any) -> dict[str, dict[str, float]]:
+    """Default rates with user overrides applied; unknown tariffs/keys and non-numbers are ignored."""
+    rates = {name: dict(r) for name, r in TARIFF_DEFAULT_RATES.items()}
+    if isinstance(overrides, str):
+        try:
+            overrides = json.loads(overrides) if overrides.strip() else {}
+        except ValueError:
+            overrides = {}
+    if not isinstance(overrides, dict):
+        return rates
+    for name, vals in overrides.items():
+        if name in rates and isinstance(vals, dict):
+            for key, val in vals.items():
+                if key in rates[name] and isinstance(val, (int, float)) and not isinstance(val, bool):
+                    rates[name][key] = float(val)
+    return rates
+
+
+def parse_half_hourly_charges(attrs: Any) -> tuple[str, list[float]] | None:
+    """(date, 48 kWh values by half-hour of the local day) from an Octopus ``charges`` attribute.
+
+    None unless the day is complete: exactly 48 distinct slots on one date, all numeric
+    (DST days with 46/50 slots are skipped rather than guessed — rule 11).
+    """
+    charges = attrs.get("charges") if isinstance(attrs, dict) else None
+    if not isinstance(charges, list) or len(charges) != HALF_HOURS_PER_DAY:
+        return None
+    slots: list[float | None] = [None] * HALF_HOURS_PER_DAY
+    day: str | None = None
+    for row in charges:
+        try:
+            start = datetime.fromisoformat(str(row["start"]))
+            kwh = row["consumption"]
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not isinstance(kwh, (int, float)) or isinstance(kwh, bool):
+            return None
+        if day is None:
+            day = start.date().isoformat()
+        elif start.date().isoformat() != day:
+            return None
+        idx = start.hour * 2 + start.minute // 30
+        if slots[idx] is not None:
+            return None
+        slots[idx] = float(kwh)
+    if day is None or any(v is None for v in slots):
+        return None
+    return day, [v for v in slots if v is not None]
+
+
+def cost_under_tariff(half_hourly_kwh: Any, bands: list[tuple[int, int, float]]) -> float | None:
+    """Pence for a day of 48 half-hourly kWh priced by ``bands``; None if any slot is missing or unpriced."""
+    if not isinstance(half_hourly_kwh, (list, tuple)) or len(half_hourly_kwh) != HALF_HOURS_PER_DAY:
+        return None
+    total = 0.0
+    for idx, kwh in enumerate(half_hourly_kwh):
+        price = band_price(bands, idx * 30)
+        if price is None or not isinstance(kwh, (int, float)) or isinstance(kwh, bool):
+            return None
+        total += kwh * price
+    return round(total, 2)
+
+
+def compare_tariffs(
+    import_by_date: dict[str, list[float]],
+    export_by_date: dict[str, list[float]],
+    tariffs: dict[str, tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]],
+    month: str,
+) -> dict[str, Any]:
+    """Net £ (import cost minus export income) per tariff over the days of ``month`` ("YYYY-MM").
+
+    Only days with both import and export logged count, so a day is never part-costed. A tariff
+    that can't price some counted day gets None (never a partial total). Unit rates only —
+    standing charges are excluded — and usage is held fixed.
+    """
+    days = sorted(d for d in import_by_date if d.startswith(month) and d in export_by_date)
+    net: dict[str, float | None] = {}
+    for name, (imp_bands, exp_bands) in tariffs.items():
+        total: float | None = 0.0 if days else None
+        for d in days:
+            imp = cost_under_tariff(import_by_date[d], imp_bands)
+            exp = cost_under_tariff(export_by_date[d], exp_bands)
+            if imp is None or exp is None or total is None:
+                total = None
+                break
+            total += imp - exp
+        net[name] = None if total is None else round(total / 100.0, 2)
+    priced = {k: v for k, v in net.items() if v is not None}
+    cheapest = min(priced, key=lambda k: priced[k]) if priced else None
+    return {
+        "month": month,
+        "days_compared": len(days),
+        "days_missing": sum(1 for d in import_by_date if d.startswith(month) and d not in export_by_date)
+        + sum(1 for d in export_by_date if d.startswith(month) and d not in import_by_date),
+        "net_gbp": net,
+        "cheapest": cheapest,
+        "rates_as_of": TARIFF_RATES_AS_OF,
+    }

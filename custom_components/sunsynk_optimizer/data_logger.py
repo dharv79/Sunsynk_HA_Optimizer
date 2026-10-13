@@ -259,6 +259,20 @@ class DataLogger:
         """Log the 00:00-05:00 house load (phase 26): one per day."""
         await self._async_append(_record("overnight_load", **fields))
 
+    async def async_log_half_hourly(self, kind: str, date: str, kwh: list[float]) -> None:
+        """Log one settled day's 48 half-hourly kWh (phase 28); ``kind`` is "import" or "export"."""
+        await self._async_append(_record(f"half_hourly_{kind}", date=date, kwh=kwh))
+
+    async def async_load_half_hourly(self, days: int = 75) -> tuple[dict[str, list[float]], dict[str, list[float]]]:
+        """({date: 48 kWh} import, same for export) from recent half-hourly records."""
+        records = await self.hass.async_add_executor_job(self._read_recent, days)
+        out: tuple[dict[str, list[float]], dict[str, list[float]]] = ({}, {})
+        for rec in records:
+            for target, kind in zip(out, ("import", "export")):
+                if rec.get("type") == f"half_hourly_{kind}" and rec.get("date") and isinstance(rec.get("kwh"), list):
+                    target[str(rec["date"])] = rec["kwh"]
+        return out
+
     async def async_recent_overnight_loads(self, today: str, days: int = 30) -> list[dict[str, Any]]:
         """Prior nights' {"load_kwh", "away"} from overnight_load records (excluding ``today``)."""
         records = await self.hass.async_add_executor_job(self._read_recent, days)
@@ -707,6 +721,7 @@ class DataLogger:
     _DEDUP_TYPES = (
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load",
+        "half_hourly_import", "half_hourly_export",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:

@@ -20,3 +20,11 @@ A third guarded sub-call from the Sunday 18:00 listener, `_async_send_ai_weekly_
 ## Efficiency KPIs in the digest (09/10/2026, phase 14)
 
 The `weekly_cost_summary` line also carries `planning.week_kpis` over the same trailing week: `week_grid_import_{offpeak,day,peak}_kwh`, `week_avoidable_import_gbp`, `week_export_peak_{kwh,gbp}`, `week_unused_charge_kwh` (summed; `None` when no day has the field), `week_self_sufficiency_pct` (mean over days that have it) and `week_kpi_days`. See data-logging.md.
+
+## Monthly tariff comparison (13/10/2026, phase 28)
+
+Options `octopus_import_consumption_sensor` / `octopus_export_consumption_sensor` point at the Octopus "previous accumulative consumption" sensors, whose `charges` attribute holds 48 half-hourly `{start, end, consumption}` kWh. `_async_capture_half_hourly` (06:00/22:00 cost capture) logs each settled day as `half_hourly_import` / `half_hourly_export` (dedup by date). Import and export settle on different days, so they are logged separately and paired by date at report time; a day that isn't 48 complete numeric slots (including DST days) is skipped, never part-logged.
+
+On the first Sunday of a month (day ≤ 7) the 18:00 digest calls `_async_send_monthly_tariff_comparison`: `planning.compare_tariffs` costs last month's days that have both import and export under Flux (the user's configured `charges` bands), Octopus Go and Cosy (`TARIFF_IMPORT_BANDS` + `TARIFF_DEFAULT_RATES`, dated `TARIFF_RATES_AS_OF`; override via the `tariff_rate_overrides` JSON option, e.g. `{"go": {"cheap": 8.5}}`). A tariff that can't price every counted day is `None`, never a partial total. JSON line (`monthly_tariff_comparison`) goes to the debug stream, human text to the notify target.
+
+Caveats stated in the message: usage held fixed (battery behaviour would change), unit rates only (no standing charge), rates approximate. Agile and Intelligent are not covered: they need historic half-hourly rates from the public Octopus API (follow-up).

@@ -1,6 +1,6 @@
 # Phase 28 — Tariff comparison report
 
-**Status:** Planned, not built. **Size:** M, ~50-80k est. **Origin:** improvement list 2, 06/10/2026 (item 29).
+**Status:** Built 13/10/2026 for Flux, Go and Cosy (Agile/Intelligent deferred). **Size:** M, ~50-80k est. **Origin:** improvement list 2, 06/10/2026 (item 29).
 
 ## Goal
 
@@ -16,3 +16,7 @@ Show monthly what Flux cost versus Agile, Go, Cosy and Intelligent for the same 
 ## Acceptance
 
 - Tests for tariff costing (window boundaries, export rates, missing half-hours → `None` total, never partial-as-complete).
+
+## Prerequisite result (13/10/2026)
+
+The import "previous accumulative consumption" sensor exposes a `charges` attribute: 48 half-hourly `{start, end, consumption}` entries (local time with offset, kWh) for the settled day. Half-hourly costing is feasible for Go/Cosy/Flux from fixed windows. Agile/Intelligent need historic half-hourly rates from the public Octopus API (not yet decided). Export sensor confirmed (same `charges` format, `is_export: true`). Import and export settle on different days (import showed 11 Oct while export showed 12 Oct), so costing must pair them by date and skip incomplete days.

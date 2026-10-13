@@ -1,6 +1,6 @@
 # Phase 29 — Clipped solar detection
 
-**Status:** Planned, not built. **Size:** S, ~20-40k est. **Origin:** improvement list 2, 06/10/2026 (item 30).
+**Status:** Done, merged (cee4395, PR #52). **Size:** S, ~30k actual. **Origin:** improvement list 2, 06/10/2026 (item 30).
 
 ## Goal
 

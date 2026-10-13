@@ -51,6 +51,9 @@
           "octopus_gas_cost_sensor": "Octopus gas cost sensor (optional)",
           "octopus_import_rates_entity": "Octopus import rates entity (optional; current rate sensor or day rates event)",
           "octopus_export_rates_entity": "Octopus export rates entity (optional; current rate sensor or day rates event)",
+          "octopus_import_consumption_sensor": "Octopus import 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
+          "octopus_export_consumption_sensor": "Octopus export 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
+          "tariff_rate_overrides": "Tariff comparison rate overrides (optional JSON, p/kWh, e.g. {\"go\": {\"cheap\": 8.5, \"day\": 28}})",
           "octopus_saving_session_entity": "Octopus saving session events entity (optional; saving session or Power Down events, enables auto-detect)",
           "data_report_target": "Daily data report notify target (optional, developer)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
@@ -118,6 +121,9 @@
           "octopus_gas_cost_sensor": "Octopus gas cost sensor (optional)",
           "octopus_import_rates_entity": "Octopus import rates entity (optional; current rate sensor or day rates event)",
           "octopus_export_rates_entity": "Octopus export rates entity (optional; current rate sensor or day rates event)",
+          "octopus_import_consumption_sensor": "Octopus import 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
+          "octopus_export_consumption_sensor": "Octopus export 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
+          "tariff_rate_overrides": "Tariff comparison rate overrides (optional JSON, p/kWh, e.g. {\"go\": {\"cheap\": 8.5, \"day\": 28}})",
           "octopus_saving_session_entity": "Octopus saving session events entity (optional; saving session or Power Down events, enables auto-detect)",
           "data_report_target": "Daily data report notify target (optional, developer)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
