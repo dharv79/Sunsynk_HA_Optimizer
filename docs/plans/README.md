@@ -37,7 +37,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 27. Automatic away mode | Planned, not built | XS–S, ~15-30k |
 | 28. Tariff comparison report | Planned, not built | M, ~50-80k |
 | 29. Clipped solar detection | Planned, not built | S, ~20-40k |
-| 30. Peak cover (reach 16:00 with enough battery for the peak window) | Done, merged (PR pending) | S–M, ~45k actual |
+| 30. Peak cover (reach 16:00 with enough battery for the peak window) | Done, merged (38d333b, PR #47) | S–M, ~45k actual |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
