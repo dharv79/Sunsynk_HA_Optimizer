@@ -1,6 +1,6 @@
 # Phase 28 — Tariff comparison report
 
-**Status:** Planned, not built. **Size:** M, ~50-80k est. **Origin:** improvement list 2, 06/10/2026 (item 29).
+**Status:** On hold (13/10/2026): the prerequisite check can only run on the live HA. Check that a "previous accumulative consumption" sensor exposes a half-hourly `charges` attribute, and whether historic Agile rates are reachable (public Octopus API). If yes, set back to Planned. **Size:** M, ~50-80k est. **Origin:** improvement list 2, 06/10/2026 (item 29).
 
 ## Goal
 
