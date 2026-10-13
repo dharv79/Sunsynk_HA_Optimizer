@@ -34,6 +34,7 @@ from .const import (
     CONF_AUTO_AWAY_MIN_HOURS,
     CONF_AUTO_AWAY_PERSONS,
     CONF_AWAY_AVG_CONSUMPTION_KW,
+    CONF_EXPORT_LIMIT_W,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
     CONF_CHARGES,
@@ -108,6 +109,10 @@ from .flux_helpers import (
 )
 from .planning import (
     auto_away,
+    CLIPPED_SOC_PCT,
+    estimate_clipped_kwh,
+    is_clipping,
+    overnight_target_too_high,
     baseload_anomaly,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
@@ -232,6 +237,8 @@ class SunsynkOptimizer:
         # restart mid-window loses that day's snapshot (same tradeoff as
         # pending_full_trim_cancel above) — informational data only.
         self._peak_window_start: dict[str, Any] | None = None
+        # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
+        self._clipped: dict[str, Any] = {}
         # Cost-aware export-disable shadow-mode tally (v1.0.11 Part 3). Counts
         # how many 30-minute checks the cost trigger disagreed with the live
         # Watt trigger, and a rough £ estimate of the exposure. Not persisted —
@@ -1410,6 +1417,7 @@ class SunsynkOptimizer:
             "week_net_cost_gbp": sum_field(cost_days, "net_cost_gbp"),
             "week_load_kwh": _sum("day_load_kwh"),
             "week_solar_kwh": _sum("actual_solar_kwh"),
+            "week_clipped_solar_kwh": _sum("clipped_solar_kwh"),
             "year_to_date": self.coordinator.state.last_year_to_date_cost or {},
             "cost_aware_export_shadow_tally": shadow_mode_tally,
             **week_kpis(paired_days),
@@ -1612,6 +1620,29 @@ class SunsynkOptimizer:
         await self._guarded(self.async_check_octopus_saving_session, "Saving session auto-detect")
         await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
         await self._guarded(self.async_run_peak_cover, "Peak cover")
+        await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
+
+    async def _async_track_clipped_solar(self) -> None:
+        """Tally solar lost while the battery is full and export is at the limit (phase 29); no writes."""
+        limit = float(self.cfg.get(CONF_EXPORT_LIMIT_W) or 0)
+        if limit <= 0:
+            return
+        now = dt_util.now()
+        today = now.date().isoformat()
+        if self._clipped.get("date") != today:
+            self._clipped = {"date": today, "kwh": None, "periods": 0, "first_full_hour": None}
+        soc = self._essential_state(self.battery_soc_entity)
+        if soc is not None and soc >= CLIPPED_SOC_PCT and self._clipped["first_full_hour"] is None:
+            self._clipped["first_full_hour"] = now.hour + now.minute / 60.0
+        if not is_clipping(soc, self._essential_state(self.grid_pac_entity), limit):
+            return
+        hourly = self._get_hourly_forecast_kwh()
+        pv_parts = [self._essential_state(e) for e in (self.pv_mppt0_entity, self.pv_mppt1_entity)]
+        pv_w = sum(p for p in pv_parts if p is not None) if any(p is not None for p in pv_parts) else None
+        lost = estimate_clipped_kwh(hourly.get(now.hour) if hourly else None, pv_w)
+        self._clipped["periods"] += 1
+        if lost is not None:
+            self._clipped["kwh"] = (self._clipped["kwh"] or 0.0) + lost
 
     async def _async_track_peak_window_usage(self) -> None:
         """Snapshot load/grid meters at the 16:00-19:00 window edges and log the delta.
@@ -2108,6 +2139,9 @@ class SunsynkOptimizer:
         now = dt_util.now()
         date = now.date().isoformat()
         evening_export_disabled = self.coordinator.state.evening_export_disabled
+        clipped = self._clipped if self._clipped.get("date") == date else {}
+        clipped_kwh = clipped.get("kwh") if clipped.get("periods") else (0.0 if clipped else None)
+        too_high = overnight_target_too_high(clipped_kwh, clipped.get("first_full_hour"))
         await self.data_logger.async_log_day_actuals(
             date=date,
             evening_soc=soc,
@@ -2116,6 +2150,8 @@ class SunsynkOptimizer:
             day_load_kwh=day_load_kwh,
             day_grid_import_kwh=day_grid_import_kwh,
             day_grid_export_kwh=day_grid_export_kwh,
+            clipped_solar_kwh=clipped_kwh,
+            overnight_target_too_high=too_high,
         )
         actuals_rec = {
             "type": "day_actuals",
@@ -2126,6 +2162,8 @@ class SunsynkOptimizer:
             "day_load_kwh": round_or_none(day_load_kwh),
             "day_grid_import_kwh": round_or_none(day_grid_import_kwh),
             "day_grid_export_kwh": round_or_none(day_grid_export_kwh),
+            "clipped_solar_kwh": round_or_none(clipped_kwh),
+            "overnight_target_too_high": too_high,
         }
         kpi_rec = await self._async_capture_day_kpis(date)
         # Persisted (not just logged/notified) so the dashboard's Consumption

@@ -54,6 +54,9 @@ CONF_AVG_CONSUMPTION_KW = "avg_consumption_kw"
 CONF_WEEKEND_AVG_CONSUMPTION_KW = "weekend_avg_consumption_kw"
 CONF_AWAY_AVG_CONSUMPTION_KW = "away_avg_consumption_kw"
 CONF_SOLAR_START_OFFSET_HOURS = "solar_start_offset_hours"
+# Phase 29: inverter export limit (W); 0/blank turns clipped-solar detection off.
+CONF_EXPORT_LIMIT_W = "export_limit_w"
+DEFAULT_EXPORT_LIMIT_W = 0
 # Phase 27: automatic away mode. Comma-separated person.* entities and/or a calendar.* entity.
 CONF_AUTO_AWAY_PERSONS = "auto_away_persons"
 CONF_AUTO_AWAY_CALENDAR = "auto_away_calendar"
