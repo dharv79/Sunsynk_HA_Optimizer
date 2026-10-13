@@ -42,6 +42,7 @@ from .const import (
     CONF_IMPORT_FEEDBACK_LIVE,
     CONF_PEAK_EXPORT_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
+    CONF_PEAK_COVER_LIVE,
     CONF_BATTERY_VOLTAGE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
@@ -75,6 +76,7 @@ from .const import (
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_PEAK_EXPORT_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
+    DEFAULT_PEAK_COVER_LIVE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
@@ -97,6 +99,9 @@ from .planning import (
     manual_free_event_error,
     CHEAP_WINDOW_END,
     CHEAP_WINDOW_HOURS,
+    PEAK_COVER_FROM_MINUTES,
+    PEAK_COVER_LAST_LOG_MINUTES,
+    PEAK_COVER_PEAK_START_MINUTES,
     DEFAULT_BATTERY_VOLTAGE,
     LOW_SOLAR_THRESHOLD_KWH,
     STARTUP_PLAN_SOURCE,
@@ -108,6 +113,7 @@ from .planning import (
     charge_progress_ok,
     daily_report_plans,
     day_kpis,
+    daytime_load_kw,
     evening_reserve_soc,
     days_in_period,
     flux1_end_minutes,
@@ -123,13 +129,16 @@ from .planning import (
     minutes_to_hhmm,
     net_cost_gbp,
     next_joined_saving_session,
+    peak_cover_plan,
     peak_export_plan,
+    peak_load_estimate_kwh,
     plan_free_event,
     plan_saving_session,
     resolve_load_kw,
     resolve_used_charge_rate,
     round_or_none,
     score_full_charge_day,
+    solar_until_kwh,
     select_target_soc,
     should_log_import_plan,
     solar_kwh_to_fill,
@@ -231,6 +240,10 @@ class SunsynkOptimizer:
         # restart mid-window a trim may replace a live export window, and the
         # 22:00 bundle omits the line (the JSONL record survives).
         self._peak_export: dict[str, Any] | None = None
+        # Today's peak-cover state (phase 30): date, logged/pushed flags and the
+        # record. Not persisted: after a restart it re-evaluates (one push a day
+        # is re-allowed, harmless — the slot is idempotent).
+        self._peak_cover: dict[str, Any] | None = None
         self.data_logger = DataLogger(hass)
 
     @property
@@ -1579,6 +1592,7 @@ class SunsynkOptimizer:
         await self._guarded(self._async_track_peak_window_usage, "Peak-window usage tracking")
         await self._guarded(self.async_check_octopus_saving_session, "Saving session auto-detect")
         await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
+        await self._guarded(self.async_run_peak_cover, "Peak cover")
 
     async def _async_track_peak_window_usage(self) -> None:
         """Snapshot load/grid meters at the 16:00-19:00 window edges and log the delta.
@@ -1683,6 +1697,7 @@ class SunsynkOptimizer:
         """
         if self._slots_held():
             return
+        await self._async_peak_cover_end()
         soc = self._essential_state(self.battery_soc_entity)
         if soc is None:
             return
@@ -2000,6 +2015,8 @@ class SunsynkOptimizer:
             if peak_rec.get("date") != date:
                 peak_rec = {}
             peak_export_rec = self._peak_export if (self._peak_export or {}).get("date") == date else {}
+            cover = (self._peak_cover or {}).get("record") or {}
+            peak_cover_rec = {"type": "peak_cover", **cover} if cover.get("date") == date else {}
             # daily_cost is captured this morning tagged with YESTERDAY's date
             # (Octopus settlement lag — see _async_capture_daily_cost), so it's
             # inherently a day behind `date` here, not equal to it. Include it
@@ -2019,7 +2036,7 @@ class SunsynkOptimizer:
                 complete_rec = {}
             lines = "\n".join(
                 json.dumps(r)
-                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, peak_rec, peak_export_rec, cost_rec, complete_rec]
+                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, peak_rec, peak_cover_rec, peak_export_rec, cost_rec, complete_rec]
                 if r
             )
             await self.async_notify(
@@ -2620,3 +2637,101 @@ class SunsynkOptimizer:
                 f"Still {gentle['current_a']} A after the gentle overnight charge; retrying every 30 minutes. "
                 f"If this persists, set Grid charge back to {gentle['restore_current_a']} A in the Sunsynk app.",
             )
+
+    # ------------------------------------------------------------------ #
+    # Peak cover (phase 30)                                                #
+    # ------------------------------------------------------------------ #
+
+    async def async_run_peak_cover(self) -> None:
+        """12:00-16:00, every 30 minutes: will the battery last the 16:00-19:00 peak window?
+
+        Projects SOC at 16:00 and, when it falls short, tops up at the day rate
+        with a Flux 1 slot now->16:00 (the inverter only imports below the
+        target, so it holds the battery there). Shadow by default
+        (CONF_PEAK_COVER_LIVE); never pushes in monitor mode or while an event
+        holds the slots. One decision is logged a day: the first actionable
+        top-up, else the last check before 16:00.
+        """
+        now = dt_util.now()
+        minutes = now.hour * 60 + now.minute
+        if not PEAK_COVER_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES or self._slots_held():
+            return
+        today = now.date().isoformat()
+        if (self._peak_cover or {}).get("date") != today:
+            self._peak_cover = {"date": today, "logged": False, "pushed": False}
+        state = self._peak_cover
+        if state["logged"]:
+            return
+        soc = self._essential_state(self.battery_soc_entity)
+        if soc is None:
+            return
+        cfg = self.cfg
+        capacity = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        charge_rate_kw = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
+        fallback_kw = float((self.coordinator.state.last_import_plan or {}).get("avg_consumption_kw") or cfg.get(
+            CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW
+        ))
+        snapshots = await self.data_logger.async_load_meter_snapshots(today)
+        load_at_05 = (snapshots.get("05:00") or {}).get("load_kwh")
+        load_now = self._essential_state(self.day_load_entity)
+        load_kw, load_source = daytime_load_kw(load_now, load_at_05, now.hour + now.minute / 60.0 - 5.0, fallback_kw)
+        peak_load_kwh, peak_load_source = peak_load_estimate_kwh(
+            await self.data_logger.async_recent_peak_loads(), 3.0 * load_kw
+        )
+        # Pessimistic solar, like the low-solar decisions: the raw (uncorrected) forecast.
+        hourly = self._get_hourly_forecast_kwh()
+        raw_daily, _ = self._resolve_raw_forecast(cfg[CONF_SOLAR_FORECAST_SENSOR], now)
+        if hourly is None and raw_daily is not None:
+            hourly = self._synthetic_hourly_forecast(raw_daily)
+        solar_kwh = solar_until_kwh(hourly, now.hour + now.minute / 60.0)
+        prices, sources = self._tariff_prices(now.date())
+        if solar_kwh is None:
+            solar_kwh = 0.0  # no forecast: assume none rather than guess
+        plan = peak_cover_plan(
+            soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, solar_kwh, load_kw, peak_load_kwh,
+            charge_rate_kw, prices["day"], prices["peak"],
+        )
+        actionable = plan["decision"] == "top_up" and plan["push_now"]
+        if not actionable and minutes < PEAK_COVER_LAST_LOG_MINUTES:
+            return
+        live = bool(cfg.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE)) and self.operation_mode != "monitor"
+        api_ok = None
+        if live and actionable:
+            api_ok = await self.async_push_flux_override(
+                {"flux_1": {"startTime": now.strftime("%H:%M"), "endTime": "16:00", "targetSoc": plan["target_soc"]}}
+            )
+            state["pushed"] = api_ok is True
+            title = "🔋 Sunsynk: topping up before the peak" if api_ok else "⚠️ Sunsynk: peak top-up NOT applied"
+            await self.async_notify(
+                title,
+                f"SOC {round(soc)}% would reach about {round(plan['projected_soc_16'])}% by 16:00 but the peak window "
+                f"needs {plan['required_soc']}%. Holding {plan['target_soc']}% at the day rate until 16:00 "
+                f"(about {plan['topup_kwh']} kWh).{_api_note(api_ok)}",
+            )
+        state["logged"] = True
+        record = {
+            "date": today,
+            "checked_at": now.strftime("%H:%M"),
+            "soc": soc,
+            **plan,
+            "solar_kwh_to_16": solar_kwh,
+            "load_kw": load_kw,
+            "load_source": load_source,
+            "peak_load_kwh": peak_load_kwh,
+            "peak_load_source": peak_load_source,
+            "day_pence": prices["day"],
+            "peak_pence": prices["peak"],
+            "price_source": price_source(sources, "day", "peak"),
+            "live": live,
+            "api_ok": api_ok,
+        }
+        state["record"] = record
+        await self.data_logger.async_log_peak_cover(**record)
+
+    async def _async_peak_cover_end(self) -> None:
+        """16:00: put the normal Flux plan back after a live peak-cover top-up slot."""
+        state = self._peak_cover or {}
+        if not state.get("pushed") or state.get("date") != dt_util.now().date().isoformat():
+            return
+        state["pushed"] = False
+        await self._async_restore_normal_plan()
