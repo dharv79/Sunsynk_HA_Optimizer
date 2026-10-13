@@ -35,7 +35,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 
 - The target is the evening reserve (phase 16) plus a 5% margin, capped at 100.
 - The surplus is the SOC above the target, in kWh.
-- `planning.arbitrage_worth_it` says to sell only if the peak export price beats the off-peak price ÷ 0.85 round-trip efficiency, plus battery wear. The wear term is `None` (no term) until phase 24 adds the options.
+- `planning.arbitrage_worth_it` says to sell only if the peak export price beats the off-peak price ÷ 0.85 round-trip efficiency, plus battery wear. The wear term comes from the phase 24 options (`None` when blank).
 - The decision is one of:
   - `export`;
   - `no_surplus` (< 0.5 kWh);
@@ -117,3 +117,10 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 **Shadow / logging.** One `peak_cover` record per day (dedup): the first actionable top-up, else the last check before 16:00, with the projection, required SOC, load/solar inputs, prices, `live` and `api_ok`; it rides the 22:00 debug bundle. Transient state `_peak_cover` is unpersisted by design: after a restart it re-evaluates.
 
 **Known limits.** The load estimate before 07:00 falls back to the plan load, which is overnight-only and low. A Flux 1 slot replaces the stored import slot until the next push: the 16:00 restore re-pushes the last plan, and the 01:55 plan re-pushes every night.
+
+## Battery wear cost (phase 24, 13/10/2026)
+
+- Options `battery_cost_gbp` and `battery_lifetime_kwh` (both blank by default). `planning.wear_cost_pence_per_kwh` = cost ÷ lifetime throughput × 100; blank or non-positive → `None` (no wear term, behaviour as before — never 0p).
+- `optimizer._wear_pence()` feeds `peak_export_plan` (16:00 peak export) and `plan_saving_session` (floor, boost and pre-charge tests). Wear is added to the replacement cost in `arbitrage_worth_it`.
+- Logged as `wear_cost_p` on the `peak_export` and `day_kpis` records. Round-trip efficiency stays the 0.85 constant (no phase 14 KPI measures it yet).
+- Tests: `tests/test_kpis.py` (phase 24 block), `tests/test_saving_session.py`.
