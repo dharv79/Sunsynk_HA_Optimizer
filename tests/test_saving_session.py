@@ -111,3 +111,10 @@ def test_next_joined_session_skips_running_and_malformed(planning):
     # Unknown reward → None, never 0p.
     one = {"joined_events": [{"start": "2026-10-12T17:00:00", "end": "2026-10-12T18:00:00"}]}
     assert planning.next_joined_saving_session(one, NOW) == (START, END, None)
+
+
+def test_wear_cost_can_stop_the_precharge_and_boost(planning):
+    # Value 252.81p vs day 27.77p: wear of 250p/kWh makes the cheap-rate fill not worth it.
+    plan = _plan(planning, wear_pence=250.0)
+    assert plan.floor_reason == "evening_reserve" and not plan.precharge and not plan.offpeak_boost
+    assert _plan(planning, wear_pence=None).precharge

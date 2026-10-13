@@ -722,12 +722,22 @@ PEAK_EXPORT_MIN_KWH = 0.5  # below this it isn't worth an API write
 ROUND_TRIP_EFFICIENCY = 0.85
 
 
+def wear_cost_pence_per_kwh(cost_gbp: float | None, lifetime_kwh: float | None) -> float | None:
+    """Battery wear per kWh cycled (phase 24): purchase cost over rated lifetime throughput.
+
+    None when either input is blank or non-positive, so decisions behave as
+    before (no wear term) rather than treating a missing cost as 0p."""
+    if not cost_gbp or not lifetime_kwh or cost_gbp <= 0 or lifetime_kwh <= 0:
+        return None
+    return round(cost_gbp / lifetime_kwh * 100, 3)
+
+
 def arbitrage_worth_it(
     buy_pence: float | None, sell_pence: float | None,
     round_trip_eff: float = ROUND_TRIP_EFFICIENCY, wear_pence: float | None = None,
 ) -> bool | None:
     """True when selling now beats buying the energy back later after losses
-    (and battery wear, once phase 24 supplies it; None = no wear term).
+    (and battery wear from phase 24; None = no wear term).
     None when a price is missing — never treat a missing price as 0p."""
     if buy_pence is None or sell_pence is None or round_trip_eff <= 0:
         return None
@@ -772,6 +782,7 @@ def peak_export_plan(
         "export_kwh": round(surplus_kwh, 2) if exporting else 0.0,
         "export_gbp": round_or_none(export_gbp),
         "gain_gbp": round_or_none(gain_gbp),
+        "wear_cost_p": wear_pence,
     }
 
 
@@ -1094,6 +1105,7 @@ def plan_saving_session(
     offpeak_pence: float | None,
     day_pence: float | None,
     min_floor_soc: int = SAVING_SESSION_MIN_FLOOR_SOC,
+    wear_pence: float | None = None,
 ) -> SavingSessionPlan:
     """Plan a saving session: how low to export, and whether to fill up first.
 
@@ -1106,13 +1118,13 @@ def plan_saving_session(
     """
     hours = max(0.0, (session_end - session_start).total_seconds() / 3600)
     value = saving_session_value_pence(reward_pence, export_pence)
-    if arbitrage_worth_it(day_pence, value):
+    if arbitrage_worth_it(day_pence, value, wear_pence=wear_pence):
         floor_soc, floor_reason = min_floor_soc, "reward_beats_rebuy"
     else:
         floor_soc, floor_reason = max(min_floor_soc, min(100, int(reserve_soc))), "evening_reserve"
 
-    offpeak_boost = bool(arbitrage_worth_it(offpeak_pence, value))
-    precharge = bool(arbitrage_worth_it(day_pence, value)) and soc < 100 and charge_rate_kw > 0
+    offpeak_boost = bool(arbitrage_worth_it(offpeak_pence, value, wear_pence=wear_pence))
+    precharge = bool(arbitrage_worth_it(day_pence, value, wear_pence=wear_pence)) and soc < 100 and charge_rate_kw > 0
     precharge_start = precharge_end = None
     if precharge:
         precharge_end = _precharge_end(session_start)

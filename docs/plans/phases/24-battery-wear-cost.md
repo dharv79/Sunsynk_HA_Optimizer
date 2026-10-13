@@ -1,6 +1,6 @@
 # Phase 24 — Battery wear cost in decisions
 
-**Status:** Planned, not built. **Size:** S, ~20-40k est. **Origin:** improvement list 2, 06/10/2026 (item 24). Build before phase 17.
+**Status:** Built (13/10/2026). **Size:** S, ~20-40k est. **Origin:** improvement list 2, 06/10/2026 (item 24). Build before phase 17.
 
 ## Goal
 

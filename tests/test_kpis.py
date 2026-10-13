@@ -319,3 +319,34 @@ def test_peak_export_dedups_and_pairs_export_days_only(tmp_path):
     days = {d["date"]: d for d in dl._pair_records(records + base)}
     assert days["2026-10-09"]["peak_export_gain_gbp"] == 0.14
     assert days["2026-10-10"]["peak_export_kwh"] is None
+
+
+# ---------------------------------------------------------------- phase 24
+
+def test_wear_cost_pence_per_kwh():
+    # £3,000 over 12,000 kWh of throughput = 25p/kWh.
+    assert planning.wear_cost_pence_per_kwh(3000, 12000) == 25.0
+    assert planning.wear_cost_pence_per_kwh(2400, 24000) == 10.0
+
+
+def test_wear_cost_blank_or_bad_inputs_is_none_not_zero():
+    for cost, life in ((None, 12000), (3000, None), (0, 12000), (3000, 0), (-5, 100), (3000, -1)):
+        assert planning.wear_cost_pence_per_kwh(cost, life) is None
+
+
+def test_wear_tips_arbitrage_at_the_margin():
+    # Break-even sell price = 16.66 / 0.85 + wear = 19.6 + 5 = 24.6p.
+    assert planning.arbitrage_worth_it(16.66, 24.7, wear_pence=5.0) is True
+    assert planning.arbitrage_worth_it(16.66, 24.5, wear_pence=5.0) is False
+    assert planning.arbitrage_worth_it(16.66, 24.5) is True  # no wear term → as before
+    assert planning.arbitrage_worth_it(None, 24.7, wear_pence=5.0) is None
+
+
+def test_peak_export_plan_respects_and_logs_wear():
+    base = planning.peak_export_plan(95, 73, 10.0, 27.81, 16.66)
+    assert base["decision"] == "export" and base["wear_cost_p"] is None
+    worn = planning.peak_export_plan(95, 73, 10.0, 27.81, 16.66, wear_pence=9.0)
+    assert worn["decision"] == "not_worth_it" and worn["wear_cost_p"] == 9.0
+    cheap = planning.peak_export_plan(95, 73, 10.0, 27.81, 16.66, wear_pence=2.0)
+    assert cheap["decision"] == "export"
+    assert cheap["gain_gbp"] < base["gain_gbp"]

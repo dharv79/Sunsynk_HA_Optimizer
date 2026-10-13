@@ -41,6 +41,8 @@ from .const import (
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_IMPORT_FEEDBACK_LIVE,
     CONF_PEAK_EXPORT_LIVE,
+    CONF_BATTERY_COST_GBP,
+    CONF_BATTERY_LIFETIME_KWH,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
     CONF_BATTERY_VOLTAGE,
@@ -131,6 +133,7 @@ from .planning import (
     next_joined_saving_session,
     peak_cover_plan,
     peak_export_plan,
+    wear_cost_pence_per_kwh,
     peak_load_estimate_kwh,
     plan_free_event,
     plan_saving_session,
@@ -1657,6 +1660,16 @@ class SunsynkOptimizer:
             soc=round_or_none(self._essential_state(self.battery_soc_entity), 1),
         )
 
+    def _wear_pence(self) -> float | None:
+        """Battery wear p/kWh from the cost and lifetime options; None when blank (phase 24)."""
+        cfg = self.cfg
+        try:
+            return wear_cost_pence_per_kwh(
+                float(cfg.get(CONF_BATTERY_COST_GBP) or 0), float(cfg.get(CONF_BATTERY_LIFETIME_KWH) or 0)
+            )
+        except (TypeError, ValueError):
+            return None
+
     async def _async_capture_day_kpis(self, date: str) -> dict[str, Any]:
         """22:00: close the day's snapshots and log the efficiency KPIs (phase 14)."""
         await self.async_capture_meter_snapshot("22:00")
@@ -1679,6 +1692,7 @@ class SunsynkOptimizer:
             **kpis,
             "price_source": price_source(sources, *TARIFF_BANDS),
             "evening_reserve_soc": self._evening_reserve_soc(),
+            "wear_cost_p": self._wear_pence(),
         }
         await self.data_logger.async_log_day_kpis(**record)
         return {"type": "day_kpis", **record}
@@ -1711,6 +1725,7 @@ class SunsynkOptimizer:
             max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))),
             prices["export_peak"],
             prices["offpeak"],
+            wear_pence=self._wear_pence(),
         )
         if plan["decision"] == "export" and self.coordinator.state.evening_export_disabled:
             plan["decision"] = "export_disabled"
@@ -2389,6 +2404,7 @@ class SunsynkOptimizer:
         plan = plan_saving_session(
             start, end, soc, capacity_kwh, charge_rate_kw, export_rate_kw, self._evening_reserve_soc(),
             reward_pence, export_pence, prices["offpeak"], prices["day"],
+            wear_pence=self._wear_pence(),
         )
         session = {
             "source": source,

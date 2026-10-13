@@ -1,6 +1,6 @@
 # Phase 30 — Peak cover
 
-**Status:** Done, merged (PR pending). **Size:** S–M, ~45k actual. **Origin:** user request 13/10/2026 after the 12/10 low-solar day (debug data + Sunsynk app chart).
+**Status:** Done, merged (38d333b, PR #47). **Size:** S–M, ~45k actual. **Origin:** user request 13/10/2026 after the 12/10 low-solar day (debug data + Sunsynk app chart).
 
 ## Goal
 

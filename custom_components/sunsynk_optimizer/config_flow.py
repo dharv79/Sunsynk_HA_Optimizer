@@ -36,6 +36,8 @@ from .const import (
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_IMPORT_FEEDBACK_LIVE,
     CONF_PEAK_EXPORT_LIVE,
+    CONF_BATTERY_COST_GBP,
+    CONF_BATTERY_LIFETIME_KWH,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
     CONF_BATTERY_VOLTAGE,
@@ -209,6 +211,18 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 description={"suggested_value": values.get(CONF_SAVING_SESSION_REWARD_PENCE)},
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=1000, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="p/kWh")
+            ),
+            vol.Optional(
+                CONF_BATTERY_COST_GBP,
+                description={"suggested_value": values.get(CONF_BATTERY_COST_GBP)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=100000, step=10, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="£")
+            ),
+            vol.Optional(
+                CONF_BATTERY_LIFETIME_KWH,
+                description={"suggested_value": values.get(CONF_BATTERY_LIFETIME_KWH)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1000000, step=100, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWh")
             ),
             vol.Required(CONF_AVG_CONSUMPTION_KW, default=values.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
