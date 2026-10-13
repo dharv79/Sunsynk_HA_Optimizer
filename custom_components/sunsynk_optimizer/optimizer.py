@@ -29,6 +29,10 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_AVG_CONSUMPTION_KW,
     CONF_WEEKEND_AVG_CONSUMPTION_KW,
+    CONF_AUTO_AWAY_CALENDAR,
+    CONF_AUTO_AWAY_KEYWORD,
+    CONF_AUTO_AWAY_MIN_HOURS,
+    CONF_AUTO_AWAY_PERSONS,
     CONF_AWAY_AVG_CONSUMPTION_KW,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
@@ -72,6 +76,8 @@ from .const import (
     CONF_TOMORROW_FORECAST_SENSOR,
     DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
+    DEFAULT_AUTO_AWAY_KEYWORD,
+    DEFAULT_AUTO_AWAY_MIN_HOURS,
     DEFAULT_AWAY_AVG_CONSUMPTION_KW,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CHARGE_RATE,
@@ -101,6 +107,7 @@ from .flux_helpers import (
     tariff_prices_pence,
 )
 from .planning import (
+    auto_away,
     baseload_anomaly,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
@@ -1498,6 +1505,7 @@ class SunsynkOptimizer:
 
     async def _async_run_import_plan(self, _now) -> None:
         """Time-change callback at 01:55 daily."""
+        await self._guarded(self._async_auto_away, "Auto away check")
         await self._guarded(self.async_run_import_plan, "Scheduled import plan")
 
     async def _async_charge_watchdog(self, _now) -> None:
@@ -1654,6 +1662,43 @@ class SunsynkOptimizer:
         await self._guarded(lambda: self.async_capture_meter_snapshot(time), "Meter snapshot")
         if time == "05:00":
             await self._guarded(self._async_overnight_load_check, "Overnight baseload check")
+
+    async def _async_auto_away(self) -> None:
+        """Set away mode from person/calendar signals (phase 27); no config = no-op."""
+        cfg = self.cfg
+        persons = [p.strip() for p in self._cfg_str(CONF_AUTO_AWAY_PERSONS).split(",") if p.strip()]
+        calendar = self._cfg_str(CONF_AUTO_AWAY_CALENDAR)
+        if not persons and not calendar:
+            return
+        now = dt_util.utcnow()
+        homes: list[bool | None] = []
+        hours: list[float | None] = []
+        for entity in persons:
+            st = self.hass.states.get(entity)
+            if st is None or st.state in ("unknown", "unavailable", ""):
+                homes.append(None)
+                hours.append(None)
+                continue
+            homes.append(st.state == "home")
+            hours.append((now - st.last_changed).total_seconds() / 3600.0)
+        calendar_away: bool | None = None
+        if calendar:
+            st = self.hass.states.get(calendar)
+            if st is not None and st.state in ("on", "off"):
+                keyword = (self._cfg_str(CONF_AUTO_AWAY_KEYWORD) or DEFAULT_AUTO_AWAY_KEYWORD).lower()
+                text = " ".join(str(st.attributes.get(k, "")) for k in ("message", "description")).lower()
+                calendar_away = st.state == "on" and keyword in text
+        decision = auto_away(
+            homes, calendar_away,
+            float(cfg.get(CONF_AUTO_AWAY_MIN_HOURS, DEFAULT_AUTO_AWAY_MIN_HOURS)), hours,
+        )
+        if decision is None or decision == bool(self.coordinator.state.away_mode):
+            return
+        self.coordinator.update_state(away_mode=decision)
+        await self.async_notify(
+            "🔋 Sunsynk: away mode " + ("on" if decision else "off"),
+            "Switched automatically from presence/calendar. The away switch still overrides this until the next change.",
+        )
 
     async def _async_overnight_load_check(self) -> None:
         """05:00: log the 00:00-05:00 house load and alert if it is far above normal (phase 26).
@@ -2052,6 +2097,7 @@ class SunsynkOptimizer:
         SOC swing (which conflates load with solar availability) — the actual
         daily load figure is logged directly.
         """
+        await self._guarded(self._async_auto_away, "Auto away check")
         await self._async_capture_daily_cost()
         soc = self._state_float(self.battery_soc_entity, 0)
         actual_solar_kwh = self._state_float(self.day_pv_energy_entity, 0)
