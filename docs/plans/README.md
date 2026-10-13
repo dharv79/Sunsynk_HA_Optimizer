@@ -32,7 +32,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 22. Charge watchdog (1.0.12b3) | Done, merged (3e59565, PR #36) | S, ~40k actual |
 | 23. Gentler charging across the cheap window (1.0.12b4) | Done, merged (dff4259, PR #45) | S, ~40k actual |
 | 24. Battery wear cost in decisions | Done, merged (7c8e7b6, PR #48) | S, ~25k |
-| 25. Spare solar sensor and appliance prompts | Done, merged (PR pending) | S, ~30k |
+| 25. Spare solar sensor and appliance prompts | Done, merged (cf0df05, PR #49) | S, ~30k |
 | 26. Overnight baseload alert | Planned, not built | S, ~20-40k |
 | 27. Automatic away mode | Planned, not built | XS–S, ~15-30k |
 | 28. Tariff comparison report | Planned, not built | M, ~50-80k |
