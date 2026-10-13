@@ -103,6 +103,8 @@ class OptimizerState:
     # current_a, restore_current_a, restore_at. Persisted so a restart before
     # 05:00 still restores the inverter's normal grid-charge current.
     gentle_charge: dict[str, Any] = field(default_factory=dict)
+    # Spare solar for flexible loads (phase 25): total_kwh, best window, per-hour list.
+    spare_solar: dict[str, Any] = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

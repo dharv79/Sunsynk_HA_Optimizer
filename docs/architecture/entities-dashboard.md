@@ -16,3 +16,7 @@ All entities extend `CoordinatorEntity` and read state from `coordinator.state` 
 ### Dashboard
 
 `dashboard_installer.py` generates a Lovelace YAML file by building a Python dict and serialising it with `json.dumps`. All SolarSynkV3 entity IDs are constructed from `inverter_serial` via the local `s()` helper. The file is written to `{hass.config.config_dir}/sunsynk_optimizer_{entry_id}.yaml` via `async_add_executor_job` (to avoid blocking the event loop), and a persistent HA notification shows the `configuration.yaml` snippet to add.
+
+### Spare solar (phase 25, 13/10/2026)
+
+`planning.expected_spare_solar` (corrected hourly solar − house load, battery refilled first from the earliest surplus, 08:00–16:00) feeds `sensor.spare_solar_today` (kWh; attributes best 3-hour window start/end/kWh and a per-hour list). Refreshed ~90 s after startup and at 06:05; the 06:05 run sends "🔋 Sunsynk: spare solar today" only if `spare_solar_notify_kwh` is set and the total reaches it (blank = off). No forecast → total `None`, never 0. Read-only: no inverter writes. Tests: `tests/test_kpis.py`. Not refreshed on forecast change (06:05 and restart only).
