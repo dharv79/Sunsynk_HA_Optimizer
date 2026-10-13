@@ -38,6 +38,7 @@ from .const import (
     CONF_PEAK_EXPORT_LIVE,
     CONF_BATTERY_COST_GBP,
     CONF_BATTERY_LIFETIME_KWH,
+    CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
     CONF_BATTERY_VOLTAGE,
@@ -223,6 +224,12 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 description={"suggested_value": values.get(CONF_BATTERY_LIFETIME_KWH)},
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=1000000, step=100, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWh")
+            ),
+            vol.Optional(
+                CONF_SPARE_SOLAR_NOTIFY_KWH,
+                description={"suggested_value": values.get(CONF_SPARE_SOLAR_NOTIFY_KWH)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0.5, max=50, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWh")
             ),
             vol.Required(CONF_AVG_CONSUMPTION_KW, default=values.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")

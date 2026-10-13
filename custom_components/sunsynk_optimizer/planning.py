@@ -1180,3 +1180,55 @@ def next_joined_saving_session(
             continue
         upcoming.append((start, end, octopoints_to_pence(item.get("octopoints_per_kwh"))))
     return min(upcoming, key=lambda s: s[0]) if upcoming else None
+
+
+SPARE_SOLAR_FIRST_HOUR = 8
+SPARE_SOLAR_WINDOW_HOURS = 3
+
+
+def expected_spare_solar(
+    hourly_forecast_kwh: dict[int, float] | None,
+    correction: float,
+    load_kw: float,
+    battery_headroom_kwh: float,
+    from_hour: float = SPARE_SOLAR_FIRST_HOUR,
+    to_hour: float = 16.0,
+) -> dict:
+    """Solar left over for flexible loads (phase 25).
+
+    Per hour: corrected solar minus house load; the battery refills first from
+    the earliest surplus (headroom), and what remains is spare. Returns
+    {"total_kwh", "hours": [{"hour", "spare_kwh"}], "window": {"start", "end",
+    "kwh"} | None} where the window is the best 3-hour run. No forecast -> None
+    total (never 0).
+    """
+    if not hourly_forecast_kwh:
+        return {"total_kwh": None, "hours": [], "window": None}
+    remaining = max(0.0, battery_headroom_kwh)
+    hours = []
+    for hour in sorted(hourly_forecast_kwh):
+        overlap = min(to_hour, hour + 1) - max(from_hour, hour)
+        if overlap <= 0:
+            continue
+        surplus = max(0.0, hourly_forecast_kwh[hour] * correction * overlap - max(0.0, load_kw) * overlap)
+        refill = min(surplus, remaining)
+        remaining -= refill
+        hours.append({"hour": hour, "spare_kwh": round(surplus - refill, 2)})
+    total = round(sum(h["spare_kwh"] for h in hours), 2)
+    best: list[dict] = []
+    best_kwh = 0.0
+    for i in range(len(hours)):
+        run = [h for h in hours[i : i + SPARE_SOLAR_WINDOW_HOURS] if h["hour"] < hours[i]["hour"] + SPARE_SOLAR_WINDOW_HOURS]
+        kwh = sum(h["spare_kwh"] for h in run)
+        if kwh > best_kwh:
+            best, best_kwh = run, kwh
+    while best and best[0]["spare_kwh"] <= 0:
+        best = best[1:]
+    while best and best[-1]["spare_kwh"] <= 0:
+        best = best[:-1]
+    window = (
+        {"start": f"{best[0]['hour']:02d}:00", "end": f"{best[-1]['hour'] + 1:02d}:00",
+         "kwh": round(sum(h["spare_kwh"] for h in best), 2)}
+        if best else None
+    )
+    return {"total_kwh": total, "hours": hours, "window": window}

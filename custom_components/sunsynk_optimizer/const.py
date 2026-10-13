@@ -118,6 +118,7 @@ GENTLE_CHARGE_SETTING = "sdBatteryCurrent"
 # Battery wear cost (phase 24). Blank = no wear term. Wear p/kWh = cost / lifetime throughput.
 CONF_BATTERY_COST_GBP = "battery_cost_gbp"
 CONF_BATTERY_LIFETIME_KWH = "battery_lifetime_kwh"
+CONF_SPARE_SOLAR_NOTIFY_KWH = "spare_solar_notify_kwh"  # blank = no morning notification
 
 # Peak cover (phase 30). Off = shadow: the midday projection of SOC at 16:00 and
 # the top-up it would make are logged and nothing is pushed. On = a Flux 1 slot

@@ -506,6 +506,17 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                             {"type": "heading", "heading": "Consumption", "heading_style": "title"},
                             {
                                 "type": "entities",
+                                "title": "Spare solar (washing, dishwasher, EV)",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "sensor.spare_solar_today", "name": "Spare today (kWh)"},
+                                    {"entity": "sensor.spare_solar_today", "type": "attribute", "attribute": "best_window_start", "name": "Best window start"},
+                                    {"entity": "sensor.spare_solar_today", "type": "attribute", "attribute": "best_window_end", "name": "Best window end"},
+                                    {"entity": "sensor.spare_solar_today", "type": "attribute", "attribute": "best_window_kwh", "name": "Best window (kWh)"},
+                                ],
+                            },
+                            {
+                                "type": "entities",
                                 "title": "Overnight (00:00-06:00)",
                                 "show_header_toggle": False,
                                 "entities": [

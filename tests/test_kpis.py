@@ -350,3 +350,30 @@ def test_peak_export_plan_respects_and_logs_wear():
     cheap = planning.peak_export_plan(95, 73, 10.0, 27.81, 16.66, wear_pence=2.0)
     assert cheap["decision"] == "export"
     assert cheap["gain_gbp"] < base["gain_gbp"]
+
+
+# --- phase 25: spare solar ---------------------------------------------------
+
+def test_cloudy_day_has_no_spare_solar(planning):
+    res = planning.expected_spare_solar({h: 0.2 for h in range(8, 16)}, 1.0, 0.4, 0.0)
+    assert res["total_kwh"] == 0 and res["window"] is None
+
+
+def test_full_battery_all_surplus_is_spare(planning):
+    hourly = {h: 1.5 for h in range(10, 14)}
+    res = planning.expected_spare_solar(hourly, 1.0, 0.5, 0.0)
+    assert res["total_kwh"] == 4.0
+    assert res["window"] == {"start": "10:00", "end": "13:00", "kwh": 3.0}
+
+
+def test_empty_battery_refills_first(planning):
+    hourly = {h: 2.0 for h in range(10, 14)}  # 1.5 kWh surplus an hour = 6 kWh
+    res = planning.expected_spare_solar(hourly, 1.0, 0.5, 4.0)
+    assert res["total_kwh"] == 2.0
+    # The first hours refill the battery; spare is at the end of the day.
+    assert res["window"]["end"] == "14:00"
+
+
+def test_no_forecast_is_none_not_zero(planning):
+    assert planning.expected_spare_solar(None, 1.0, 0.5, 0.0)["total_kwh"] is None
+    assert planning.expected_spare_solar({}, 1.0, 0.5, 0.0)["window"] is None

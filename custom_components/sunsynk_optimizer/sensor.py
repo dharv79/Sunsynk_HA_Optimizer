@@ -75,6 +75,7 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
             SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
             SunsynkOptimizerSensor(coordinator, entry, "saving_session", "Saving session"),
+            SunsynkOptimizerSensor(coordinator, entry, "spare_solar", "Spare solar today"),
         ]
     )
 
@@ -95,6 +96,10 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
         self._attr_entity_category = entity_category
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        return "kWh" if self._sensor_key == "spare_solar" else None
 
     @property
     def native_value(self) -> str | int | None:
@@ -125,6 +130,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "saving_session":
             return _as_dict(state.saving_session).get("phase") or "none"
+
+        if self._sensor_key == "spare_solar":
+            return _as_dict(state.spare_solar).get("total_kwh")
 
         if self._sensor_key == "import_plan_end":
             plan = state.last_import_plan
@@ -194,6 +202,15 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return _as_dict(state.free_event)
         if self._sensor_key == "saving_session":
             return _as_dict(state.saving_session)
+        if self._sensor_key == "spare_solar":
+            spare = _as_dict(state.spare_solar)
+            window = _as_dict(spare.get("window"))
+            return {
+                "best_window_start": window.get("start"),
+                "best_window_end": window.get("end"),
+                "best_window_kwh": window.get("kwh"),
+                "hours": spare.get("hours", []),
+            }
         if self._sensor_key == "last_error":
             attrs: dict[str, Any] = {}
             if state.last_api_result:

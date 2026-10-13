@@ -1,6 +1,6 @@
 # Phase 25 — Spare solar sensor and appliance prompts
 
-**Status:** Planned, not built. **Size:** S, ~20-40k est. **Origin:** improvement list 2, 06/10/2026 (item 25).
+**Status:** Done (PR pending). **Size:** S, ~30k. **Origin:** improvement list 2, 06/10/2026 (item 25).
 
 ## Goal
 

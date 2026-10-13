@@ -43,6 +43,7 @@ from .const import (
     CONF_PEAK_EXPORT_LIVE,
     CONF_BATTERY_COST_GBP,
     CONF_BATTERY_LIFETIME_KWH,
+    CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
     CONF_BATTERY_VOLTAGE,
@@ -98,6 +99,8 @@ from .flux_helpers import (
     tariff_prices_pence,
 )
 from .planning import (
+    SPARE_SOLAR_FIRST_HOUR,
+    expected_spare_solar,
     manual_free_event_error,
     CHEAP_WINDOW_END,
     CHEAP_WINDOW_HOURS,
@@ -297,6 +300,7 @@ class SunsynkOptimizer:
             (1, 55, self._async_run_import_plan),
             (CHARGE_WATCHDOG_MINUTES // 60, CHARGE_WATCHDOG_MINUTES % 60, self._async_charge_watchdog),
             (6, 0, self._async_capture_morning_state),
+            (6, 5, self._async_spare_solar_morning),
             (22, 0, self._async_capture_day_actuals),  # also takes the 22:00 meter snapshot
             # Phase 14 KPI snapshots at the Flux band edges.
             (2, 0, self._async_meter_snapshot),
@@ -328,6 +332,7 @@ class SunsynkOptimizer:
 
         self.coordinator.update_state(operation_mode=self.operation_mode)
         self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
+        self.unsubs.append(async_call_later(self.hass, 90, lambda _now: self._refresh_spare_solar()))
 
         if self._free_event_active():
             self._arm_free_event_timers(self.coordinator.state.free_event)
@@ -1874,6 +1879,44 @@ class SunsynkOptimizer:
 
         elif soc > 85 and not is_full_day:
             await self.async_run_flux2_check()
+
+    def _refresh_spare_solar(self) -> dict[str, Any] | None:
+        """Recompute the spare-solar estimate into state (no inverter writes); None without a forecast."""
+        cfg = self.cfg
+        now = dt_util.now()
+        soc = self._essential_state(self.battery_soc_entity)
+        capacity = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        hourly = self._get_hourly_forecast_kwh()
+        raw_daily, _ = self._resolve_raw_forecast(cfg[CONF_SOLAR_FORECAST_SENSOR], now)
+        if hourly is None and raw_daily is not None:
+            hourly = self._synthetic_hourly_forecast(raw_daily)
+        plan = self.coordinator.state.last_import_plan or {}
+        correction = float(plan.get("forecast_correction_factor") or 1.0)
+        load_kw = float(plan.get("avg_consumption_kw") or cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        headroom = capacity * (100.0 - soc) / 100.0 if soc is not None else 0.0
+        result = expected_spare_solar(
+            hourly, correction, load_kw, headroom, from_hour=max(SPARE_SOLAR_FIRST_HOUR, now.hour + now.minute / 60.0)
+        )
+        result["date"] = now.date().isoformat()
+        self.coordinator.update_state(spare_solar=result)
+        return result
+
+    async def _async_spare_solar_morning(self, _now) -> None:
+        """06:05: refresh the estimate and, if the option is set, tell the user when to run appliances."""
+        result = self._refresh_spare_solar()
+        raw = self.cfg.get(CONF_SPARE_SOLAR_NOTIFY_KWH)
+        try:
+            threshold = float(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            threshold = None
+        window = (result or {}).get("window")
+        if threshold is None or not window or (result.get("total_kwh") or 0) < threshold:
+            return
+        await self.async_notify(
+            "🔋 Sunsynk: spare solar today",
+            f"Spare solar {window['start']}–{window['end']} (~{window['kwh']} kWh) — good time for the washing, "
+            f"dishwasher or EV.",
+        )
 
     async def _async_capture_morning_state(self, _now) -> None:
         """Capture SOC and PV power at 06:00 to measure overnight battery drain.
