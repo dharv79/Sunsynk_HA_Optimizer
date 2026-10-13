@@ -251,6 +251,19 @@ class DataLogger:
         """Log the midday peak-cover decision (phase 30): one per day."""
         await self._async_append(_record("peak_cover", **fields))
 
+    async def async_log_overnight_load(self, **fields: Any) -> None:
+        """Log the 00:00-05:00 house load (phase 26): one per day."""
+        await self._async_append(_record("overnight_load", **fields))
+
+    async def async_recent_overnight_loads(self, today: str, days: int = 30) -> list[dict[str, Any]]:
+        """Prior nights' {"load_kwh", "away"} from overnight_load records (excluding ``today``)."""
+        records = await self.hass.async_add_executor_job(self._read_recent, days)
+        return [
+            {"load_kwh": r.get("load_kwh"), "away": bool(r.get("away"))}
+            for r in records
+            if r.get("type") == "overnight_load" and r.get("date") != today
+        ]
+
     async def async_recent_peak_loads(self, days: int = 14) -> list[float]:
         """House load (kWh) in recent 16:00-19:00 windows, from peak_window_usage records."""
         records = await self.hass.async_add_executor_job(self._read_recent, days)
@@ -687,7 +700,7 @@ class DataLogger:
     # daily_cost is not deduped here — it merges via async_merge_daily_cost.
     _DEDUP_TYPES = (
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog",
-        "meter_snapshot", "day_kpis", "peak_export", "peak_cover",
+        "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:

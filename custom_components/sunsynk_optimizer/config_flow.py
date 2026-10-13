@@ -41,6 +41,8 @@ from .const import (
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
+    CONF_BASELOAD_ALERT,
+    DEFAULT_BASELOAD_ALERT,
     CONF_BATTERY_VOLTAGE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
@@ -176,6 +178,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Required(
                 CONF_PEAK_COVER_LIVE,
                 default=values.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE),
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_BASELOAD_ALERT,
+                default=values.get(CONF_BASELOAD_ALERT, DEFAULT_BASELOAD_ALERT),
             ): selector.BooleanSelector(),
             vol.Required(
                 CONF_DEFAULT_FULL_CHARGE_DAY,

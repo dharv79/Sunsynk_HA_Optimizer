@@ -46,6 +46,8 @@ from .const import (
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
+    CONF_BASELOAD_ALERT,
+    DEFAULT_BASELOAD_ALERT,
     CONF_BATTERY_VOLTAGE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
@@ -99,6 +101,7 @@ from .flux_helpers import (
     tariff_prices_pence,
 )
 from .planning import (
+    baseload_anomaly,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
     manual_free_event_error,
@@ -1649,6 +1652,31 @@ class SunsynkOptimizer:
     async def _async_meter_snapshot(self, now) -> None:
         time = dt_util.as_local(now).strftime("%H:%M")
         await self._guarded(lambda: self.async_capture_meter_snapshot(time), "Meter snapshot")
+        if time == "05:00":
+            await self._guarded(self._async_overnight_load_check, "Overnight baseload check")
+
+    async def _async_overnight_load_check(self) -> None:
+        """05:00: log the 00:00-05:00 house load and alert if it is far above normal (phase 26).
+
+        Read-only (notification only), so it runs in monitor mode too. A missing
+        meter logs nothing and never alerts.
+        """
+        load = round_or_none(self._essential_state(self.day_load_entity))
+        if load is None:
+            return
+        today = dt_util.now().date().isoformat()
+        away = bool(self.coordinator.state.away_mode)
+        history = await self.data_logger.async_recent_overnight_loads(today)
+        await self.data_logger.async_log_overnight_load(date=today, load_kwh=load, away=away)
+        if away or not self.cfg.get(CONF_BASELOAD_ALERT, DEFAULT_BASELOAD_ALERT):
+            return
+        anomaly = baseload_anomaly(history, load)
+        if anomaly:
+            await self.async_notify(
+                "🔋 Sunsynk: overnight load high",
+                f"Overnight load {anomaly['tonight_kwh']} kWh vs usual {anomaly['usual_kwh']} kWh "
+                "— something left on?",
+            )
 
     async def async_capture_meter_snapshot(self, time: str) -> None:
         """Log the cumulative daily meters at a Flux band edge (phase 14).

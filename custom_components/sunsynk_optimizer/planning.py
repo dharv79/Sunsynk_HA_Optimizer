@@ -1232,3 +1232,39 @@ def expected_spare_solar(
         if best else None
     )
     return {"total_kwh": total, "hours": hours, "window": window}
+
+
+BASELOAD_MIN_NIGHTS = 7
+BASELOAD_FACTOR = 1.5
+BASELOAD_MIN_EXTRA_KWH = 1.0
+
+
+def baseload_anomaly(
+    history: list[dict[str, Any]],
+    tonight_kwh: float | None,
+    min_nights: int = BASELOAD_MIN_NIGHTS,
+    factor: float = BASELOAD_FACTOR,
+    min_extra_kwh: float = BASELOAD_MIN_EXTRA_KWH,
+) -> dict[str, Any] | None:
+    """Return {"tonight_kwh", "usual_kwh", "nights"} when 00:00-05:00 load is abnormally high, else None.
+
+    ``history`` rows are ``{"load_kwh", "away"}``. Home nights only (away is a
+    different regime, do-not-break 18); missing or non-positive readings are
+    ignored, never counted as 0 (do-not-break 11). Needs ``min_nights`` of
+    history, and tonight must beat the median by both ``factor`` and
+    ``min_extra_kwh`` so a small base can't alert on noise.
+    """
+    if not isinstance(tonight_kwh, (int, float)) or tonight_kwh <= 0:
+        return None
+    values = sorted(
+        float(r["load_kwh"])
+        for r in history
+        if not r.get("away") and isinstance(r.get("load_kwh"), (int, float)) and r["load_kwh"] > 0
+    )
+    if len(values) < min_nights:
+        return None
+    mid = len(values) // 2
+    usual = values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
+    if tonight_kwh >= usual * factor and tonight_kwh - usual >= min_extra_kwh:
+        return {"tonight_kwh": round(tonight_kwh, 2), "usual_kwh": round(usual, 2), "nights": len(values)}
+    return None
