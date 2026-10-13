@@ -1,6 +1,6 @@
 # Phase 27 — Automatic away mode
 
-**Status:** Planned, not built. **Size:** XS–S, ~15-30k est. **Origin:** improvement list 2, 06/10/2026 (item 28).
+**Status:** Done, merged (0f19108, PR #51). **Size:** XS–S, ~25k actual. **Origin:** improvement list 2, 06/10/2026 (item 28).
 
 ## Goal
 
