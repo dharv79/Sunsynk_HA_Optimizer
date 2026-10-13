@@ -1,6 +1,6 @@
 # Phase 28 — Tariff comparison report
 
-**Status:** Built 13/10/2026 for Flux, Go and Cosy (Agile/Intelligent deferred). **Size:** M, ~50-80k est. **Origin:** improvement list 2, 06/10/2026 (item 29).
+**Status:** Done, merged (92f6a35, PR #53) for Flux, Go and Cosy; Agile/Intelligent deferred. **Size:** M, ~50-80k est. **Origin:** improvement list 2, 06/10/2026 (item 29).
 
 ## Goal
 

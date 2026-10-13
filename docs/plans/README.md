@@ -35,7 +35,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 25. Spare solar sensor and appliance prompts | Done, merged (cf0df05, PR #49) | S, ~30k |
 | 26. Overnight baseload alert | Done, merged (4fcff5b, PR #50) | S, ~30k |
 | 27. Automatic away mode | Done, merged (0f19108, PR #51) | XS–S, ~25k actual |
-| 28. Tariff comparison report | Planned, not built (prerequisite passed 13/10/2026) | M, ~50-80k |
+| 28. Tariff comparison report | Done, merged (92f6a35, PR #53); Agile/Intelligent deferred | M, ~45k |
 | 29. Clipped solar detection | Done, merged (cee4395, PR #52) | S, ~30k actual |
 | 30. Peak cover (reach 16:00 with enough battery for the peak window) | Done, merged (38d333b, PR #47) | S–M, ~45k actual |
 
