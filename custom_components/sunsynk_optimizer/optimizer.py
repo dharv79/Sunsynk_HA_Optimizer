@@ -69,6 +69,9 @@ from .const import (
     CONF_OCTOPUS_IMPORT_COST_SENSOR,
     CONF_OCTOPUS_EXPORT_INCOME_SENSOR,
     CONF_OCTOPUS_GAS_COST_SENSOR,
+    CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR,
+    CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR,
+    CONF_TARIFF_RATE_OVERRIDES,
     CONF_OCTOPUS_IMPORT_RATES_ENTITY,
     CONF_OCTOPUS_EXPORT_RATES_ENTITY,
     CONF_OCTOPUS_SAVING_SESSION_ENTITY,
@@ -108,6 +111,14 @@ from .flux_helpers import (
     tariff_prices_pence,
 )
 from .planning import (
+    TARIFF_IMPORT_BANDS,
+    TARIFF_LABELS,
+    TARIFF_RATES_AS_OF,
+    bands_from_rates,
+    compare_tariffs,
+    flux_bands_from_charges,
+    merge_tariff_rates,
+    parse_half_hourly_charges,
     auto_away,
     CLIPPED_SOC_PCT,
     estimate_clipped_kwh,
@@ -1368,6 +1379,7 @@ class SunsynkOptimizer:
         if dt_util.now().strftime("%A") == "Sunday":
             await self._guarded(self.async_choose_best_full_charge_day, "Full-charge-day selection")
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
+            await self._guarded(self._async_send_monthly_tariff_comparison, "Monthly tariff comparison")
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
         await self._guarded(self.async_recheck_full_charge_day, "Full-charge-day re-check")
 
@@ -2073,6 +2085,7 @@ class SunsynkOptimizer:
         completes the right day. Merging only fills unset fields, so calling
         this twice a day is safe.
         """
+        await self._guarded(self._async_capture_half_hourly, "Half-hourly capture")
         readings = self._read_octopus_previous_day_cost()
         if not readings:
             return  # No Octopus sensors configured/available — nothing to log.
@@ -2119,6 +2132,67 @@ class SunsynkOptimizer:
                     "as_of_date": (now - timedelta(days=1)).date().isoformat(),
                 },
             )
+
+    async def _async_capture_half_hourly(self) -> None:
+        """Log the settled day's 48 half-hourly import/export kWh (phase 28), if complete.
+
+        Import and export settle on different days, so each is logged under its own
+        date; an incomplete day (not 48 numeric slots) is skipped, never part-logged.
+        """
+        for kind, conf_key in (
+            ("import", CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR),
+            ("export", CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR),
+        ):
+            sensor_id = self._cfg_str(conf_key)
+            state = self._available_state(sensor_id) if sensor_id else None
+            parsed = parse_half_hourly_charges(state.attributes) if state is not None else None
+            if parsed is not None:
+                await self.data_logger.async_log_half_hourly(kind, parsed[0], parsed[1])
+
+    async def _async_send_monthly_tariff_comparison(self) -> None:
+        """First Sunday of the month: cost last month's logged usage under Flux, Go and Cosy.
+
+        Usage is held fixed (battery behaviour would differ on another tariff) and standing
+        charges are excluded, so this is a guide, not a quote.
+        """
+        today = dt_util.now().date()
+        if today.day > 7:
+            return
+        month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        imp, exp = await self.data_logger.async_load_half_hourly()
+        rates = merge_tariff_rates(self.cfg.get(CONF_TARIFF_RATE_OVERRIDES))
+        export_flat = lambda r: [(0, 1440, r["export"])]  # noqa: E731
+        tariffs = {
+            "flux": (
+                flux_bands_from_charges(self.cfg.get(CONF_CHARGES), "import"),
+                flux_bands_from_charges(self.cfg.get(CONF_CHARGES), "export"),
+            ),
+            **{
+                name: (bands_from_rates(TARIFF_IMPORT_BANDS[name], rates[name]), export_flat(rates[name]))
+                for name in ("go", "cosy")
+            },
+        }
+        result = compare_tariffs(imp, exp, tariffs, month)
+        if not result["days_compared"]:
+            return  # Consumption sensors not configured, or no complete days logged.
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify(
+                "Sunsynk Monthly Tariff Comparison",
+                json.dumps({"type": "monthly_tariff_comparison", **result}),
+                target=data_report_target,
+            )
+        notify_target = self._cfg_str(CONF_NOTIFY_TARGET)
+        lines = [
+            f"{TARIFF_LABELS[k]}: " + (f"£{v:.2f}" if v is not None else "n/a")
+            for k, v in result["net_gbp"].items()
+        ]
+        await self.async_notify(
+            "🔋 Sunsynk: Tariff comparison for " + month,
+            f"{result['days_compared']} days, net of export, same usage. " + " · ".join(lines)
+            + f". Unit rates only (as of {TARIFF_RATES_AS_OF}); battery use would differ on another tariff.",
+            target=notify_target or None,
+        )
 
     async def _async_capture_day_actuals(self, _now) -> None:
         """Capture end-of-day actuals at 22:00 and log them.

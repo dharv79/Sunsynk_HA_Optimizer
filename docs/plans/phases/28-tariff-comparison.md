@@ -1,6 +1,6 @@
 # Phase 28 — Tariff comparison report
 
-**Status:** Planned, not built (prerequisite passed 13/10/2026). **Size:** M, ~50-80k est. **Origin:** improvement list 2, 06/10/2026 (item 29).
+**Status:** Built 13/10/2026 for Flux, Go and Cosy (Agile/Intelligent deferred). **Size:** M, ~50-80k est. **Origin:** improvement list 2, 06/10/2026 (item 29).
 
 ## Goal
 

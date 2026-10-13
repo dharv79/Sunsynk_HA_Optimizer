@@ -85,6 +85,12 @@ CONF_OCTOPUS_IMPORT_COST_SENSOR = "octopus_import_cost_sensor"
 CONF_OCTOPUS_EXPORT_INCOME_SENSOR = "octopus_export_income_sensor"
 CONF_OCTOPUS_GAS_COST_SENSOR = "octopus_gas_cost_sensor"
 
+# Phase 28: "previous accumulative consumption" sensors (their `charges` attribute
+# holds 48 half-hourly kWh) and optional tariff-rate overrides (JSON).
+CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR = "octopus_import_consumption_sensor"
+CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR = "octopus_export_consumption_sensor"
+CONF_TARIFF_RATE_OVERRIDES = "tariff_rate_overrides"
+
 # Phase 18: optional Octopus Energy rate entities (current-rate sensor or the
 # current-day-rates event). Blank keeps pricing on the configured `charges`.
 CONF_OCTOPUS_IMPORT_RATES_ENTITY = "octopus_import_rates_entity"
