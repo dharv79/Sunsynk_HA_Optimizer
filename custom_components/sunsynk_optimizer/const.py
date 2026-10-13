@@ -115,6 +115,12 @@ DEFAULT_GENTLE_CHARGE_LIVE = False
 CONF_BATTERY_VOLTAGE = "battery_voltage"
 GENTLE_CHARGE_SETTING = "sdBatteryCurrent"
 
+# Peak cover (phase 30). Off = shadow: the midday projection of SOC at 16:00 and
+# the top-up it would make are logged and nothing is pushed. On = a Flux 1 slot
+# now->16:00 holds the battery at the SOC the peak window needs, at the day rate.
+CONF_PEAK_COVER_LIVE = "peak_cover_live"
+DEFAULT_PEAK_COVER_LIVE = False
+
 # Optional HA AI Task-generated weekly insight (v1.0.11 Part 4). Off by
 # default: depends on the user having an AI Task provider configured in this
 # HA instance (Settings -> Voice assistants), which may incur cost on their

@@ -775,6 +775,120 @@ def peak_export_plan(
     }
 
 
+# Phase 30: peak cover — make sure the battery reaches 16:00 with enough charge
+# to run the house through 16:00-19:00, topping up at the (cheaper) day rate.
+PEAK_COVER_FLOOR_SOC = 25  # the battery's own low-battery limit
+PEAK_COVER_MARGIN = 1.1
+PEAK_COVER_MIN_SHORTFALL_SOC = 3
+PEAK_COVER_LEAD_MINUTES = 45  # start this long before the charge needs to begin
+PEAK_COVER_FROM_MINUTES = 12 * 60
+PEAK_COVER_PEAK_START_MINUTES = 16 * 60
+PEAK_COVER_LAST_LOG_MINUTES = 15 * 60 + 30
+PEAK_COVER_MIN_LOAD_HOURS = 2.0  # hours of 05:00-now data before the observed load is trusted
+PEAK_COVER_LOAD_PERCENTILE = 75
+PEAK_COVER_MIN_PEAK_DAYS = 3
+
+
+def solar_until_kwh(hourly: dict[int, float] | None, now_hour: float, end_hour: float = 16.0) -> float | None:
+    """Forecast solar (kWh) between now_hour and end_hour from {hour: kWh} buckets; None without a forecast."""
+    if not hourly:
+        return None
+    total = 0.0
+    for hour, kwh in hourly.items():
+        overlap = min(end_hour, hour + 1) - max(now_hour, hour)
+        if overlap > 0:
+            total += kwh * overlap
+    return round(total, 3)
+
+
+def daytime_load_kw(
+    load_now_kwh: float | None, load_at_05_kwh: float | None, hours: float, fallback_kw: float
+) -> tuple[float, str]:
+    """House load (kW) since 05:00 from the daily meter; the fallback until 2 h of data exist."""
+    if load_now_kwh is None or load_at_05_kwh is None or hours < PEAK_COVER_MIN_LOAD_HOURS:
+        return fallback_kw, "fallback"
+    delta = load_now_kwh - load_at_05_kwh
+    if delta <= 0:
+        return fallback_kw, "fallback"
+    return round(delta / hours, 3), "observed"
+
+
+def peak_load_estimate_kwh(recent_kwh: list[float], default_kwh: float) -> tuple[float, str]:
+    """Expected 16:00-19:00 house load: the 75th percentile of recent days (covers most days), else the default."""
+    values = sorted(v for v in recent_kwh if v is not None and v >= 0)
+    if len(values) < PEAK_COVER_MIN_PEAK_DAYS:
+        return default_kwh, "default"
+    rank = PEAK_COVER_LOAD_PERCENTILE / 100.0 * (len(values) - 1)
+    low = int(rank)
+    high = min(low + 1, len(values) - 1)
+    return round(values[low] + (values[high] - values[low]) * (rank - low), 2), "history"
+
+
+def peak_cover_worth_it(day_pence: float | None, peak_pence: float | None, efficiency: float = CHARGE_EFFICIENCY) -> bool | None:
+    """True when charging at the day rate beats buying the same kWh at the peak rate after charge losses.
+    None when a price is missing — never treat a missing price as 0p."""
+    if day_pence is None or peak_pence is None or efficiency <= 0:
+        return None
+    return peak_pence > day_pence / efficiency
+
+
+def peak_cover_plan(
+    soc: float,
+    capacity_kwh: float,
+    minutes_to_peak: float,
+    solar_kwh: float,
+    load_kw: float,
+    peak_load_kwh: float,
+    charge_rate_kw: float,
+    day_pence: float | None,
+    peak_pence: float | None,
+    floor_soc: int = PEAK_COVER_FLOOR_SOC,
+    margin: float = PEAK_COVER_MARGIN,
+) -> dict[str, Any]:
+    """Will the battery reach 16:00 with enough to run the peak window? If not, how to top up.
+
+    Projects SOC at 16:00 from the current SOC, forecast solar and house load
+    (a battery that would run flat sits at the floor, the grid covering the
+    rest), against the SOC needed to carry the expected peak load above the
+    floor. decision: ok / top_up / not_worth_it / no_price. A top-up is a Flux 1
+    slot now->16:00 at target_soc: the inverter only imports while below the
+    target, so it holds the battery there at the day rate. `push_now` waits
+    until the charge would need to start (plus a lead) so later solar can still
+    help. Gain is the peak cost avoided minus the day-rate cost of the top-up.
+    """
+    hours = max(0.0, minutes_to_peak / 60.0)
+    projected = soc + (solar_kwh - load_kw * hours) / capacity_kwh * 100.0
+    projected_soc = round(min(100.0, max(float(floor_soc), projected)), 1)
+    required_soc = min(100, math.ceil(floor_soc + peak_load_kwh * margin / capacity_kwh * 100.0))
+    shortfall_soc = max(0.0, required_soc - projected_soc)
+    worth = peak_cover_worth_it(day_pence, peak_pence)
+    if worth is None:
+        decision = "no_price"
+    elif shortfall_soc < PEAK_COVER_MIN_SHORTFALL_SOC:
+        decision = "ok"
+    elif not worth:
+        decision = "not_worth_it"
+    else:
+        decision = "top_up"
+    topping = decision == "top_up"
+    topup_kwh = round(shortfall_soc / 100.0 * capacity_kwh, 2) if topping else 0.0
+    charge_minutes = math.ceil(topup_kwh / CHARGE_EFFICIENCY / charge_rate_kw * 60.0) if topping and charge_rate_kw > 0 else 0
+    gain_gbp = None
+    if topping:
+        gain_gbp = round_or_none(topup_kwh * (peak_pence - day_pence / CHARGE_EFFICIENCY) / 100.0)
+    return {
+        "decision": decision,
+        "projected_soc_16": projected_soc,
+        "required_soc": required_soc,
+        "shortfall_soc": round(shortfall_soc, 1),
+        "target_soc": required_soc if topping else None,
+        "topup_kwh": topup_kwh,
+        "charge_minutes": charge_minutes,
+        "push_now": topping and minutes_to_peak <= charge_minutes + PEAK_COVER_LEAD_MINUTES,
+        "gain_gbp": gain_gbp,
+    }
+
+
 def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cost: float | None) -> float | None:
     """import - export + gas, or None if any input is missing (never treat missing as £0)."""
     if import_cost is None or export_income is None or gas_cost is None:

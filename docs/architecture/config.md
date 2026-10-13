@@ -31,6 +31,8 @@ The options flow is multi-step: `init` → `charges_1` (import tariff rows 1–4
 - `peak_export_live` (default off, phase 17): when off, the 16:00 peak surplus export decision is only logged; when on, Flux 2 exports 16:00–19:00 down to the evening reserve + 5%. See export-control.md.
 - `gentle_charge_live` (default off, phase 23): when off, the gentle grid-charge current is only logged; when on, the 01:55 plan writes it, keeps Flux 1 open to 05:00 and restores the previous current at 05:00. `battery_voltage` (default 51.2 V) converts kWh to amps. See import-plan.md.
 
+- `peak_cover_live` (default off, phase 30): when off, the midday "will the battery last the peak window" projection is only logged; when on, a Flux 1 slot now→16:00 holds the battery at the SOC the peak needs, at the day rate. See export-control.md.
+
 ## Octopus rate entities (phase 18)
 
 `octopus_import_rates_entity` / `octopus_export_rates_entity` (optional, free text): an Octopus Energy current-rate sensor or day-rates event. Blank keeps pricing on `charges`. See export-control.md.

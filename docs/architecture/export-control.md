@@ -101,3 +101,19 @@ Shadow mode is unchanged: the watt trigger still drives the decision.
 - missing everywhere → `None`.
 
 In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `price_source: "octopus"` (or `"mixed"` if only import is set).
+
+## Peak cover (13/10/2026, phase 30)
+
+**Why.** On 12/10 (dull day) the overnight charge stopped at ~83%, the battery hit its 25% low-battery limit by ~14:30 and 2.7 kWh was bought at the 38.88p peak rate during a grid charge that ran into 16:00–19:00. Other days peak imports were 0.1–0.4 kWh, so this is an occasional-shortfall guard, worth roughly £0.2 on a bad day.
+
+**Logic (`planning.peak_cover_plan`).** Every 30 minutes 12:00–16:00 (`async_run_peak_cover`, from the periodic tick):
+- Projected SOC at 16:00 = SOC + (forecast solar to 16:00 − load × hours) / capacity. Solar is the raw (uncorrected) forecast — the pessimistic choice, like the low-solar decisions (do-not-break 8) — from the hourly sensor or the synthetic profile; no forecast means no solar assumed. Load is the observed average since 05:00 from the meter snapshots once 2 h exist, else tonight's plan load. A battery that would run flat is held at the 25% floor (`PEAK_COVER_FLOOR_SOC`, the user's Low Batt setting).
+- Required SOC = floor + 75th-percentile recent `peak_load_kwh` (≥3 days, else 3 h × load) × 1.1 margin.
+- `top_up` when the shortfall is ≥3 points and the day price beats the peak price after charge losses (`peak_cover_worth_it`); a missing price → `no_price`, never a decision to charge.
+- The push waits until the charge would need to start (+45 min lead, `push_now`) so later solar can still help.
+
+**Live (`peak_cover_live`, default off).** A Flux 1 slot now→16:00 with `targetSoc` = the required SOC. The inverter imports only while below the target, so it holds the battery there at the day rate rather than charging in one go. One push a day; at 16:00 `_async_peak_cover_end` (in `async_run_peak_export`) restores the normal plan (`_async_restore_normal_plan`). Never in monitor mode; skipped while a free event or saving session holds the slots.
+
+**Shadow / logging.** One `peak_cover` record per day (dedup): the first actionable top-up, else the last check before 16:00, with the projection, required SOC, load/solar inputs, prices, `live` and `api_ok`; it rides the 22:00 debug bundle. Transient state `_peak_cover` is unpersisted by design: after a restart it re-evaluates.
+
+**Known limits.** The load estimate before 07:00 falls back to the plan load, which is overnight-only and low. A Flux 1 slot replaces the stored import slot until the next push: the 16:00 restore re-pushes the last plan, and the 01:55 plan re-pushes every night.

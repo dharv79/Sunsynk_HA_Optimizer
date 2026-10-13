@@ -37,6 +37,7 @@ from .const import (
     CONF_IMPORT_FEEDBACK_LIVE,
     CONF_PEAK_EXPORT_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
+    CONF_PEAK_COVER_LIVE,
     CONF_BATTERY_VOLTAGE,
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
@@ -75,6 +76,7 @@ from .const import (
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_PEAK_EXPORT_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
+    DEFAULT_PEAK_COVER_LIVE,
     DEFAULT_FULL_CHARGE_DAY,
     DEFAULT_INVEST,
     DEFAULT_NOTIFY_SERVICE,
@@ -167,6 +169,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Required(
                 CONF_GENTLE_CHARGE_LIVE,
                 default=values.get(CONF_GENTLE_CHARGE_LIVE, DEFAULT_GENTLE_CHARGE_LIVE),
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_PEAK_COVER_LIVE,
+                default=values.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE),
             ): selector.BooleanSelector(),
             vol.Required(
                 CONF_DEFAULT_FULL_CHARGE_DAY,
