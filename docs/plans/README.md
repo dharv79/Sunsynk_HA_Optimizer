@@ -43,7 +43,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 33. Tariff price-change alert | Done, merged (0731e77, PR #59) | XS, ~15k |
 | 34. Battery capacity tracking | Done, merged (2c8963c, PR #66), shadow | S, ~35k |
 | 35. Fuller tariff comparison (standing charges, VAT, Agile/Intelligent) | Done, merged (8a92549, PR #60) | M, ~55k |
-| 36. Bill reconciliation | Done, merged (PR #67); manual billed entry (no Octopus statement sensor) | S, ~30k |
+| 36. Bill reconciliation | Done, merged (dfded0a, PR #67); manual billed entry (no Octopus statement sensor) | S, ~30k |
 | 37. Value-of-the-system report | Done, merged (487ba83, PR #65) | S, ~30k |
 | 38. "Cost of 1 kWh now" sensor | Done, merged (f790c19, PR #64) | S, ~30k |
 | 39. Multi-day low-solar planning | Done, merged (1935017, PR #61), shadow | S, ~30k |

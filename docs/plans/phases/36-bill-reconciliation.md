@@ -1,6 +1,6 @@
 # Phase 36 — Bill reconciliation
 
-**Status:** Done, merged (PR #67). **Size:** S, ~30k actual. **Origin:** improvement list 3, 14/10/2026 (item 6).
+**Status:** Done, merged (dfded0a, PR #67). **Size:** S, ~30k actual. **Origin:** improvement list 3, 14/10/2026 (item 6).
 
 ## Goal
 
