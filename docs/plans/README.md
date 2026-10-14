@@ -38,8 +38,20 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 28. Tariff comparison report | Done, merged (92f6a35, PR #53); Agile/Intelligent deferred | M, ~45k |
 | 29. Clipped solar detection | Done, merged (cee4395, PR #52) | S, ~30k actual |
 | 30. Peak cover (reach 16:00 with enough battery for the peak window) | Done, merged (38d333b, PR #47) | S–M, ~45k actual |
+| 31. Inverter drift check | Planned, not built | S, ~30-45k |
+| 32. Retry a failed overnight plan push | Planned, not built | XS, ~15-25k |
+| 33. Tariff price-change alert | Planned, not built | XS–S, ~20-30k |
+| 34. Battery capacity tracking | Planned, not built | M, ~45-70k |
+| 35. Fuller tariff comparison (standing charges, VAT, Agile/Intelligent) | Planned, not built | M, ~50-80k |
+| 36. Bill reconciliation | Planned, not built | S, ~30-45k |
+| 37. Value-of-the-system report | Planned, not built | S, ~30-45k |
+| 38. "Cost of 1 kWh now" sensor | Planned, not built | S, ~25-40k |
+| 39. Multi-day low-solar planning | Planned, not built | M, ~45-70k |
+| 40. Daytime load spike alert | Planned, not built | XS–S, ~20-30k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
+
+Phases 31–40 come from improvement list 3 (14/10/2026). Recommended order: 32 → 31 → 33 (protect existing savings), then 35 and 39 (largest new value); 31 and 36 start with a feasibility check (Flux read-back / Octopus statement sensor) and go "On hold" in part if it fails; 36 after 35; 37 and 38 independent; 39 ships in shadow first.
 
 Phase 30 is a user request (13/10/2026). Phases 22–29 come from the second improvement list (06/10/2026; items 26 hot-water diversion and 31 EV battery hold were declined). 22 is independent and recommended early; 23 needs 22 (safety net) and an API check; 24 before 17; 26 shares phase 12's missing-meter guard; 28 and 23 start with a feasibility check and go "On hold" if it fails.
 
