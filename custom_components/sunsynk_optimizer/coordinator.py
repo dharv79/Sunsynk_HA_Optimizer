@@ -117,6 +117,9 @@ class OptimizerState:
     tariff_price_alert: dict[str, Any] = field(default_factory=dict)
     # "Cost of 1 kWh now" (phase 38): pence, source, cheapest_hour_today, reserve_soc.
     marginal_cost: dict[str, Any] = field(default_factory=dict)
+    # Battery capacity tracking (phase 34): date, estimate_kwh, samples,
+    # configured_kwh, pct_of_configured. Shadow: never changes battery_capacity.
+    battery_capacity_estimate: dict[str, Any] = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

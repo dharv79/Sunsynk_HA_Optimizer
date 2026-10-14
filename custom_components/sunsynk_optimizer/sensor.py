@@ -74,6 +74,7 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "overnight_drain_adjustment", "Overnight drain adjustment", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "evening_soc_adjustment", "Evening SOC adjustment", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate", entity_category=EntityCategory.DIAGNOSTIC),
+            SunsynkOptimizerSensor(coordinator, entry, "battery_capacity_estimate", "Battery capacity estimate", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
             SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
             SunsynkOptimizerSensor(coordinator, entry, "saving_session", "Saving session"),
@@ -109,6 +110,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
     def native_unit_of_measurement(self) -> str | None:
         if self._sensor_key == "marginal_cost":
             return "p/kWh"
+        if self._sensor_key == "battery_capacity_estimate":
+            return "kWh"
         return "kWh" if self._sensor_key == "spare_solar" else None
 
     @property
@@ -146,6 +149,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "marginal_cost":
             return _as_dict(state.marginal_cost).get("pence")
+
+        if self._sensor_key == "battery_capacity_estimate":
+            return _as_dict(state.battery_capacity_estimate).get("estimate_kwh")
 
         if self._sensor_key == "import_plan_end":
             plan = state.last_import_plan
@@ -224,6 +230,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 "best_window_kwh": window.get("kwh"),
                 "hours": spare.get("hours", []),
             }
+        if self._sensor_key == "battery_capacity_estimate":
+            return _as_dict(state.battery_capacity_estimate)
         if self._sensor_key == "marginal_cost":
             cost = _as_dict(state.marginal_cost)
             cheapest = _as_dict(cost.get("cheapest_hour_today"))

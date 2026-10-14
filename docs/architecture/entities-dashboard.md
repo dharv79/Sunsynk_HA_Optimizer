@@ -54,3 +54,6 @@ action:
     target: {entity_id: switch.dishwasher}
 ```
 
+### Battery capacity estimate (phase 34, 14/10/2026)
+
+Diagnostic `sensor.battery_capacity_estimate` (kWh): the measured usable capacity, with the `capacity_estimate` record as attributes. See import-plan.md.

@@ -299,6 +299,16 @@ class DataLogger:
             if r.get("type") == "peak_window_usage" and isinstance(r.get("peak_load_kwh"), (int, float))
         ]
 
+    async def async_log_capacity_estimate(self, **fields: Any) -> None:
+        """Monthly measured battery capacity (phase 34)."""
+        await self._async_append(_record("capacity_estimate", **fields))
+
+    async def async_load_snapshot_days(self, days: int) -> dict[str, dict[str, dict[str, Any]]]:
+        """{date: {"HH:MM": snapshot}} for every date with meter snapshots in the last ``days``."""
+        records = await self.hass.async_add_executor_job(self._read_recent, days)
+        dates = {r.get("date") for r in records if r.get("type") == "meter_snapshot" and r.get("date")}
+        return {date: snapshots_for_date(records, date) for date in sorted(dates)}
+
     async def async_load_meter_snapshots(self, date: str) -> dict[str, dict[str, Any]]:
         """Return {"HH:MM": snapshot} for `date` (first record per time wins)."""
         records = await self.hass.async_add_executor_job(self._read_recent, 2)
@@ -733,7 +743,7 @@ class DataLogger:
     _DEDUP_TYPES = (
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load",
-        "half_hourly_import", "half_hourly_export",
+        "half_hourly_import", "half_hourly_export", "capacity_estimate",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:

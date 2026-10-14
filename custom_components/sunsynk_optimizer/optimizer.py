@@ -149,6 +149,10 @@ from .planning import (
     solar_is_spare,
     battery_value_summary,
     no_battery_baseline,
+    CAPACITY_HISTORY_DAYS,
+    capacity_estimate,
+    capacity_low,
+    capacity_samples,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
     manual_free_event_error,
@@ -427,6 +431,8 @@ class SunsynkOptimizer:
         self.coordinator.update_state(operation_mode=self.operation_mode)
         self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
         self.unsubs.append(async_call_later(self.hass, 90, lambda _now: self._refresh_spare_solar()))
+        if not self.coordinator.state.battery_capacity_estimate:
+            self.unsubs.append(async_call_later(self.hass, 120, self._async_initial_capacity_estimate))
 
         if self._free_event_active():
             self._arm_free_event_timers(self.coordinator.state.free_event)
@@ -1534,6 +1540,8 @@ class SunsynkOptimizer:
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
             await self._guarded(self._async_send_monthly_tariff_comparison, "Monthly tariff comparison")
             await self._guarded(self._async_send_monthly_battery_value, "Monthly battery value")
+            if dt_util.now().day <= 7:
+                await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
         await self._guarded(self.async_recheck_full_charge_day, "Full-charge-day re-check")
 
@@ -2513,6 +2521,44 @@ class SunsynkOptimizer:
             f"Battery saved ~£{summary['saving_gbp']:.2f} this month{wear} ({summary['days']} days) "
             "vs the same days with no battery, 00:00–22:00 at your Flux rates.",
         )
+
+    async def _async_initial_capacity_estimate(self, _now) -> None:
+        await self._guarded(lambda: self.async_run_capacity_estimate(notify=False), "Battery capacity estimate")
+
+    async def async_run_capacity_estimate(self, notify: bool = True) -> dict[str, Any]:
+        """Measure usable capacity from recent meter snapshots (phase 34); read-only, shadow.
+
+        Logs a `capacity_estimate` record and alerts when the estimate is below
+        90% of the configured `battery_capacity`. Never changes the config.
+        """
+        days = await self.data_logger.async_load_snapshot_days(CAPACITY_HISTORY_DAYS)
+        samples = [
+            sample
+            for date, snaps in days.items()
+            for sample in capacity_samples(snaps, int(date[5:7]))
+        ]
+        estimate = capacity_estimate(samples)
+        configured = self._capacity_kwh()
+        record = {
+            "date": dt_util.now().date().isoformat(),
+            "estimate_kwh": estimate,
+            "samples": len(samples),
+            "charge_samples": sum(1 for s in samples if s["kind"] == "charge"),
+            "configured_kwh": configured,
+            "pct_of_configured": None if estimate is None else round(estimate / configured * 100, 1),
+        }
+        self.coordinator.update_state(touch=False, battery_capacity_estimate=record)
+        if not notify:
+            return record
+        await self.data_logger.async_log_capacity_estimate(**record)
+        if capacity_low(estimate, configured):
+            await self.async_notify(
+                "🔋 Sunsynk: battery capacity low",
+                f"Measured usable capacity ~{estimate} kWh is {record['pct_of_configured']}% of the configured "
+                f"{configured:g} kWh ({len(samples)} charge/discharge samples, last {CAPACITY_HISTORY_DAYS} days). "
+                "Check the battery, or lower Battery capacity in Configure so plans use the real figure.",
+            )
+        return record
 
     async def _async_send_monthly_tariff_comparison(self) -> None:
         """First Sunday of the month: cost last month's logged usage under Flux and the alternatives.

@@ -174,3 +174,24 @@ In a run of 2 or more days, `multi_day_shadow` records what would change and log
 - **16:00 peak export:** sells no lower than `multi_day_peak_floor_soc`. That is the reserve plus tomorrow's 05:00–19:00 shortfall, where shortfall = plan load × 14 h − tomorrow's solar − overnight refill (plan charge rate × 3 h × efficiency), clamped to [reserve, 100]. It holds back only what the cheap window can't put back, since a sale at peak that is refilled off-peak still pays.
 
 With a single low day or a missing forecast, nothing is logged and behaviour is unchanged. A live option comes after the shadow log has been reviewed. Tests: `test_low_solar_run`, `test_multi_day_peak_floor_soc`, `test_multi_day_shadow`.
+
+## Battery capacity tracking, shadow (14/10/2026, phase 34)
+
+`planning.capacity_samples` takes one day's meter snapshots and gives at most two samples, each in kWh per 100% SOC:
+- **Charge night (02:00→05:00):** (grid in − load − export) × 0.92 over the SOC gained.
+- **Evening discharge (19:00→22:00):** (load − grid in + export) / 0.92 over the SOC lost. October–March only, so no solar is mixed in.
+- **Why not 19:00→02:00:** the meters reset at midnight, so the 22:00–24:00 hours are not covered.
+
+A swing under 30% SOC or any missing meter gives no sample. Away days count, because capacity is a physical property.
+
+`planning.capacity_estimate` returns the median of the last 60 days' samples, needing at least 5, otherwise `None`.
+
+`async_run_capacity_estimate` runs on the first Sunday of the month at 18:00. It:
+- logs a `capacity_estimate` record (deduped per day);
+- updates `state.battery_capacity_estimate`;
+- alerts "🔋 Sunsynk: battery capacity low" when the estimate is below 90% of the configured `battery_capacity` (`planning.capacity_low`).
+
+On startup with no stored estimate it fills the state without logging or alerting.
+
+Exposed as the diagnostic sensor `sensor.battery_capacity_estimate` (kWh; attributes: samples, configured_kwh, pct_of_configured). Shadow: it never changes `battery_capacity`; that is an option for later. Tests: `test_capacity_*` in `tests/test_kpis.py`.
+

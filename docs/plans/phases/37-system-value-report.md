@@ -1,6 +1,6 @@
 # Phase 37 — Value-of-the-system report
 
-**Status:** Done, merged (PR #65). **Size:** S, ~30k actual. **Origin:** improvement list 3, 14/10/2026 (item 7).
+**Status:** Done, merged (487ba83, PR #65). **Size:** S, ~30k actual. **Origin:** improvement list 3, 14/10/2026 (item 7).
 
 ## Goal
 
