@@ -1,6 +1,6 @@
 # Phase 37 — Value-of-the-system report
 
-**Status:** Planned, not built. **Size:** S, ~30-45k est. **Origin:** improvement list 3, 14/10/2026 (item 7).
+**Status:** Done, merged (PR #65). **Size:** S, ~30k actual. **Origin:** improvement list 3, 14/10/2026 (item 7).
 
 ## Goal
 
@@ -15,3 +15,7 @@ Show monthly what the battery + optimiser earn versus no battery.
 ## Acceptance
 
 - Tests: baseline maths per band, missing snapshot excluded, wear subtraction, no cost data → `None`.
+
+## As built
+
+Actual is metered from the same snapshots (00:00–22:00), not the Octopus `daily_cost`, so both sides cover the same hours at the same prices. The weekly line is the debug-stream JSON (`week_battery_saving_gbp`); the monthly line is a separate first-Sunday notification.

@@ -147,6 +147,8 @@ from .planning import (
     cheapest_hour_today,
     marginal_cost_pence,
     solar_is_spare,
+    battery_value_summary,
+    no_battery_baseline,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
     manual_free_event_error,
@@ -1531,6 +1533,7 @@ class SunsynkOptimizer:
             await self._guarded(self.async_choose_best_full_charge_day, "Full-charge-day selection")
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
             await self._guarded(self._async_send_monthly_tariff_comparison, "Monthly tariff comparison")
+            await self._guarded(self._async_send_monthly_battery_value, "Monthly battery value")
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
         await self._guarded(self.async_recheck_full_charge_day, "Full-charge-day re-check")
 
@@ -1588,6 +1591,8 @@ class SunsynkOptimizer:
             "week_peak_export_kwh": _sum("peak_export_kwh"),
             "week_peak_export_gain_gbp": _sum("peak_export_gain_gbp"),
             "peak_export_live": bool(self.cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)),
+            # Phase 37: days behind week_battery_saving_gbp.
+            "battery_saving_days": battery_value_summary(paired_days)["days"],
         }
 
 
@@ -2002,6 +2007,11 @@ class SunsynkOptimizer:
             "price_source": price_source(sources, *TARIFF_BANDS),
             "evening_reserve_soc": self._evening_reserve_soc(),
             "wear_cost_p": self._wear_pence(),
+            # Phase 37: what the day cost with vs without the battery.
+            **no_battery_baseline(
+                snapshots, prices, flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"),
+                self._capacity_kwh(cfg), self._wear_pence(),
+            ),
         }
         await self.data_logger.async_log_day_kpis(**record)
         return {"type": "day_kpis", **record}
@@ -2476,6 +2486,33 @@ class SunsynkOptimizer:
                 return {}
             await self.hass.async_add_executor_job(_write, results)
         return agile_prices_by_date(results, dt_util.DEFAULT_TIME_ZONE)
+
+    async def _async_send_monthly_battery_value(self) -> None:
+        """First Sunday of the month: what the battery + optimiser saved last month vs no battery (phase 37)."""
+        today = dt_util.now().date()
+        if today.day > 7:
+            return
+        month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        days = [
+            d for d in await self.data_logger.async_load_paired_days(days=40)
+            if str(d.get("date", "")).startswith(month)
+        ]
+        summary = battery_value_summary(days)
+        if summary["saving_gbp"] is None:
+            return  # No day had complete snapshots and prices.
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify(
+                "Sunsynk Monthly Battery Value",
+                json.dumps({"type": "monthly_battery_value", "month": month, **summary}),
+                target=data_report_target,
+            )
+        wear = " after battery wear" if self._wear_pence() is not None else ""
+        await self.async_notify(
+            "🔋 Sunsynk: battery value for " + month,
+            f"Battery saved ~£{summary['saving_gbp']:.2f} this month{wear} ({summary['days']} days) "
+            "vs the same days with no battery, 00:00–22:00 at your Flux rates.",
+        )
 
     async def _async_send_monthly_tariff_comparison(self) -> None:
         """First Sunday of the month: cost last month's logged usage under Flux and the alternatives.

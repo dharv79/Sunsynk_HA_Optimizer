@@ -1,6 +1,6 @@
 # Phase 38 — "Cost of 1 kWh now" sensor
 
-**Status:** Done, merged (PR #64). **Size:** S, ~30k actual. **Origin:** improvement list 3, 14/10/2026 (item 8).
+**Status:** Done, merged (f790c19, PR #64). **Size:** S, ~30k actual. **Origin:** improvement list 3, 14/10/2026 (item 8).
 
 ## Goal
 
