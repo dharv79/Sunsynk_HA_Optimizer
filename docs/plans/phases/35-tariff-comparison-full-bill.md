@@ -1,6 +1,6 @@
 # Phase 35 — Fuller tariff comparison (standing charges, VAT, Agile/Intelligent)
 
-**Status:** Planned, not built. **Size:** M, ~50-80k est. **Origin:** improvement list 3, 14/10/2026 (item 5; completes phase 28's deferred part).
+**Status:** Done, merged (PR #60); Agile fetch unverified live. **Size:** M, ~55k actual. **Origin:** improvement list 3, 14/10/2026 (item 5; completes phase 28's deferred part).
 
 ## Goal
 

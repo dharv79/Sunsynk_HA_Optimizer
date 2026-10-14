@@ -23,6 +23,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 | `data_logger.py` | Monthly JSONL logging, pairing, adaptive `compute_*` corrections |
 | `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST, inverter settings read/write |
 | `flux_helpers.py` | `fluxProducts` payload, `merge_entry_data`, peak-price helper |
+| `octopus_public.py` | Octopus public API (no key): historic Agile rates for the tariff comparison |
 | `sensor.py` / `binary_sensor.py` / `button.py` / `switch.py` / `datetime.py` | Entities (event-driven, no polling) |
 | `dashboard_installer.py` | Generates Lovelace YAML |
 | `tools/backtest.py` (repo root) | Offline HA-free replay of logged nights with alternative parameters |
