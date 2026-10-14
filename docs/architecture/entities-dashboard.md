@@ -24,3 +24,7 @@ All entities extend `CoordinatorEntity` and read state from `coordinator.state` 
 ### Overnight baseload alert (phase 26, 13/10/2026)
 
 At 05:00 (after the meter snapshot) the day-load meter, which resets at midnight, gives the 00:00–05:00 house load. It is logged as `{"type":"overnight_load","date","load_kwh","away"}` (dedup per day). `planning.baseload_anomaly` compares it with the median of prior **home** nights (≥7 needed; away nights and `None`/≤0 readings ignored) and alerts when tonight ≥ 1.5× median and ≥ 1.0 kWh above it: "🔋 Sunsynk: overnight load high". Option `baseload_alert` (default on) disables the notification; logging continues. Read-only, so also runs in monitor mode. Missing meter → nothing logged, no alert.
+
+### Daytime load spike alert (phase 40, 14/10/2026)
+
+On the 30-minute tick between 05:00 and 16:00, `grid_pac` is sampled into an unpersisted per-day list. `planning.daytime_import_anomaly` alerts when the last 2 readings are both present and above 1.5 kW (0.75 kW in away mode) while SOC is above `BATTERY_LOW_SOC` + 5. The alert is "🔋 Sunsynk: daytime grid import", sent at most once a day. Samples reset while a free event or saving session holds the slots, or after peak cover pushed a top-up. Shares the `baseload_alert` option. Read-only, so also runs in monitor mode. Missing readings never alert. Tests: `test_daytime_import_*` in `tests/test_kpis.py`.

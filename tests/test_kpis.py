@@ -409,3 +409,30 @@ def test_baseload_ignores_away_and_none(planning):
     assert planning.baseload_anomaly(hist, 6.0) is None
     assert planning.baseload_anomaly(hist + _nights(2.2), 6.0)["usual_kwh"] == 2.2
     assert planning.baseload_anomaly(hist + _nights(2.2), None) is None
+
+
+# ---- Phase 40: daytime load spike alert ----
+
+
+def test_daytime_import_sustained_alerts(planning):
+    out = planning.daytime_import_anomaly([1800.0, 2100.0], 60)
+    assert out == {"grid_w": 1800, "soc": 60, "checks": 2}
+
+
+def test_daytime_import_single_spike_no_alert(planning):
+    assert planning.daytime_import_anomaly([200.0, 2500.0], 60) is None
+    assert planning.daytime_import_anomaly([2500.0], 60) is None
+
+
+def test_daytime_import_low_soc_expected(planning):
+    assert planning.daytime_import_anomaly([2000.0, 2000.0], planning.BATTERY_LOW_SOC + 5) is None
+
+
+def test_daytime_import_missing_sensors(planning):
+    assert planning.daytime_import_anomaly([None, 2000.0], 60) is None
+    assert planning.daytime_import_anomaly([2000.0, 2000.0], None) is None
+
+
+def test_daytime_import_away_threshold(planning):
+    assert planning.daytime_import_anomaly([900.0, 900.0], 60) is None
+    assert planning.daytime_import_anomaly([900.0, 900.0], 60, planning.DAYTIME_IMPORT_AWAY_THRESHOLD_W)
