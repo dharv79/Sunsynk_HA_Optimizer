@@ -608,3 +608,24 @@ def test_trim_never_at_night_or_below_tonights_charge(planning):
     assert planning.trim_target_soc(95, 73, minutes=11 * 60, plan_target_soc=70) == 82
     # Peak window sells at the peak rate, so tonight's target no longer floors it.
     assert planning.trim_target_soc(95, 73, minutes=17 * 60, plan_target_soc=100) == 82
+
+
+def test_restore_keeps_an_active_export_pause(planning):
+    assert planning.restore_flux2_slot(True, 18 * 60)["targetSoc"] == 100
+    assert planning.restore_flux2_slot(True, 19 * 60)["targetSoc"] == 85
+    assert planning.restore_flux2_slot(False, 17 * 60)["targetSoc"] == 85
+    # Returns a copy: callers can't mutate the shared default.
+    planning.restore_flux2_slot(False, 0)["targetSoc"] = 1
+    assert planning.DEFAULT_FLUX2_SLOT["targetSoc"] == 85
+
+
+def test_saving_session_later_today(planning):
+    from datetime import datetime, timezone
+    now = datetime(2026, 10, 14, 15, 0, tzinfo=timezone.utc)
+    later = {"phase": "scheduled", "session_start": "2026-10-14T17:00:00+00:00"}
+    assert planning.saving_session_later_today(later, now)
+    assert not planning.saving_session_later_today({**later, "phase": "exporting"}, now)
+    assert not planning.saving_session_later_today({**later, "session_start": "2026-10-15T17:00:00+00:00"}, now)
+    assert not planning.saving_session_later_today({**later, "session_start": "2026-10-14T14:00:00+00:00"}, now)
+    assert not planning.saving_session_later_today({"phase": "scheduled"}, now)
+    assert not planning.saving_session_later_today({}, now)

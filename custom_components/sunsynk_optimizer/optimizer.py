@@ -178,6 +178,10 @@ from .planning import (
     synthetic_hourly_profile,
     trailing_week,
     trim_target_soc,
+    DEFAULT_FLUX2_SLOT,
+    EXPORT_PAUSE_FLUX2_SLOT,
+    restore_flux2_slot,
+    saving_session_later_today,
     week_kpis,
     weighted_forecast_correction,
     window_grid_kwh,
@@ -981,7 +985,7 @@ class SunsynkOptimizer:
 
         payload = {
             "flux_1": {"startTime": "02:00", "endTime": flux1_end, "targetSoc": target_soc},
-            "flux_2": {"startTime": "16:00", "endTime": "16:15", "targetSoc": 85},
+            "flux_2": dict(DEFAULT_FLUX2_SLOT),
         }
         # A free event or saving session holds Flux 1/2 for its own windows; the
         # plan is still computed and logged so it's ready to push the moment the
@@ -1253,7 +1257,7 @@ class SunsynkOptimizer:
                 trigger_desc = f"Grid draw is {round(grid_pac)} W during the 16:00–19:00 export window"
             api_ok = await self._async_push_flux2_action(
                 "disable_evening_export",
-                {"startTime": "16:00", "endTime": "16:15", "targetSoc": 100},
+                dict(EXPORT_PAUSE_FLUX2_SLOT),
                 base_action,
                 reason,
                 evening_export_disabled=True,
@@ -1275,6 +1279,7 @@ class SunsynkOptimizer:
         if (
             not is_full_day and soc > 85 and trim_target is not None
             and not self._peak_export_holds_flux2(now_local) and self._cooldown_ok()
+            and not saving_session_later_today(self.coordinator.state.saving_session, now_local)
         ):
             self._mark_trim()
             api_ok = await self._async_push_flux2_action(
@@ -1369,17 +1374,19 @@ class SunsynkOptimizer:
     async def _async_initial_refresh(self, _now) -> None:
         """Populate initial state soon after startup.
 
-        Skips the one-shot plan if a reload lands mid-evening while export is
-        paused: the plan re-pushes flux_2 to its default (targetSoc 85) and
-        would re-enable export at the worst moment. The periodic Flux 2 check
-        keeps the pause and the nightly 01:55 plan re-plans normally.
+        Skips the one-shot plan if a reload lands in 16:00-19:00: the plan
+        re-pushes flux_2 to its default (targetSoc 85), which would undo an
+        export pause or a live peak export (unpersisted, so unknown after a
+        reload). The nightly 01:55 plan re-plans normally.
         """
         now = dt_util.now()
         if self._slots_held():
             _LOGGER.info("Skipping initial import plan — %s holds the Flux slots", self._slots_held_by())
             return
-        if self.coordinator.state.evening_export_disabled and 16 <= now.hour < 19:
-            _LOGGER.info("Skipping initial import plan — evening export pause active")
+        if 16 <= now.hour < 19:
+            # Its default Flux 2 slot would undo an export pause or a live peak
+            # export (unpersisted, so unknown after a reload); 01:55 re-plans.
+            _LOGGER.info("Skipping initial import plan — inside the 16:00-19:00 peak window")
             return
         if (
             self._essential_state(self.battery_soc_entity) is None
@@ -1856,6 +1863,8 @@ class SunsynkOptimizer:
         if self._slots_held():
             return
         await self._async_peak_cover_end()
+        if saving_session_later_today(self.coordinator.state.saving_session, dt_util.now()):
+            return  # the session exports this energy at export rate + reward
         soc = self._essential_state(self.battery_soc_entity)
         if soc is None:
             return
@@ -1978,8 +1987,15 @@ class SunsynkOptimizer:
                     return
                 now_local = dt_util.now()
                 trim_target, reserve = self._trim_target(current_soc, now_local)
-                # A live peak export (phase 17) already sells lower; don't replace it.
-                if trim_target is None or self._peak_export_holds_flux2(now_local):
+                # Don't replace a live peak export (it already sells lower), an export
+                # pause, an event's slots, or sell what a saving session later today needs.
+                if (
+                    trim_target is None
+                    or self._peak_export_holds_flux2(now_local)
+                    or self.coordinator.state.evening_export_disabled
+                    or self._slots_held()
+                    or saving_session_later_today(self.coordinator.state.saving_session, now_local)
+                ):
                     return
                 api_ok = await self._async_push_flux2_action(
                     "full_day_trim_to_82",
@@ -2493,9 +2509,14 @@ class SunsynkOptimizer:
         )
 
     async def _async_restore_normal_plan(self) -> None:
-        """Re-push the latest computed Flux 1 plan plus the standard Flux 2 slot."""
+        """Re-push the latest computed Flux 1 plan plus the standard Flux 2 slot (or an active export pause)."""
         plan = self.coordinator.state.last_import_plan
-        payload: dict[str, Any] = {"flux_2": {"startTime": "16:00", "endTime": "16:15", "targetSoc": 85}}
+        now = dt_util.now()
+        payload: dict[str, Any] = {
+            "flux_2": restore_flux2_slot(
+                bool(self.coordinator.state.evening_export_disabled), now.hour * 60 + now.minute
+            )
+        }
         if isinstance(plan, dict) and isinstance(plan.get("payload"), dict) and plan["payload"].get("flux_1"):
             payload["flux_1"] = plan["payload"]["flux_1"]
         await self.async_push_flux_override(payload)

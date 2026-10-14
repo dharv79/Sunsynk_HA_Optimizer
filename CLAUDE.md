@@ -36,7 +36,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 4. Mutate state only via `coordinator.update_state` — `coordinator.py`.
 5. Push only via `_async_post_with_status` (settings: `_async_write_setting`); gate notification text on its bool — `optimizer.py`.
 6. Scheduled callbacks run through `_guarded` — `optimizer.py`.
-7. Reload one-shot skipped 16:00–19:00 while `evening_export_disabled`, and always while a free event or saving session holds the slots (`_slots_held`) — `optimizer.py`.
+7. Reload one-shot skipped 16:00–19:00, and always while a free event or saving session holds the slots (`_slots_held`); post-event restore keeps an active export pause (`planning.restore_flux2_slot`) — `optimizer.py`.
 8. Low-solar decisions use `min(raw, corrected)` forecast — `planning.select_target_soc`.
 9. Drain nights require `initial_soc < target_soc` — `data_logger._is_drain_night`.
 10. Plan fields read back by `_pair_records` must be in `_IMPORT_PLAN_FIELDS` — `data_logger.py`.
