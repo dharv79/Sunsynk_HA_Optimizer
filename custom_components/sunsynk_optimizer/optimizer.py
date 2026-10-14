@@ -139,6 +139,8 @@ from .planning import (
     WEEK_HISTORY_DAYS,
     CHARGE_WATCHDOG_MINUTES,
     CHARGE_WATCHDOG_RECHECK_MINUTES,
+    PLAN_RETRY_INTERVAL_MINUTES,
+    plan_retry_due,
     apply_soc_adjustments,
     charge_efficiency,
     charge_progress_ok,
@@ -274,6 +276,9 @@ class SunsynkOptimizer:
         # Charge watchdog (phase 22) 15-minute re-check handle. Not persisted:
         # a restart mid-check just skips that night's re-check.
         self._charge_watchdog_recheck = None
+        # Phase 32 failed-plan-push retry handle. Not persisted: a restart runs
+        # the startup plan push instead.
+        self._plan_retry = None
         # Today's 16:00 peak export decision (phase 17). Not persisted: after a
         # restart mid-window a trim may replace a live export window, and the
         # 22:00 bundle omits the line (the JSONL record survives).
@@ -385,6 +390,7 @@ class SunsynkOptimizer:
         if self._charge_watchdog_recheck:
             self._charge_watchdog_recheck()
             self._charge_watchdog_recheck = None
+        self._cancel_plan_retry()
         if self.pending_full_trim_cancel:
             self.pending_full_trim_cancel()
             self.pending_full_trim_cancel = None
@@ -827,6 +833,8 @@ class SunsynkOptimizer:
                 last_import_plan={"logic_branch": "monitor_only", "source": source},
             )
             return
+        if not dry_run:
+            self._cancel_plan_retry()  # a fresh plan supersedes any pending retry
 
         # Pre-flight: battery SOC is essential. If missing we cannot compute
         # energy_needed = (target - soc), so skip rather than default soc=0
@@ -992,6 +1000,7 @@ class SunsynkOptimizer:
         # event ends (_async_restore_normal_plan reads it back).
         held_by = None if dry_run else self._slots_held_by()
         api_ok = None if (dry_run or held_by) else await self.async_push_flux_override(payload)
+        retrying = api_ok is False and self._arm_plan_retry(payload, source, now, attempts=0)
 
         plan_state = {
             "date": now.date().isoformat(),
@@ -1033,6 +1042,7 @@ class SunsynkOptimizer:
             "payload": payload,
             "source": source,
             "api_ok": api_ok,
+            "retrying": retrying,
             "held_by_free_event": held_by == "free_event",
             "held_by_saving_session": held_by == "saving_session",
             "saving_session_boost": saving_session_boost,
@@ -1088,7 +1098,51 @@ class SunsynkOptimizer:
         )
         await self._async_notify_import_plan(plan_state)
 
-    async def _async_skip_plan(self, msg: str) -> None:
+    def _cancel_plan_retry(self) -> None:
+        if self._plan_retry:
+            self._plan_retry()
+            self._plan_retry = None
+
+    def _arm_plan_retry(self, payload: dict[str, Any], source: str, now, attempts: int) -> bool:
+        """Arm the next failed-plan-push retry (phase 32); False when none is due."""
+        if not plan_retry_due(now.hour * 60 + now.minute, attempts):
+            return False
+        self._plan_retry = async_call_later(
+            self.hass,
+            PLAN_RETRY_INTERVAL_MINUTES * 60,
+            partial(self._async_plan_retry, payload, source, attempts + 1),
+        )
+        return True
+
+    async def _async_plan_retry(self, payload: dict[str, Any], source: str, attempt: int, _now) -> None:
+        self._plan_retry = None
+        await self._guarded(lambda: self.async_run_plan_retry(payload, source, attempt), "Import plan retry")
+
+    async def async_run_plan_retry(self, payload: dict[str, Any], source: str, attempt: int) -> None:
+        """Re-push a failed overnight plan; stop on success, held slots or monitor mode."""
+        if self.operation_mode == "monitor" or self._slots_held():
+            return
+        now = dt_util.now()
+        if await self.async_push_flux_override(payload):
+            state = self.coordinator.state
+            updates: dict[str, Any] = {"last_error": None}
+            if isinstance(state.last_import_plan, dict) and state.last_import_plan.get("payload") == payload:
+                updates["last_import_plan"] = {**state.last_import_plan, "api_ok": True, "retrying": False}
+            plan = state.nightly_import_plan
+            if source != STARTUP_PLAN_SOURCE and isinstance(plan, dict) and plan.get("payload") == payload:
+                updates["nightly_import_plan"] = {**plan, "api_ok": True, "retrying": False}
+            self.coordinator.update_state(**updates)
+            flux1 = payload.get("flux_1") or {}
+            await self.async_notify(
+                f"🔋 Sunsynk: import plan set (retry {attempt})",
+                f"Import: {flux1.get('startTime')} → {flux1.get('endTime')} target {flux1.get('targetSoc')}%.",
+            )
+            return
+        if not self._arm_plan_retry(payload, source, now, attempt):
+            await self.async_notify(
+                "⚠️ Sunsynk: import plan NOT applied",
+                f"Inverter NOT updated after {attempt} retries; tonight's charge runs on the existing settings.",
+            )
         _LOGGER.warning(msg)
         self.coordinator.update_state(last_error=msg)
         await self.async_notify("⚠️ Sunsynk: plan skipped", msg)
@@ -1135,7 +1189,12 @@ class SunsynkOptimizer:
             api_note = " A saving session holds the Flux slots; this plan pushes when it ends."
         else:
             title = "🔋 Sunsynk: import plan set" if api_ok else "⚠️ Sunsynk: import plan NOT applied"
-            api_note = "" if api_ok else " Inverter NOT updated; will retry next cycle."
+            if api_ok:
+                api_note = ""
+            elif plan.get("retrying"):
+                api_note = f" Inverter NOT updated; retrying every {PLAN_RETRY_INTERVAL_MINUTES} min."
+            else:
+                api_note = " Inverter NOT updated; will retry next cycle."
         full_day_note = " — full-charge day" if plan["is_full_day"] else ""
         if plan.get("saving_session_boost"):
             full_day_note += " — saving session today"

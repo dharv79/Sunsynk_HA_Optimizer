@@ -1,6 +1,6 @@
 # Phase 32 — Retry a failed overnight plan push
 
-**Status:** Planned, not built. **Size:** XS, ~15-25k est. **Origin:** improvement list 3, 14/10/2026 (item 2).
+**Status:** Done, merged. **Size:** XS, ~20k actual. **Origin:** improvement list 3, 14/10/2026 (item 2).
 
 ## Goal
 

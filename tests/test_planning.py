@@ -635,3 +635,18 @@ def test_battery_limits_bottom_20_low_25(planning):
     assert planning.BATTERY_BOTTOM_SOC == 20 and planning.BATTERY_LOW_SOC == 25
     assert planning.KPI_RESERVE_SOC == planning.SAVING_SESSION_MIN_FLOOR_SOC == 20
     assert planning.PEAK_COVER_FLOOR_SOC == 25
+
+
+@pytest.mark.parametrize(
+    "now_minutes, attempts, due",
+    [
+        (1 * 60 + 55, 0, True),  # 01:55 failure → retry at 02:05
+        (2 * 60 + 25, 3, True),  # 02:25 → 02:35, still inside the window
+        (2 * 60 + 35, 4, False),  # 02:45 retry would be past 02:40
+        (2 * 60 + 5, 5, False),  # attempt cap
+        (14 * 60, 0, False),  # daytime startup push failure: no overnight retry
+        (1 * 60, 0, False),  # 01:10 is before the window
+    ],
+)
+def test_plan_retry_due(planning, now_minutes, attempts, due):
+    assert planning.plan_retry_due(now_minutes, attempts) is due

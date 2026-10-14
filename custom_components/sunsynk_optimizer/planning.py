@@ -310,6 +310,25 @@ def hhmm_to_minutes(hhmm: str) -> int | None:
 
 CHARGE_WATCHDOG_MINUTES = 2 * 60 + 20  # 20 min into the 02:00 import window
 CHARGE_WATCHDOG_RECHECK_MINUTES = 15
+
+# Phase 32: a failed overnight plan push is retried every 10 min while the
+# retry still lands inside the cheap charge's useful start (01:30-02:40).
+PLAN_RETRY_INTERVAL_MINUTES = 10
+PLAN_RETRY_FROM_MINUTES = 1 * 60 + 30
+PLAN_RETRY_UNTIL_MINUTES = 2 * 60 + 40
+PLAN_RETRY_MAX_ATTEMPTS = 5
+
+
+def plan_retry_due(now_minutes: int, attempts: int) -> bool:
+    """Whether to arm another plan-push retry PLAN_RETRY_INTERVAL_MINUTES from now.
+
+    ``attempts`` counts retries already made (0 after the first failed push).
+    """
+    next_minutes = now_minutes + PLAN_RETRY_INTERVAL_MINUTES
+    return (
+        attempts < PLAN_RETRY_MAX_ATTEMPTS
+        and PLAN_RETRY_FROM_MINUTES <= next_minutes <= PLAN_RETRY_UNTIL_MINUTES
+    )
 # Progress counts as "ok" once SOC has gained this share of the expected rise
 # (the charge ramps up and house load eats into it), with a 1% floor so SOC
 # rounding alone never passes; or while grid import is at least this share of
