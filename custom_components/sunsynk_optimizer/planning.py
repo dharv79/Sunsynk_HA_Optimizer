@@ -55,9 +55,15 @@ def forecast_band(forecast_kwh: float) -> str:
     return "shoulder"
 
 
+# Battery limits: the inverter stops discharging at the bottom and starts slowing
+# discharge at the low mark, so plans size above the bottom and aim to stay above low.
+BATTERY_BOTTOM_SOC = 20
+BATTERY_LOW_SOC = 25
+
+
 def bridge_soc(energy_kwh: float, battery_capacity_kwh: float) -> int:
-    """SOC% needed to cover `energy_kwh` of load on top of a 20% floor, clamped 30-100."""
-    return max(30, min(100, int(20 + energy_kwh / battery_capacity_kwh * 100)))
+    """SOC% needed to cover `energy_kwh` of load on top of the battery bottom, clamped 30-100."""
+    return max(30, min(100, int(BATTERY_BOTTOM_SOC + energy_kwh / battery_capacity_kwh * 100)))
 
 
 def walk_bridge_gap(
@@ -170,10 +176,10 @@ def select_target_soc(
 
 
 def apply_soc_adjustments(target_soc: int, drain_adjustment: int, evening_adjustment: int) -> int:
-    """Add the drain buffer and evening nudge, keeping the estimated 06:00 SOC >= 25%."""
-    target = max(20, min(100, target_soc + drain_adjustment + evening_adjustment))
-    if drain_adjustment > 0 and target - drain_adjustment < 25:
-        target = min(100, 25 + drain_adjustment)
+    """Add the drain buffer and evening nudge, keeping the estimated 06:00 SOC above the low mark."""
+    target = max(BATTERY_BOTTOM_SOC, min(100, target_soc + drain_adjustment + evening_adjustment))
+    if drain_adjustment > 0 and target - drain_adjustment < BATTERY_LOW_SOC:
+        target = min(100, BATTERY_LOW_SOC + drain_adjustment)
     return target
 
 
@@ -540,7 +546,7 @@ def resolve_load_kw(config_kw: float, learned_kw: float | None) -> tuple[float, 
 # Phase 14: cumulative daily-meter snapshots at the Flux band edges. The
 # SolarSynkV3 daily totals reset at midnight, so 22:00 closes the KPI day
 # (22:00-24:00 is not covered, same as day_actuals).
-KPI_RESERVE_SOC = 20  # same floor as bridge_soc
+KPI_RESERVE_SOC = BATTERY_BOTTOM_SOC
 KPI_LATE_LOAD_HOURS = 4.0  # 22:00 → next 02:00 charge
 DAY_KPI_FIELDS = (
     "grid_import_offpeak_kwh",
@@ -812,7 +818,7 @@ def peak_export_plan(
 
 # Phase 30: peak cover — make sure the battery reaches 16:00 with enough charge
 # to run the house through 16:00-19:00, topping up at the (cheaper) day rate.
-PEAK_COVER_FLOOR_SOC = 25  # the battery's own low-battery limit
+PEAK_COVER_FLOOR_SOC = BATTERY_LOW_SOC  # full-power discharge through the peak
 PEAK_COVER_MARGIN = 1.1
 PEAK_COVER_MIN_SHORTFALL_SOC = 3
 PEAK_COVER_LEAD_MINUTES = 45  # start this long before the charge needs to begin
