@@ -28,3 +28,29 @@ At 05:00 (after the meter snapshot) the day-load meter, which resets at midnight
 ### Daytime load spike alert (phase 40, 14/10/2026)
 
 On the 30-minute tick between 05:00 and 16:00, `grid_pac` is sampled into an unpersisted per-day list. `planning.daytime_import_anomaly` alerts when the last 2 readings are both present and above 1.5 kW (0.75 kW in away mode) while SOC is above `BATTERY_LOW_SOC` + 5. The alert is "🔋 Sunsynk: daytime grid import", sent at most once a day. Samples reset while a free event or saving session holds the slots, or after peak cover pushed a top-up. Shares the `baseload_alert` option. Read-only, so also runs in monitor mode. Missing readings never alert. Tests: `test_daytime_import_*` in `tests/test_kpis.py`.
+
+### Cost of 1 kWh now (phase 38, 14/10/2026)
+
+`sensor.cost_of_1_kwh_now` (p/kWh) is what using 1 kWh right now costs. It is refreshed on the 30-minute tick and on every battery SOC change, and state is written only when the result changes. `planning.marginal_cost_pence` picks the source:
+- **solar**: exporting more than 100 W and PV power covers the export. Cost = the export price the kWh displaces.
+- **battery**: SOC above the reserve needed to cover the house from now (or 16:00) to 02:00 (`evening_reserve_soc` with those hours). Cost = off-peak price / 0.85 round-trip + wear (phase 24), or the current export price if higher, since that kWh could have been sold.
+- **grid**: otherwise, and always in 02:00–05:00. Cost = the import band price (Octopus rates first, then `charges`).
+
+A missing price gives `None`, never 0p. Attributes: `source`, `cheapest_hour_today` (with `cheapest_hour_pence` / `cheapest_hour_source`), `reserve_soc`. `planning.cheapest_hour_today` scans the remaining whole hours: spare-solar hours (from `sensor.spare_solar_today`) are priced at export, others at their import band; the earliest of equal minimums wins. Read-only. Shown on the dashboard under the spare solar card. Tests: `test_marginal_cost_*`, `test_solar_is_spare`, `test_cheapest_hour_today` in `tests/test_kpis.py`.
+
+Example automation (run the dishwasher when cheap):
+
+```yaml
+trigger:
+  - platform: numeric_state
+    entity_id: sensor.cost_of_1_kwh_now
+    below: 16
+condition:
+  - condition: time
+    after: "08:00"
+    before: "20:00"
+action:
+  - service: switch.turn_on
+    target: {entity_id: switch.dishwasher}
+```
+
