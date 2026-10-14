@@ -1626,3 +1626,30 @@ def grid_current_drift(expected: float | None, actual: Any) -> list[dict[str, An
     if expected is None or actual_a is None or abs(actual_a - expected) < GRID_CURRENT_DRIFT_TOLERANCE_A:
         return []
     return [{"slot": None, "field": "grid_charge_current_a", "expected": expected, "actual": actual_a}]
+
+
+# --------------------------------------------------------------------------- #
+# Tariff price-change alert (phase 33)                                         #
+# --------------------------------------------------------------------------- #
+
+TARIFF_PRICE_TOLERANCE_PENCE = 0.05
+
+
+def tariff_price_changes(
+    configured: dict[str, float | None],
+    octopus: dict[str, float | None],
+    tolerance: float = TARIFF_PRICE_TOLERANCE_PENCE,
+) -> list[tuple[str, float, float]]:
+    """(band, configured p, Octopus p) for each band whose prices disagree.
+
+    A band missing or None on either side is ignored, so an unavailable
+    Octopus entity never reads as a change to 0p.
+    """
+    changes = []
+    for band, mine in configured.items():
+        theirs = octopus.get(band)
+        if mine is None or theirs is None:
+            continue
+        if abs(theirs - mine) > tolerance:
+            changes.append((band, round(mine, 2), round(theirs, 2)))
+    return changes
