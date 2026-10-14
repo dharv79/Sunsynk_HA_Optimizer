@@ -155,3 +155,7 @@ Catches a night where the Flux 1 charge silently fails (cloud write lost, invert
 **Restore.** 05:00 timer (re-armed on startup), retried by the 30-minute check until it sticks; the first failure notifies "⚠️ Sunsynk: grid charge current NOT restored". Runs even in monitor mode (it only undoes this integration's own write).
 
 **Watchdog.** On a live gentle night the phase 22 watchdog expects `gentle_charge_rate_kw` instead of `used_charge_rate_kw` (`_watchdog_rate_kw`), so slow-by-design charging isn't flagged as stalled.
+
+## Battery limits (14/10/2026)
+
+`planning.BATTERY_BOTTOM_SOC = 20` (the inverter stops discharging) and `BATTERY_LOW_SOC = 25` (it starts slowing discharge). The bottom is the floor for the solar bridge, the evening reserve / KPI reserve and the saving-session minimum floor. The low mark is the target for the estimated 06:00 SOC (`apply_soc_adjustments`) and the peak-cover floor, so the house gets full-power discharge through the morning and the 16:00–19:00 peak. Values unchanged; previously literals.

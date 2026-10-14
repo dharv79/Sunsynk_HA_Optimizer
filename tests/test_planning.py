@@ -629,3 +629,9 @@ def test_saving_session_later_today(planning):
     assert not planning.saving_session_later_today({**later, "session_start": "2026-10-14T14:00:00+00:00"}, now)
     assert not planning.saving_session_later_today({"phase": "scheduled"}, now)
     assert not planning.saving_session_later_today({}, now)
+
+
+def test_battery_limits_bottom_20_low_25(planning):
+    assert planning.BATTERY_BOTTOM_SOC == 20 and planning.BATTERY_LOW_SOC == 25
+    assert planning.KPI_RESERVE_SOC == planning.SAVING_SESSION_MIN_FLOOR_SOC == 20
+    assert planning.PEAK_COVER_FLOOR_SOC == 25
