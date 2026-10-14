@@ -1,6 +1,6 @@
 # Phase 36 — Bill reconciliation
 
-**Status:** Planned, not built. **Size:** S, ~30-45k est. **Origin:** improvement list 3, 14/10/2026 (item 6).
+**Status:** Done, merged (PR #67). **Size:** S, ~30k actual. **Origin:** improvement list 3, 14/10/2026 (item 6).
 
 ## Goal
 
@@ -15,3 +15,7 @@ Keep the year-to-date figure honest by comparing logged costs with what Octopus 
 ## Acceptance
 
 - Tests: matching month, gap over threshold, missing days → partial flagged, billed unknown → no alert.
+
+## As built
+
+The feasibility check found no Octopus statement or balance sensor, so the bill is entered by hand in `number.billed_last_month`. Reconciliation runs when the number is set, not on the first Sunday, because bills usually arrive after the first week. No standing charge is added, because the Octopus cost sensors already include it.

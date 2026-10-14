@@ -71,3 +71,19 @@ The saving is conservative, because coarse bands overstate direct solar use and 
 
 Nothing is sent when no day qualifies. Tests: `test_no_battery_baseline_*` and `test_battery_value_summary` in `tests/test_kpis.py`.
 
+## Bill reconciliation (14/10/2026, phase 36)
+
+**Feasibility:** the Octopus Energy integration has no account-balance or statement sensor we could rely on. So the billed figure is entered by hand in `number.billed_last_month` (£, `number.py`, the first number platform).
+
+Setting the number:
+- stores `{month: last calendar month, billed_gbp}` in `state.bill_reconciliation`;
+- runs `async_run_bill_reconciliation` straight away.
+
+The run sums last month's paired days with `planning.logged_day_cost_gbp` (import − export, plus gas when a gas cost sensor is configured; a missing field gives `None` for that day). `planning.reconcile_month` then returns logged £, gap £ and %, days logged versus days in the month, and `partial`.
+
+Standing charges are not added, because the Octopus "previous accumulative cost" sensors already include them; `standing_p_per_day` exists for logs that exclude them.
+
+It alerts only for a complete month with |gap| > £2: "⚠️ Sunsynk: bill differs from logged cost". Otherwise it sends "🔋 Sunsynk: bill check for YYYY-MM". A `bill_reconciliation` JSON line goes to the debug stream. The number's attributes hold the last result.
+
+Assumes the bill covers a calendar month. Read-only. Tests: `test_reconcile_*` and `test_logged_day_cost` in `tests/test_kpis.py`.
+

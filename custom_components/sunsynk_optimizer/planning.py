@@ -2081,3 +2081,49 @@ def capacity_estimate(samples: list[dict[str, Any]], min_samples: int = CAPACITY
 def capacity_low(estimate: float | None, configured_kwh: float, fraction: float = CAPACITY_ALERT_FRACTION) -> bool:
     """Measured capacity below ``fraction`` of the configured figure; False when unknown."""
     return estimate is not None and configured_kwh > 0 and estimate < configured_kwh * fraction
+
+
+# Bill reconciliation (phase 36).
+BILL_GAP_ALERT_GBP = 2.0
+
+
+def logged_day_cost_gbp(day: dict[str, Any], include_gas: bool) -> float | None:
+    """A logged day's net £ (import − export, + gas when configured); None when a needed field is missing."""
+    imp, exp, gas = (day.get(k) for k in ("actual_import_cost_gbp", "actual_export_income_gbp", "actual_gas_cost_gbp"))
+    if not _is_number(imp) or not _is_number(exp):
+        return None
+    if not include_gas:
+        return round(imp - exp, 2)
+    return net_cost_gbp(imp, exp, gas) if _is_number(gas) else None
+
+
+def reconcile_month(
+    day_costs: list[float | None],
+    days_in_month: int,
+    billed_gbp: float | None,
+    standing_p_per_day: float | None = None,
+    threshold_gbp: float = BILL_GAP_ALERT_GBP,
+) -> dict[str, Any]:
+    """Compare a month's logged cost with the billed £.
+
+    ``day_costs`` is one value per logged day (None = that day's cost is
+    missing). ``standing_p_per_day`` is added per day only when the logged
+    costs exclude it (None = already included, as the Octopus cost sensors
+    do). A month with missing days is ``partial`` and never alerts; unknown
+    billed → gap None, no alert.
+    """
+    values = [c for c in day_costs if _is_number(c)]
+    logged = sum(values) + (standing_p_per_day or 0.0) * len(values) / 100 if values else None
+    partial = len(values) < days_in_month
+    gap = None if logged is None or billed_gbp is None else billed_gbp - logged
+    pct = None if gap is None or not billed_gbp else gap / abs(billed_gbp) * 100
+    return {
+        "logged_gbp": round_or_none(logged),
+        "billed_gbp": round_or_none(billed_gbp),
+        "gap_gbp": round_or_none(gap),
+        "gap_pct": round_or_none(pct, 1),
+        "days_logged": len(values),
+        "days_in_month": days_in_month,
+        "partial": partial,
+        "alert": gap is not None and not partial and abs(gap) > threshold_gbp,
+    }

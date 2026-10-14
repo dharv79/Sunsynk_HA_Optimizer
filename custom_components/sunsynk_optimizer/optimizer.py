@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import calendar
+
 import json
 import logging
 import os
@@ -153,6 +155,8 @@ from .planning import (
     capacity_estimate,
     capacity_low,
     capacity_samples,
+    logged_day_cost_gbp,
+    reconcile_month,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
     manual_free_event_error,
@@ -2521,6 +2525,52 @@ class SunsynkOptimizer:
             f"Battery saved ~£{summary['saving_gbp']:.2f} this month{wear} ({summary['days']} days) "
             "vs the same days with no battery, 00:00–22:00 at your Flux rates.",
         )
+
+    async def async_set_billed_amount(self, billed_gbp: float) -> None:
+        """User entered last month's billed net £ (number entity); reconcile it now (phase 36)."""
+        month = (dt_util.now().date().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        self.coordinator.update_state(bill_reconciliation={"month": month, "billed_gbp": billed_gbp})
+        await self._guarded(self.async_run_bill_reconciliation, "Bill reconciliation")
+
+    async def async_run_bill_reconciliation(self) -> dict[str, Any] | None:
+        """Compare the month's logged Octopus costs with the billed £ the user entered (phase 36); read-only."""
+        state = dict(self.coordinator.state.bill_reconciliation or {})
+        month, billed = state.get("month"), state.get("billed_gbp")
+        if not month or billed is None:
+            return None
+        year, mon = (int(x) for x in month.split("-"))
+        days_in_month = calendar.monthrange(year, mon)[1]
+        include_gas = bool(self._cfg_str(CONF_OCTOPUS_GAS_COST_SENSOR))
+        days = {
+            d["date"]: d for d in await self.data_logger.async_load_paired_days(days=100)
+            if str(d.get("date", "")).startswith(month)
+        }
+        result = reconcile_month(
+            [logged_day_cost_gbp(d, include_gas) for d in days.values()], days_in_month, float(billed)
+        )
+        result = {"month": month, "includes_gas": include_gas, **result}
+        self.coordinator.update_state(bill_reconciliation={**state, "result": result})
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify(
+                "Sunsynk Bill Reconciliation",
+                json.dumps({"type": "bill_reconciliation", **result}),
+                target=data_report_target,
+            )
+        if result["logged_gbp"] is None:
+            body = f"No logged Octopus cost for {month}, so the £{billed:.2f} bill can't be checked."
+        else:
+            body = (
+                f"Billed £{result['billed_gbp']:.2f} vs logged £{result['logged_gbp']:.2f} "
+                f"({result['days_logged']}/{days_in_month} days"
+                + (", partial month" if result["partial"] else "")
+                + f"): gap £{result['gap_gbp']:+.2f}."
+            )
+            if result["alert"]:
+                body += " Over £2: check credits, standing-charge or VAT changes, or a missed day's cost."
+        title = "⚠️ Sunsynk: bill differs from logged cost" if result["alert"] else "🔋 Sunsynk: bill check for " + month
+        await self.async_notify(title, body)
+        return result
 
     async def _async_initial_capacity_estimate(self, _now) -> None:
         await self._guarded(lambda: self.async_run_capacity_estimate(notify=False), "Battery capacity estimate")
