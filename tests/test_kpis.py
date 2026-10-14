@@ -484,3 +484,57 @@ def test_cheapest_hour_today(planning):
     out = planning.cheapest_hour_today(9, _PRICES, _EXPORT, [{"hour": 13, "spare_kwh": 1.2}, {"hour": 14, "spare_kwh": 0}])
     assert out == {"hour": "13:00", "pence": 15.0, "source": "solar"}
     assert planning.cheapest_hour_today(9, {}, _EXPORT) is None
+
+
+# ---- Phase 37: value of the system ----
+
+_BASE_PRICES = {"offpeak": 10.0, "day": 30.0, "peak": 40.0}
+_BASE_EXPORT = [(0, 1440, 15.0)]
+
+
+def _base_snaps(**override):
+    snaps = {
+        "02:00": {"load_kwh": 1.0, "grid_import_kwh": 0.0, "grid_export_kwh": 0.0, "soc": 50},
+        "05:00": {"load_kwh": 2.0, "grid_import_kwh": 6.0, "grid_export_kwh": 0.0, "soc": 100},
+        "16:00": {"load_kwh": 7.0, "grid_import_kwh": 6.0, "grid_export_kwh": 2.0, "soc": 100},
+        "19:00": {"load_kwh": 10.0, "grid_import_kwh": 6.0, "grid_export_kwh": 2.0, "soc": 70},
+        "22:00": {"load_kwh": 12.0, "grid_import_kwh": 6.0, "grid_export_kwh": 2.0, "soc": 50},
+    }
+    for time, fields in override.items():
+        snaps[time.replace("h", ":")] = {**snaps[time.replace("h", ":")], **fields}
+    return snaps
+
+
+def test_no_battery_baseline_per_band(planning):
+    out = planning.no_battery_baseline(_base_snaps(), _BASE_PRICES, _BASE_EXPORT, 10.0)
+    # Baseline: 00-02 1 kWh day (30p), 02-05 1 kWh offpeak (10p), 05-16 solar 7 covers load 5 and
+    # exports 2 (-30p), 16-19 3 kWh peak (120p; solar 0), 19-22 2 kWh day (60p) = 190p.
+    assert out["no_battery_gbp"] == 1.90
+    # Actual: 6 kWh offpeak (60p) - 2 kWh export (30p) = 30p.
+    assert out["with_battery_gbp"] == 0.30
+    assert out["battery_saving_gbp"] == 1.60
+    assert out["battery_cycled_kwh"] == 5.0
+
+
+def test_no_battery_baseline_wear_subtracted(planning):
+    out = planning.no_battery_baseline(_base_snaps(), _BASE_PRICES, _BASE_EXPORT, 10.0, wear_pence=4.0)
+    assert out["battery_saving_gbp"] == round(1.60 - 5.0 * 4.0 / 100, 2)
+
+
+def test_no_battery_baseline_missing_snapshot_excluded(planning):
+    snaps = _base_snaps()
+    del snaps["16:00"]
+    out = planning.no_battery_baseline(snaps, _BASE_PRICES, _BASE_EXPORT, 10.0)
+    assert out["battery_saving_gbp"] is None
+    snaps = _base_snaps(**{"19h00": {"soc": None}})
+    assert planning.no_battery_baseline(snaps, _BASE_PRICES, _BASE_EXPORT, 10.0)["battery_saving_gbp"] is None
+
+
+def test_no_battery_baseline_no_prices_is_none(planning):
+    assert planning.no_battery_baseline(_base_snaps(), {}, _BASE_EXPORT, 10.0)["no_battery_gbp"] is None
+
+
+def test_battery_value_summary(planning):
+    days = [{"battery_saving_gbp": 1.5}, {"battery_saving_gbp": None}, {"battery_saving_gbp": 0.75}, {}]
+    assert planning.battery_value_summary(days) == {"saving_gbp": 2.25, "days": 2}
+    assert planning.battery_value_summary([{}]) == {"saving_gbp": None, "days": 0}

@@ -579,6 +579,7 @@ DAY_KPI_FIELDS = (
     "export_peak_kwh",
     "export_peak_gbp",
     "unused_charge_kwh",
+    "battery_saving_gbp",  # phase 37
 )
 
 
@@ -1938,3 +1939,91 @@ def cheapest_hour_today(
         if best is None or pence < best["pence"]:
             best = {"hour": f"{hour:02d}:00", "pence": round(pence, 2), "source": source}
     return best
+
+
+# Value-of-the-system report (phase 37). Same 00:00-22:00 KPI day as day_kpis.
+# (start, end, import band, can have solar)
+_BASELINE_SEGMENTS = (
+    ("00:00", "02:00", "day", False),
+    ("02:00", "05:00", "offpeak", False),
+    ("05:00", "16:00", "day", True),
+    ("16:00", "19:00", "peak", True),
+    ("19:00", "22:00", "day", True),
+)
+
+
+def _seg_value(snapshots: dict[str, dict[str, Any]], start: str, end: str, key: str) -> float | None:
+    """Meter delta for a segment; the daily meters read 0 at midnight."""
+    if start == "00:00":
+        return _snap(snapshots, end, key)
+    return _snap_delta(snapshots, start, end, key)
+
+
+def _pence(kwh: float, price: float | None) -> float | None:
+    """kWh × price; no energy costs 0 even without a price, otherwise a missing price is None."""
+    if kwh <= 0:
+        return 0.0
+    return None if price is None else kwh * price
+
+
+def no_battery_baseline(
+    snapshots: dict[str, dict[str, Any]],
+    prices_pence: dict[str, float | None],
+    export_bands: list[tuple[int, int, float]],
+    battery_capacity_kwh: float,
+    wear_pence: float | None = None,
+) -> dict[str, float | None]:
+    """What 00:00-22:00 cost with the battery vs without it, from the meter snapshots.
+
+    Per Flux segment: solar = load − import + export + battery gain (night
+    segments have none). Without a battery the house uses that solar
+    directly, imports the rest at the band price and exports the surplus.
+    Actual = metered import − export at the same prices. Saving = baseline −
+    actual − wear on the kWh the battery took in. Coarse bands overstate
+    direct solar use, so the saving is conservative. Any missing snapshot or
+    needed price → all None (the day is excluded, never 0).
+    """
+    empty = {"no_battery_gbp": None, "with_battery_gbp": None, "battery_saving_gbp": None, "battery_cycled_kwh": None}
+    if battery_capacity_kwh <= 0:
+        return empty
+    baseline = actual = cycled = 0.0
+    for start, end, band, sunny in _BASELINE_SEGMENTS:
+        load = _seg_value(snapshots, start, end, "load_kwh")
+        imp = _seg_value(snapshots, start, end, "grid_import_kwh")
+        exp = _seg_value(snapshots, start, end, "grid_export_kwh")
+        if load is None or imp is None or exp is None:
+            return empty
+        soc_a, soc_b = _snap(snapshots, start, "soc"), _snap(snapshots, end, "soc")
+        gain = None if soc_a is None or soc_b is None else (soc_b - soc_a) / 100 * battery_capacity_kwh
+        if sunny:
+            if gain is None:
+                return empty
+            solar = max(0.0, load - imp + exp + gain)
+        else:
+            solar = 0.0
+        if gain is not None and gain > 0:
+            cycled += gain
+        direct = min(solar, load)
+        imp_price = prices_pence.get(band)
+        exp_price = price_at(export_bands, hhmm_to_minutes(start))
+        parts = (
+            _pence(load - direct, imp_price), _pence(solar - direct, exp_price),
+            _pence(imp, imp_price), _pence(exp, exp_price),
+        )
+        if any(p is None for p in parts):
+            return empty
+        baseline += parts[0] - parts[1]
+        actual += parts[2] - parts[3]
+    wear = cycled * (wear_pence or 0.0)
+    return {
+        "no_battery_gbp": round(baseline / 100, 2),
+        "with_battery_gbp": round(actual / 100, 2),
+        "battery_saving_gbp": round((baseline - actual - wear) / 100, 2),
+        "battery_cycled_kwh": round(cycled, 2),
+    }
+
+
+def battery_value_summary(days: list[dict[str, Any]]) -> dict[str, Any]:
+    """{"saving_gbp", "days"} over days with a `battery_saving_gbp`; saving None when none has one."""
+    values = [d["battery_saving_gbp"] for d in days if isinstance(d.get("battery_saving_gbp"), (int, float))]
+    return {"saving_gbp": round(sum(values), 2) if values else None, "days": len(values)}

@@ -36,7 +36,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 - Prices come from the configured `charges` via `flux_helpers.kpi_prices_pence` (`band_price_pence_per_kwh`, generalised from the peak-price helper).
 - Any missing snapshot, meter, price, or meter that went backwards gives `None` for that KPI, never 0.
 
-**Reporting.** A `day_kpis` record (deduped) is logged at 22:00 and added to the 22:00 bundle. `_pair_records` carries the KPI fields into paired days. The Sunday digest adds `planning.week_kpis`: kWh and £ summed, self-sufficiency averaged, plus `week_kpi_days`.
+**Reporting.** A `day_kpis` record (deduped) is logged at 22:00 and added to the 22:00 bundle. `_pair_records` carries the KPI fields into paired days. The Sunday digest adds `planning.week_kpis`: kWh and £ summed, self-sufficiency averaged, plus `week_kpi_days`. Since phase 37, `day_kpis` also carries the battery-vs-no-battery fields (see weekly-reports.md).
 
 **Backtest.** Run `python3 tools/backtest.py DATA_DIR [--target-offset N] [--load-kw X] [--capacity K] [--days N]`. It is HA-free and read-only, and loads `planning.py` / `flux_helpers.py` by path.
 

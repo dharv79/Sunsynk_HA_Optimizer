@@ -54,3 +54,20 @@ Two tariffs added:
   - Agile export uses a flat rate (`agile.export`).
 
 The report shows the total per tariff with the unit-only figure in brackets. Tests are in `tests/test_tariff_comparison.py`.
+
+## Value-of-the-system report (14/10/2026, phase 37)
+
+At 22:00 `planning.no_battery_baseline` prices the 00:00–22:00 KPI day twice from the meter snapshots, once as it happened and once with no battery:
+- **Solar per Flux segment:** load − import + export + battery gain (SOC change × capacity). The two night segments, 00:00–02:00 and 02:00–05:00, have none.
+- **No battery:** that solar first covers the segment's load; the rest of the load is imported at the band price and the surplus exported at the export price from `charges`.
+- **With battery:** metered import − export at the same prices.
+- **Saving:** baseline − actual − wear (phase 24 p/kWh × kWh the battery took in).
+
+The saving is conservative, because coarse bands overstate direct solar use and 22:00–24:00 is not covered. A missing snapshot, a missing SOC on a solar segment, or a missing price with energy behind it puts `None` in all four fields, so the day is excluded rather than counted as 0. Fields on `day_kpis`: `no_battery_gbp`, `with_battery_gbp`, `battery_saving_gbp`, `battery_cycled_kwh`.
+
+`battery_saving_gbp` is in `DAY_KPI_FIELDS`, so the weekly JSON carries `week_battery_saving_gbp` and `battery_saving_days`. On the first Sunday of the month, `_async_send_monthly_battery_value` sums last month's paired days (`planning.battery_value_summary`) and sends:
+- a `monthly_battery_value` JSON line to the debug stream;
+- "🔋 Sunsynk: battery value for YYYY-MM" ("Battery saved ~£X this month (N days)") to the notify target.
+
+Nothing is sent when no day qualifies. Tests: `test_no_battery_baseline_*` and `test_battery_value_summary` in `tests/test_kpis.py`.
+
