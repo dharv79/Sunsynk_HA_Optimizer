@@ -1758,3 +1758,65 @@ def tariff_price_changes(
         if abs(theirs - mine) > tolerance:
             changes.append((band, round(mine, 2), round(theirs, 2)))
     return changes
+
+
+# --------------------------------------------------------------------------- #
+# Multi-day low-solar planning (phase 39, shadow)                              #
+# --------------------------------------------------------------------------- #
+
+MULTI_DAY_MIN_RUN = 2
+# Tomorrow's battery need runs from the end of the cheap window to the end of
+# the peak (05:00-19:00): the part the overnight charge has to carry.
+MULTI_DAY_NEED_HOURS = (PEAK_END_MINUTES - 5 * 60) / 60
+
+
+def low_solar_run(days_kwh: list[float | None], threshold: float = LOW_SOLAR_THRESHOLD_KWH) -> int:
+    """Consecutive low-solar days starting today; a missing forecast ends the run."""
+    run = 0
+    for kwh in days_kwh:
+        if kwh is None or kwh >= threshold:
+            break
+        run += 1
+    return run
+
+
+def multi_day_peak_floor_soc(
+    reserve_soc: int,
+    capacity_kwh: float | None,
+    tomorrow_load_kwh: float | None,
+    tomorrow_solar_kwh: float | None,
+    refill_kwh: float | None,
+) -> int | None:
+    """Lowest SOC the 16:00 peak export should sell to ahead of a dull tomorrow.
+
+    Holds back only what tomorrow's cheap window can't put back: the reserve
+    plus (tomorrow's 05:00-19:00 load - its solar - the overnight refill),
+    clamped to [reserve, 100]. None when any input is missing (no change).
+    """
+    if None in (capacity_kwh, tomorrow_load_kwh, tomorrow_solar_kwh, refill_kwh) or not capacity_kwh:
+        return None
+    shortfall_kwh = max(0.0, tomorrow_load_kwh - tomorrow_solar_kwh - refill_kwh)
+    return min(100, max(reserve_soc, math.ceil(reserve_soc + shortfall_kwh / capacity_kwh * 100)))
+
+
+def multi_day_shadow(
+    run_days: int,
+    target_soc: int | None = None,
+    peak_target_soc: int | None = None,
+    floor_soc: int | None = None,
+) -> dict[str, Any] | None:
+    """What multi-day planning would change today, or None outside a run of ≥2 low days.
+
+    In a run: the 01:55 target goes to 100%, daytime trims stay off and the
+    16:00 peak export sells no lower than ``floor_soc``.
+    """
+    if run_days < MULTI_DAY_MIN_RUN:
+        return None
+    out: dict[str, Any] = {"run_days": run_days, "trims_off": True}
+    if target_soc is not None:
+        out.update(live_target_soc=target_soc, would_target_soc=100, changes_target=target_soc < 100)
+    if peak_target_soc is not None:
+        would = max(peak_target_soc, floor_soc) if floor_soc is not None else peak_target_soc
+        out.update(live_peak_target_soc=peak_target_soc, would_peak_target_soc=would,
+                   changes_peak=would != peak_target_soc)
+    return out

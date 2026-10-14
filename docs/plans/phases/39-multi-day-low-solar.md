@@ -1,6 +1,6 @@
 # Phase 39 — Multi-day low-solar planning
 
-**Status:** Planned, not built. **Size:** M, ~45-70k est. **Origin:** improvement list 3, 14/10/2026 (item 9).
+**Status:** Done, merged (PR #61), shadow only; live option pending a review of `multi_day_plan` records. **Size:** S, ~30k actual. Uses today + tomorrow forecasts (no day-3 sensor); the peak floor also subtracts the overnight refill. **Origin:** improvement list 3, 14/10/2026 (item 9).
 
 ## Goal
 

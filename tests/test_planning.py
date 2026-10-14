@@ -705,3 +705,32 @@ def test_tariff_price_changes(planning):
     assert planning.tariff_price_changes(configured, {"day": 24.10, "peak": None}) == [("day", 23.28, 24.1)]
     # Missing Octopus band or missing configured price: ignored, never "0p".
     assert planning.tariff_price_changes({"day": None}, {"day": 24.1, "offpeak": 0.0}) == []
+
+
+def test_low_solar_run(planning):
+    t = planning.LOW_SOLAR_THRESHOLD_KWH
+    assert planning.low_solar_run([t - 1, t - 2]) == 2
+    assert planning.low_solar_run([t - 1, t + 5]) == 1
+    assert planning.low_solar_run([t + 1, t - 1]) == 0
+    assert planning.low_solar_run([t - 1, None]) == 1  # missing forecast ends the run
+    assert planning.low_solar_run([]) == 0
+
+
+def test_multi_day_peak_floor_soc(planning):
+    # 14 h × 0.5 kW = 7 kWh load, 2 kWh solar, 3 kWh refill → 2 kWh short of 10 kWh = +20%.
+    assert planning.multi_day_peak_floor_soc(30, 10.0, 7.0, 2.0, 3.0) == 50
+    assert planning.multi_day_peak_floor_soc(30, 10.0, 4.0, 2.0, 3.0) == 30  # refill covers it
+    assert planning.multi_day_peak_floor_soc(30, 10.0, 50.0, 0.0, 0.0) == 100  # clamped
+    assert planning.multi_day_peak_floor_soc(30, 10.0, 7.0, None, 3.0) is None
+    assert planning.multi_day_peak_floor_soc(30, None, 7.0, 2.0, 3.0) is None
+
+
+def test_multi_day_shadow(planning):
+    assert planning.multi_day_shadow(1, target_soc=60) is None  # single low day: unchanged
+    assert planning.multi_day_shadow(0, peak_target_soc=40, floor_soc=60) is None
+    plan = planning.multi_day_shadow(2, target_soc=80)
+    assert plan["would_target_soc"] == 100 and plan["changes_target"] and plan["trims_off"]
+    peak = planning.multi_day_shadow(2, peak_target_soc=40, floor_soc=60)
+    assert peak["would_peak_target_soc"] == 60 and peak["changes_peak"]
+    same = planning.multi_day_shadow(3, peak_target_soc=40, floor_soc=None)
+    assert same["would_peak_target_soc"] == 40 and not same["changes_peak"]
