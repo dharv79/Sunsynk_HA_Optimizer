@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from copy import deepcopy
 from datetime import datetime, timedelta
 from functools import partial
@@ -19,6 +20,7 @@ from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,
@@ -100,7 +102,7 @@ from .const import (
     FULL_CHARGE_DAY_OPTIONS,
     GENTLE_CHARGE_SETTING,
 )
-from .data_logger import DAILY_COST_FIELDS, DataLogger
+from .data_logger import DAILY_COST_FIELDS, DATA_DIR_NAME, DataLogger
 from .flux_helpers import (
     apply_flux_override,
     band_price_pence_per_kwh,
@@ -112,6 +114,7 @@ from .flux_helpers import (
     kpi_prices_pence,
     tariff_prices_pence,
 )
+from .octopus_public import async_fetch_agile_rates
 from .planning import (
     TARIFF_IMPORT_BANDS,
     TARIFF_LABELS,
@@ -120,6 +123,10 @@ from .planning import (
     compare_tariffs,
     flux_bands_from_charges,
     merge_tariff_rates,
+    agile_prices_by_date,
+    agile_region_override,
+    octopus_region,
+    tariff_vat_percent,
     parse_half_hourly_charges,
     auto_away,
     CLIPPED_SOC_PCT,
@@ -2320,18 +2327,57 @@ class SunsynkOptimizer:
             if parsed is not None:
                 await self.data_logger.async_log_half_hourly(kind, parsed[0], parsed[1])
 
-    async def _async_send_monthly_tariff_comparison(self) -> None:
-        """First Sunday of the month: cost last month's logged usage under Flux, Go and Cosy.
+    def _agile_region(self, overrides: Any) -> str | None:
+        """Agile region: the "agile_region" override, else the import rates entity's tariff code."""
+        region = agile_region_override(overrides)
+        if region:
+            return region
+        entity = self._cfg_str(CONF_OCTOPUS_IMPORT_RATES_ENTITY)
+        state = self.hass.states.get(entity) if entity else None
+        return octopus_region(state.attributes.get("tariff_code")) if state is not None else None
 
-        Usage is held fixed (battery behaviour would differ on another tariff) and standing
-        charges are excluded, so this is a guide, not a quote.
+    async def _async_agile_prices(self, month: str, region: str | None) -> dict[str, list[float]]:
+        """{date: 48 ex-VAT p/kWh} for a past month, cached in the data dir; {} when unavailable."""
+        if region is None:
+            return {}
+        path = os.path.join(self.hass.config.path(DATA_DIR_NAME), f"agile_{region}_{month}.json")
+
+        def _read() -> Any:
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    return json.load(fh)
+            except (OSError, ValueError):
+                return None
+
+        def _write(results: list[dict[str, Any]]) -> None:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(results, fh)
+
+        results = await self.hass.async_add_executor_job(_read)
+        if not isinstance(results, list):
+            first = dt_util.parse_date(f"{month}-01")
+            start = dt_util.start_of_local_day(first)
+            end = dt_util.start_of_local_day((first + timedelta(days=32)).replace(day=1))
+            results = await async_fetch_agile_rates(async_get_clientsession(self.hass), region, start, end)
+            if not results:
+                return {}
+            await self.hass.async_add_executor_job(_write, results)
+        return agile_prices_by_date(results, dt_util.DEFAULT_TIME_ZONE)
+
+    async def _async_send_monthly_tariff_comparison(self) -> None:
+        """First Sunday of the month: cost last month's logged usage under Flux and the alternatives.
+
+        Usage is held fixed (battery behaviour would differ on another tariff), so this is a
+        guide, not a quote. Totals include standing charges and VAT (phase 35).
         """
         today = dt_util.now().date()
         if today.day > 7:
             return
         month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         imp, exp = await self.data_logger.async_load_half_hourly()
-        rates = merge_tariff_rates(self.cfg.get(CONF_TARIFF_RATE_OVERRIDES))
+        overrides = self.cfg.get(CONF_TARIFF_RATE_OVERRIDES)
+        rates = merge_tariff_rates(overrides)
         def export_flat(r: dict[str, float]) -> list[tuple[int, int, float]]:
             return [(0, 1440, r["export"])]
 
@@ -2342,10 +2388,19 @@ class SunsynkOptimizer:
             ),
             **{
                 name: (bands_from_rates(TARIFF_IMPORT_BANDS[name], rates[name]), export_flat(rates[name]))
-                for name in ("go", "cosy")
+                for name in ("go", "cosy", "intelligent")
             },
         }
-        result = compare_tariffs(imp, exp, tariffs, month)
+        if any(d.startswith(month) for d in imp):
+            tariffs["agile"] = (
+                await self._async_agile_prices(month, self._agile_region(overrides)),
+                export_flat(rates["agile"]),
+            )
+        result = compare_tariffs(
+            imp, exp, tariffs, month,
+            standing={name: r.get("standing") for name, r in rates.items()},
+            vat_percent=tariff_vat_percent(overrides),
+        )
         if not result["days_compared"]:
             return  # Consumption sensors not configured, or no complete days logged.
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
@@ -2356,8 +2411,10 @@ class SunsynkOptimizer:
                 target=data_report_target,
             )
         lines = [
-            f"{TARIFF_LABELS[k]}: " + (f"£{v:.2f}" if v is not None else "n/a")
-            for k, v in result["net_gbp"].items()
+            f"{TARIFF_LABELS[k]}: "
+            + (f"£{v:.2f}" if v is not None else "n/a")
+            + (f" (units £{result['net_gbp'][k]:.2f})" if v is not None and result["net_gbp"][k] is not None else "")
+            for k, v in result["total_gbp"].items()
         ]
         stale = (
             " Flux prices here are your configured tariff rows, which differ from Octopus's current rates."
@@ -2366,8 +2423,9 @@ class SunsynkOptimizer:
         )
         await self.async_notify(
             "🔋 Sunsynk: tariff comparison for " + month,
-            f"{result['days_compared']} days, net of export, same usage. " + " · ".join(lines)
-            + f". Unit rates only (as of {TARIFF_RATES_AS_OF}); battery use would differ on another tariff.{stale}",
+            f"{result['days_compared']} days, same usage, inc. standing charge and {result['vat_percent']:g}% VAT, "
+            "net of export. " + " · ".join(lines)
+            + f". Rates as of {TARIFF_RATES_AS_OF}; battery use would differ on another tariff.{stale}",
         )
 
     async def _async_capture_day_actuals(self, _now) -> None:

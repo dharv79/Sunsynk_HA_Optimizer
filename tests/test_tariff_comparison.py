@@ -109,3 +109,94 @@ def test_overrides_merge_and_ignore_junk(planning):
     assert r["go"]["cheap"] == 7.5 and r["go"]["day"] == 28.0 and "bogus" not in r["go"]
     assert planning.merge_tariff_rates("not json")["go"]["cheap"] == 8.5
     assert planning.merge_tariff_rates(None)["cosy"]["peak"] == 40.5
+
+
+# --- Phase 35: standing charges, VAT, Intelligent, Agile ---------------------
+
+FLAT_BANDS = [(0, 1440, 10.0)]
+NO_EXPORT = [(0, 1440, 0.0)]
+
+
+def _month(days=2):
+    return {f"2026-09-0{i + 1}": list(FLAT) for i in range(days)}
+
+
+def test_standing_charge_times_days(planning):
+    out = planning.compare_tariffs(_month(2), _month(2), {"a": (FLAT_BANDS, NO_EXPORT)}, "2026-09", standing={"a": 50.0})
+    # 48 kWh × 10p = £4.80/day; + 50p/day standing.
+    assert out["net_gbp"]["a"] == 9.6
+    assert out["total_gbp"]["a"] == 10.6
+
+
+def test_vat_applies_to_import_and_standing_not_export(planning):
+    export = [(0, 1440, 1.0)]  # 48p/day income
+    out = planning.compare_tariffs(
+        _month(1), _month(1), {"a": (FLAT_BANDS, export)}, "2026-09", standing={"a": 52.0}, vat_percent=5
+    )
+    assert out["total_gbp"]["a"] == round(((480 + 52) * 1.05 - 48) / 100, 2)
+    off = planning.compare_tariffs(_month(1), _month(1), {"a": (FLAT_BANDS, export)}, "2026-09", standing={"a": 52.0})
+    assert off["total_gbp"]["a"] == round((480 + 52 - 48) / 100, 2)
+
+
+def test_missing_standing_gives_none_total_but_keeps_net(planning):
+    out = planning.compare_tariffs(_month(1), _month(1), {"a": (FLAT_BANDS, NO_EXPORT)}, "2026-09")
+    assert out["net_gbp"]["a"] == 4.8 and out["total_gbp"]["a"] is None
+
+
+def test_agile_slot_pricing(planning):
+    prices = [float(i) for i in range(48)]  # 0p..47p
+    agile = {"2026-09-01": prices}
+    out = planning.compare_tariffs(_month(1), _month(1), {"agile": (agile, NO_EXPORT)}, "2026-09", standing={"agile": 0})
+    assert out["total_gbp"]["agile"] == round(sum(prices) / 100, 2)
+
+
+def test_agile_unavailable_is_none_others_still_reported(planning):
+    tariffs = {"agile": ({}, NO_EXPORT), "a": (FLAT_BANDS, NO_EXPORT)}
+    out = planning.compare_tariffs(_month(1), _month(1), tariffs, "2026-09", standing={"agile": 50, "a": 50})
+    assert out["total_gbp"]["agile"] is None and out["net_gbp"]["agile"] is None
+    assert out["total_gbp"]["a"] == 5.3 and out["cheapest"] == "a"
+
+
+def test_intelligent_cheap_window(planning):
+    rates = planning.merge_tariff_rates(None)["intelligent"]
+    bands = planning.bands_from_rates(planning.TARIFF_IMPORT_BANDS["intelligent"], rates)
+    assert planning.band_price(bands, 23 * 60 + 30) == rates["cheap"]
+    assert planning.band_price(bands, 5 * 60) == rates["cheap"]
+    assert planning.band_price(bands, 5 * 60 + 30) == rates["day"]
+
+
+def test_agile_prices_by_date_complete_days_only(planning):
+    from datetime import timezone
+
+    base = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    rows = [
+        {"valid_from": (base + timedelta(minutes=30 * i)).isoformat().replace("+00:00", "Z"),
+         "value_exc_vat": float(i % 48), "value_inc_vat": 99.0}
+        for i in range(48 + 10)  # one full day + 10 slots of the next
+    ]
+    out = planning.agile_prices_by_date(rows, timezone.utc)
+    assert list(out) == ["2026-09-01"] and out["2026-09-01"][47] == 47.0  # ex-VAT used
+    assert planning.agile_prices_by_date(None) == {}
+
+
+def test_overrides_vat_region_and_standing(planning):
+    assert planning.tariff_vat_percent(None) == planning.TARIFF_VAT_PERCENT
+    assert planning.tariff_vat_percent('{"vat_percent": 5}') == 5.0
+    assert planning.tariff_vat_percent('{"vat_percent": "5"}') == planning.TARIFF_VAT_PERCENT
+    assert planning.agile_region_override('{"agile_region": "c"}') == "C"
+    assert planning.agile_region_override('{"agile_region": "Z"}') is None
+    assert planning.merge_tariff_rates('{"flux": {"standing": 60}}')["flux"]["standing"] == 60.0
+    assert planning.octopus_region("E-1R-FLUX-IMPORT-23-02-14-C") == "C"
+    assert planning.octopus_region("bogus") is None
+
+
+def test_newest_agile_product(planning):
+    products = [
+        {"code": "AGILE-22-08-31", "direction": "IMPORT", "available_from": "2022-08-31T00:00:00Z"},
+        {"code": "AGILE-24-10-01", "direction": "IMPORT", "available_from": "2024-10-01T00:00:00Z"},
+        {"code": "AGILE-OUTGOING-19-05-13", "direction": "EXPORT", "available_from": "2019-05-13T00:00:00Z"},
+        {"code": "AGILE-27-01-01", "direction": "IMPORT", "available_from": "2027-01-01T00:00:00Z"},
+        {"code": "GO-VAR-22-10-14", "direction": "IMPORT", "available_from": "2022-10-14T00:00:00Z"},
+    ]
+    assert planning.newest_agile_product(products, datetime(2026, 9, 1)) == "AGILE-24-10-01"
+    assert planning.newest_agile_product([], datetime(2026, 9, 1)) is None

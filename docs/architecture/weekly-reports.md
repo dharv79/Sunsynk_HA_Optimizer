@@ -28,3 +28,29 @@ Options `octopus_import_consumption_sensor` / `octopus_export_consumption_sensor
 On the first Sunday of a month (day ≤ 7) the 18:00 digest calls `_async_send_monthly_tariff_comparison`: `planning.compare_tariffs` costs last month's days that have both import and export under Flux (the user's configured `charges` bands), Octopus Go and Cosy (`TARIFF_IMPORT_BANDS` + `TARIFF_DEFAULT_RATES`, dated `TARIFF_RATES_AS_OF`; override via the `tariff_rate_overrides` JSON option, e.g. `{"go": {"cheap": 8.5}}`). A tariff that can't price every counted day is `None`, never a partial total. JSON line (`monthly_tariff_comparison`) goes to the debug stream, human text to the notify target.
 
 Caveats stated in the message: usage held fixed (battery behaviour would change), unit rates only (no standing charge), rates approximate. Agile and Intelligent are not covered: they need historic half-hourly rates from the public Octopus API (follow-up).
+
+## Fuller tariff comparison (14/10/2026)
+
+Phase 35 completes phase 28's deferred part. `compare_tariffs` now takes `standing` (p/day per tariff) and `vat_percent`:
+- **`net_gbp`** (kept for continuity): unit rates only, import minus export.
+- **`total_gbp`**: `(import + standing × days) × (1 + VAT) − export`. VAT is not applied to export income.
+- **`cheapest`**: ranked on totals.
+
+Defaults are dated constants and can be overridden through the options JSON:
+- Standing charge 54.62p/day for every tariff (`TARIFF_STANDING_P_PER_DAY`, from the user's Flux bills). Override with `{"go": {"standing": …}}`.
+- VAT 0% (`TARIFF_VAT_PERCENT`, per bills from 01/10/2026). Override with `"vat_percent"`.
+
+Unit rates are treated as ex-VAT.
+
+Two tariffs added:
+- **Intelligent Octopus Go:** a fixed 23:30–05:30 cheap window (smart-charge extras out of scope).
+- **Agile:** priced per slot from the public Octopus API (`octopus_public.async_fetch_agile_rates`).
+  - The fetch picks the newest Agile import product on sale on the 1st of the month (`planning.newest_agile_product`, listing filtered by `available_at`).
+  - It reads `standard-unit-rates` for the month and uses `value_exc_vat`.
+  - `planning.agile_prices_by_date` keeps only complete 48-slot days.
+  - Results are cached as `agile_<region>_<YYYY-MM>.json` in the data dir.
+  - Region comes from the `"agile_region"` override, else the import rates entity's `tariff_code` (`planning.octopus_region`).
+  - With no region, or a failed fetch, Agile reports n/a and the other tariffs are still priced.
+  - Agile export uses a flat rate (`agile.export`).
+
+The report shows the total per tariff with the unit-only figure in brackets. Tests are in `tests/test_tariff_comparison.py`.

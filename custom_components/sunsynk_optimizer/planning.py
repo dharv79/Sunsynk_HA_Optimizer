@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -1392,10 +1393,19 @@ def overnight_target_too_high(clipped_kwh: float | None, first_full_hour: float 
 # Approximate public unit rates in pence/kWh, last checked 13/10/2026. They drift
 # with Ofgem's cap, so users can override any rate via the options JSON.
 TARIFF_RATES_AS_OF = "13/10/2026"
+# "standing" is p/day: Octopus charges the same regional standing charge on its
+# variable tariffs, defaulted from the user's Flux bills (54.62p, 14/10/2026).
+# Unit rates are ex-VAT; VAT is applied once in compare_tariffs.
+TARIFF_STANDING_P_PER_DAY = 54.62
 TARIFF_DEFAULT_RATES: dict[str, dict[str, float]] = {
-    "go": {"cheap": 8.5, "day": 28.0, "export": 12.0},
-    "cosy": {"cheap": 13.5, "peak": 40.5, "day": 27.0, "export": 12.0},
+    "flux": {"standing": TARIFF_STANDING_P_PER_DAY},  # unit rates come from the user's charges
+    "go": {"cheap": 8.5, "day": 28.0, "export": 12.0, "standing": TARIFF_STANDING_P_PER_DAY},
+    "cosy": {"cheap": 13.5, "peak": 40.5, "day": 27.0, "export": 12.0, "standing": TARIFF_STANDING_P_PER_DAY},
+    "intelligent": {"cheap": 7.0, "day": 28.0, "export": 12.0, "standing": TARIFF_STANDING_P_PER_DAY},
+    "agile": {"export": 12.0, "standing": TARIFF_STANDING_P_PER_DAY},  # import priced per slot
 }
+# Domestic VAT on the user's bills is 0% from 01/10/2026; override with "vat_percent".
+TARIFF_VAT_PERCENT = 0.0
 # (start "HH:MM", end "HH:MM", rate key); an end before its start wraps midnight.
 TARIFF_IMPORT_BANDS: dict[str, list[tuple[str, str, str]]] = {
     "go": [("00:30", "05:30", "cheap"), ("05:30", "00:30", "day")],
@@ -1403,8 +1413,13 @@ TARIFF_IMPORT_BANDS: dict[str, list[tuple[str, str, str]]] = {
         ("04:00", "07:00", "cheap"), ("13:00", "16:00", "cheap"),
         ("16:00", "19:00", "peak"), ("07:00", "13:00", "day"), ("19:00", "04:00", "day"),
     ],
+    # Intelligent Octopus Go: the fixed cheap window only (smart-charge extras out of scope).
+    "intelligent": [("23:30", "05:30", "cheap"), ("05:30", "23:30", "day")],
 }
-TARIFF_LABELS = {"flux": "Flux", "go": "Octopus Go", "cosy": "Cosy Octopus"}
+TARIFF_LABELS = {
+    "flux": "Flux", "go": "Octopus Go", "cosy": "Cosy Octopus",
+    "intelligent": "Intelligent Octopus Go", "agile": "Agile Octopus",
+}
 HALF_HOURS_PER_DAY = 48
 
 
@@ -1442,17 +1457,80 @@ def flux_bands_from_charges(charges: Any, status: str) -> list[tuple[int, int, f
     return out
 
 
-def merge_tariff_rates(overrides: Any) -> dict[str, dict[str, float]]:
-    """Default rates with user overrides applied; unknown tariffs/keys and non-numbers are ignored."""
-    rates = {name: dict(r) for name, r in TARIFF_DEFAULT_RATES.items()}
+def _overrides_dict(overrides: Any) -> dict[str, Any]:
+    """The options' tariff overrides JSON as a dict; junk → {}."""
     if isinstance(overrides, str):
         try:
             overrides = json.loads(overrides) if overrides.strip() else {}
         except ValueError:
             overrides = {}
-    if not isinstance(overrides, dict):
-        return rates
-    for name, vals in overrides.items():
+    return overrides if isinstance(overrides, dict) else {}
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def tariff_vat_percent(overrides: Any) -> float:
+    """VAT % for the comparison: the "vat_percent" override when valid (0-100), else the dated default."""
+    vat = _overrides_dict(overrides).get("vat_percent")
+    return float(vat) if _is_number(vat) and 0 <= vat <= 100 else TARIFF_VAT_PERCENT
+
+
+def agile_region_override(overrides: Any) -> str | None:
+    """The "agile_region" override (a DNO region letter A-P), else None."""
+    region = _overrides_dict(overrides).get("agile_region")
+    return region.upper() if isinstance(region, str) and re.fullmatch(r"[A-Pa-p]", region) else None
+
+
+def octopus_region(tariff_code: Any) -> str | None:
+    """Region letter from an Octopus tariff code ("E-1R-FLUX-IMPORT-23-02-14-C" → "C")."""
+    match = re.fullmatch(r"E-[12]R-.+-([A-P])", str(tariff_code or ""))
+    return match.group(1) if match else None
+
+
+def agile_prices_by_date(results: Any, tz: Any = None) -> dict[str, list[float]]:
+    """{local date: 48 ex-VAT p/kWh} from Octopus standard-unit-rates results.
+
+    Only complete days are kept (DST days with 46/50 slots and partial days
+    are dropped rather than guessed, matching parse_half_hourly_charges).
+    """
+    slots: dict[str, dict[int, float]] = {}
+    for row in results if isinstance(results, list) else []:
+        if not isinstance(row, dict) or not _is_number(row.get("value_exc_vat")):
+            continue
+        start = _as_aware(row.get("valid_from"), tz)
+        if start is None:
+            continue
+        local = start.astimezone(tz) if tz is not None else start
+        slots.setdefault(local.date().isoformat(), {})[local.hour * 2 + local.minute // 30] = float(
+            row["value_exc_vat"]
+        )
+    return {
+        day: [by_idx[i] for i in range(HALF_HOURS_PER_DAY)]
+        for day, by_idx in slots.items()
+        if len(by_idx) == HALF_HOURS_PER_DAY
+    }
+
+
+def newest_agile_product(products: list[dict[str, Any]], before: datetime) -> str | None:
+    """Code of the newest Agile import product that was on sale by ``before``."""
+    best: tuple[str, str] | None = None
+    for product in products:
+        code, available = str(product.get("code", "")), str(product.get("available_from") or "")
+        if not code.startswith("AGILE-") or "OUTGOING" in code or product.get("direction") not in (None, "IMPORT"):
+            continue
+        if available and available[:10] > before.date().isoformat():
+            continue
+        if best is None or available > best[1]:
+            best = (code, available)
+    return best[0] if best else None
+
+
+def merge_tariff_rates(overrides: Any) -> dict[str, dict[str, float]]:
+    """Default rates with user overrides applied; unknown tariffs/keys and non-numbers are ignored."""
+    rates = {name: dict(r) for name, r in TARIFF_DEFAULT_RATES.items()}
+    for name, vals in _overrides_dict(overrides).items():
         if name in rates and isinstance(vals, dict):
             for key, val in vals.items():
                 if key in rates[name] and isinstance(val, (int, float)) and not isinstance(val, bool):
@@ -1492,13 +1570,19 @@ def parse_half_hourly_charges(attrs: Any) -> tuple[str, list[float]] | None:
     return day, [v for v in slots if v is not None]
 
 
-def cost_under_tariff(half_hourly_kwh: Any, bands: list[tuple[int, int, float]]) -> float | None:
-    """Pence for a day of 48 half-hourly kWh priced by ``bands``; None if any slot is missing or unpriced."""
+def cost_under_tariff(half_hourly_kwh: Any, bands: list[tuple[int, int, float]] | list[float]) -> float | None:
+    """Pence for a day of 48 half-hourly kWh; None if any slot is missing or unpriced.
+
+    ``bands`` is either minute bands (start, end, p) or 48 per-slot prices (Agile).
+    """
     if not isinstance(half_hourly_kwh, (list, tuple)) or len(half_hourly_kwh) != HALF_HOURS_PER_DAY:
+        return None
+    per_slot = bool(bands) and all(_is_number(b) for b in bands)
+    if per_slot and len(bands) != HALF_HOURS_PER_DAY:
         return None
     total = 0.0
     for idx, kwh in enumerate(half_hourly_kwh):
-        price = band_price(bands, idx * 30)
+        price = float(bands[idx]) if per_slot else band_price(bands, idx * 30)
         if price is None or not isinstance(kwh, (int, float)) or isinstance(kwh, bool):
             return None
         total += kwh * price
@@ -1508,28 +1592,46 @@ def cost_under_tariff(half_hourly_kwh: Any, bands: list[tuple[int, int, float]])
 def compare_tariffs(
     import_by_date: dict[str, list[float]],
     export_by_date: dict[str, list[float]],
-    tariffs: dict[str, tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]],
+    tariffs: dict[str, tuple[Any, Any]],
     month: str,
+    standing: dict[str, float] | None = None,
+    vat_percent: float = 0.0,
 ) -> dict[str, Any]:
-    """Net £ (import cost minus export income) per tariff over the days of ``month`` ("YYYY-MM").
+    """Per-tariff £ over the days of ``month`` ("YYYY-MM"), usage held fixed.
 
-    Only days with both import and export logged count, so a day is never part-costed. A tariff
-    that can't price some counted day gets None (never a partial total). Unit rates only —
-    standing charges are excluded — and usage is held fixed.
+    Each tariff is (import, export) pricing: minute bands, or for Agile a
+    {date: 48 slot prices} dict. ``net_gbp`` is unit rates only (import cost
+    minus export income, kept for continuity); ``total_gbp`` adds the standing
+    charge (p/day) and VAT on import + standing — closer to a bill. Only days
+    with both import and export logged count; a tariff that can't price some
+    counted day (or has no standing charge) gets None, never a partial total.
     """
     days = sorted(d for d in import_by_date if d.startswith(month) and d in export_by_date)
+    standing = standing or {}
     net: dict[str, float | None] = {}
-    for name, (imp_bands, exp_bands) in tariffs.items():
-        total: float | None = 0.0 if days else None
+    total: dict[str, float | None] = {}
+    for name, (imp_spec, exp_spec) in tariffs.items():
+        imp_p: float | None = 0.0 if days else None
+        exp_p = 0.0
         for d in days:
-            imp = cost_under_tariff(import_by_date[d], imp_bands)
-            exp = cost_under_tariff(export_by_date[d], exp_bands)
-            if imp is None or exp is None or total is None:
-                total = None
+            imp_prices = imp_spec.get(d) if isinstance(imp_spec, dict) else imp_spec
+            exp_prices = exp_spec.get(d) if isinstance(exp_spec, dict) else exp_spec
+            imp = cost_under_tariff(import_by_date[d], imp_prices) if imp_prices else None
+            exp = cost_under_tariff(export_by_date[d], exp_prices) if exp_prices else None
+            if imp is None or exp is None:
+                imp_p = None
                 break
-            total += imp - exp
-        net[name] = None if total is None else round(total / 100.0, 2)
-    priced = {k: v for k, v in net.items() if v is not None}
+            imp_p += imp
+            exp_p += exp
+        net[name] = None if imp_p is None else round((imp_p - exp_p) / 100.0, 2)
+        day_charge = standing.get(name)
+        total[name] = (
+            None
+            if imp_p is None or not _is_number(day_charge)
+            else round(((imp_p + day_charge * len(days)) * (1 + vat_percent / 100.0) - exp_p) / 100.0, 2)
+        )
+    ranked = total if any(v is not None for v in total.values()) else net
+    priced = {k: v for k, v in ranked.items() if v is not None}
     cheapest = min(priced, key=lambda k: priced[k]) if priced else None
     return {
         "month": month,
@@ -1537,6 +1639,9 @@ def compare_tariffs(
         "days_missing": sum(1 for d in import_by_date if d.startswith(month) and d not in export_by_date)
         + sum(1 for d in export_by_date if d.startswith(month) and d not in import_by_date),
         "net_gbp": net,
+        "total_gbp": total,
+        "standing_p_per_day": {k: standing.get(k) for k in tariffs},
+        "vat_percent": vat_percent,
         "cheapest": cheapest,
         "rates_as_of": TARIFF_RATES_AS_OF,
     }
