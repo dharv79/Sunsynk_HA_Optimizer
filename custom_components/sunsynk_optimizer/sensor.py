@@ -74,7 +74,10 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "overnight_drain_adjustment", "Overnight drain adjustment", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "evening_soc_adjustment", "Evening SOC adjustment", entity_category=EntityCategory.DIAGNOSTIC),
             SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate", entity_category=EntityCategory.DIAGNOSTIC),
-            SunsynkOptimizerSensor(coordinator, entry, "battery_capacity_estimate", "Battery capacity estimate", entity_category=EntityCategory.DIAGNOSTIC),
+            SunsynkOptimizerSensor(
+                coordinator, entry, "battery_capacity_estimate", "Battery capacity estimate",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.battery_capacity_estimate",
+            ),
             SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
             SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
             SunsynkOptimizerSensor(coordinator, entry, "saving_session", "Saving session"),

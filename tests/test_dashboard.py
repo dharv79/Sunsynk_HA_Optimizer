@@ -103,3 +103,9 @@ def test_malicious_id_cannot_inject_template(dashboard):
     blob = json.dumps(_build_dashboard(hostile))
     assert "{{states" not in blob
     assert "sensor.solarsynkv3_1statesx_battery_soc" in blob
+
+
+def test_dashboard_surfaces_bill_check_and_capacity(dashboard):
+    blob = json.dumps(dashboard)
+    for entity in ("number.billed_last_month", "sensor.battery_capacity_estimate", "sensor.cost_of_1_kwh_now"):
+        assert entity in blob, f"{entity} missing from dashboard"
