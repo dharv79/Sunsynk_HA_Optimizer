@@ -436,3 +436,51 @@ def test_daytime_import_missing_sensors(planning):
 def test_daytime_import_away_threshold(planning):
     assert planning.daytime_import_anomaly([900.0, 900.0], 60) is None
     assert planning.daytime_import_anomaly([900.0, 900.0], 60, planning.DAYTIME_IMPORT_AWAY_THRESHOLD_W)
+
+
+# ---- Phase 38: cost of 1 kWh now ----
+
+_PRICES = {"offpeak": 17.0, "day": 28.0, "peak": 39.0, "export_peak": 29.0}
+_EXPORT = [(2 * 60, 5 * 60, 7.0), (5 * 60, 16 * 60, 15.0), (16 * 60, 19 * 60, 29.0), (19 * 60, 2 * 60, 15.0)]
+
+
+def test_marginal_cost_solar(planning):
+    out = planning.marginal_cost_pence(12 * 60, 100, 40, True, _PRICES, _EXPORT)
+    assert out == {"pence": 15.0, "source": "solar"}
+
+
+def test_marginal_cost_battery_replacement(planning):
+    out = planning.marginal_cost_pence(12 * 60, 80, 40, False, _PRICES, _EXPORT, wear_pence=5.0)
+    assert out["source"] == "battery"
+    assert out["pence"] == round(17.0 / planning.ROUND_TRIP_EFFICIENCY + 5.0, 2)
+
+
+def test_marginal_cost_battery_peak_export_floor(planning):
+    out = planning.marginal_cost_pence(17 * 60, 80, 40, False, _PRICES, _EXPORT)
+    assert out == {"pence": 29.0, "source": "battery"}
+
+
+def test_marginal_cost_grid_below_reserve_and_offpeak(planning):
+    assert planning.marginal_cost_pence(12 * 60, 30, 40, False, _PRICES, _EXPORT) == {"pence": 28.0, "source": "grid"}
+    assert planning.marginal_cost_pence(3 * 60, 90, 40, False, _PRICES, _EXPORT) == {"pence": 17.0, "source": "grid"}
+    assert planning.marginal_cost_pence(17 * 60, None, 40, False, _PRICES, _EXPORT)["pence"] == 39.0
+
+
+def test_marginal_cost_missing_price_is_none(planning):
+    assert planning.marginal_cost_pence(12 * 60, 30, 40, False, {"day": None}, _EXPORT)["pence"] is None
+    assert planning.marginal_cost_pence(12 * 60, 30, 40, True, _PRICES, [])["pence"] is None
+    assert planning.marginal_cost_pence(12 * 60, 80, 40, False, {"offpeak": None}, _EXPORT)["pence"] is None
+
+
+def test_solar_is_spare(planning):
+    assert planning.solar_is_spare(-2000, 3000)
+    assert not planning.solar_is_spare(-2000, 500)   # battery exporting
+    assert not planning.solar_is_spare(-50, 3000)
+    assert not planning.solar_is_spare(None, 3000)
+
+
+def test_cheapest_hour_today(planning):
+    assert planning.cheapest_hour_today(20, _PRICES, _EXPORT) == {"hour": "20:00", "pence": 28.0, "source": "grid"}
+    out = planning.cheapest_hour_today(9, _PRICES, _EXPORT, [{"hour": 13, "spare_kwh": 1.2}, {"hour": 14, "spare_kwh": 0}])
+    assert out == {"hour": "13:00", "pence": 15.0, "source": "solar"}
+    assert planning.cheapest_hour_today(9, {}, _EXPORT) is None

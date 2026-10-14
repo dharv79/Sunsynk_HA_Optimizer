@@ -115,6 +115,8 @@ class OptimizerState:
     # Tariff price-change alert (phase 33): bands whose Octopus rate differs
     # from the configured `charges`, and the signature so each set alerts once.
     tariff_price_alert: dict[str, Any] = field(default_factory=dict)
+    # "Cost of 1 kWh now" (phase 38): pence, source, cheapest_hour_today, reserve_soc.
+    marginal_cost: dict[str, Any] = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

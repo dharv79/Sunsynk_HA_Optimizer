@@ -513,6 +513,9 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": "sensor.spare_solar_today", "type": "attribute", "attribute": "best_window_start", "name": "Best window start"},
                                     {"entity": "sensor.spare_solar_today", "type": "attribute", "attribute": "best_window_end", "name": "Best window end"},
                                     {"entity": "sensor.spare_solar_today", "type": "attribute", "attribute": "best_window_kwh", "name": "Best window (kWh)"},
+                                    {"entity": "sensor.cost_of_1_kwh_now", "name": "Cost of 1 kWh now"},
+                                    {"entity": "sensor.cost_of_1_kwh_now", "type": "attribute", "attribute": "source", "name": "Now from"},
+                                    {"entity": "sensor.cost_of_1_kwh_now", "type": "attribute", "attribute": "cheapest_hour_today", "name": "Cheapest hour left"},
                                 ],
                             },
                             {

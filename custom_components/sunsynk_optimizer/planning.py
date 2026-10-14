@@ -1851,3 +1851,90 @@ def multi_day_shadow(
         out.update(live_peak_target_soc=peak_target_soc, would_peak_target_soc=would,
                    changes_peak=would != peak_target_soc)
     return out
+
+
+# "Cost of 1 kWh now" sensor (phase 38).
+MARGINAL_SOLAR_MIN_EXPORT_W = 100.0
+
+
+def band_key_at(minutes: int) -> str:
+    """The `kpi_prices_pence` import band key for a local minute of day."""
+    if 2 * 60 <= minutes < TRIM_FROM_MINUTES:  # Flux off-peak 02:00-05:00
+        return "offpeak"
+    if PEAK_START_MINUTES <= minutes < PEAK_END_MINUTES:
+        return "peak"
+    return "day"
+
+
+def price_at(bands: list[tuple[int, int, float]], minutes: int) -> float | None:
+    """Price of the minute band (from `flux_bands_from_charges`) covering ``minutes``; None when none does."""
+    for start, end, price in bands:
+        inside = start <= minutes < end if start < end else (minutes >= start or minutes < end)
+        if inside:
+            return price
+    return None
+
+
+def solar_is_spare(grid_w: float | None, pv_w: float | None) -> bool:
+    """Exporting and PV covers the export, so the next kWh used is lost solar export."""
+    return (
+        isinstance(grid_w, (int, float)) and isinstance(pv_w, (int, float))
+        and grid_w < -MARGINAL_SOLAR_MIN_EXPORT_W and pv_w >= -grid_w
+    )
+
+
+def marginal_cost_pence(
+    minutes: int,
+    soc: float | None,
+    reserve_soc: float | None,
+    solar_spare: bool,
+    prices: dict[str, float | None],
+    export_bands: list[tuple[int, int, float]],
+    wear_pence: float | None = None,
+    efficiency: float = ROUND_TRIP_EFFICIENCY,
+) -> dict[str, Any]:
+    """{"pence", "source"} for using 1 kWh at ``minutes``; pence None when its price is unknown (never 0p).
+
+    Spare solar costs the export it displaces. Battery above ``reserve_soc``
+    costs its off-peak replacement (/ round-trip efficiency + wear), or the
+    current export price if higher (that kWh could have been sold). Otherwise
+    the grid import price for the band. The off-peak band is always grid.
+    """
+    band = band_key_at(minutes)
+    export = price_at(export_bands, minutes)
+    if solar_spare:
+        return {"pence": round_or_none(export), "source": "solar"}
+    if band != "offpeak" and isinstance(soc, (int, float)) and isinstance(reserve_soc, (int, float)) and soc > reserve_soc:
+        offpeak = prices.get("offpeak")
+        if offpeak is None:
+            return {"pence": None, "source": "battery"}
+        cost = offpeak / efficiency + (wear_pence or 0.0)
+        if export is not None:
+            cost = max(cost, export)
+        return {"pence": round(cost, 2), "source": "battery"}
+    return {"pence": round_or_none(prices.get(band)), "source": "grid"}
+
+
+def cheapest_hour_today(
+    from_hour: int,
+    prices: dict[str, float | None],
+    export_bands: list[tuple[int, int, float]],
+    spare_hours: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Earliest cheapest remaining hour today: spare-solar hours cost their export price, others the grid band.
+
+    Hours without a price are skipped; None when no hour is priced.
+    """
+    spare = {h.get("hour") for h in spare_hours or [] if (h.get("spare_kwh") or 0) > 0}
+    best: dict[str, Any] | None = None
+    for hour in range(max(0, from_hour), 24):
+        minutes = hour * 60
+        if hour in spare:
+            pence, source = price_at(export_bands, minutes), "solar"
+        else:
+            pence, source = prices.get(band_key_at(minutes)), "grid"
+        if pence is None:
+            continue
+        if best is None or pence < best["pence"]:
+            best = {"hour": f"{hour:02d}:00", "pence": round(pence, 2), "source": source}
+    return best

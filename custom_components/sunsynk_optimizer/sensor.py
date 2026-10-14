@@ -78,6 +78,9 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
             SunsynkOptimizerSensor(coordinator, entry, "saving_session", "Saving session"),
             SunsynkOptimizerSensor(coordinator, entry, "spare_solar", "Spare solar today"),
+            SunsynkOptimizerSensor(
+                coordinator, entry, "marginal_cost", "Cost of 1 kWh now", entity_id="sensor.cost_of_1_kwh_now"
+            ),
         ]
     )
 
@@ -104,6 +107,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_unit_of_measurement(self) -> str | None:
+        if self._sensor_key == "marginal_cost":
+            return "p/kWh"
         return "kWh" if self._sensor_key == "spare_solar" else None
 
     @property
@@ -138,6 +143,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "spare_solar":
             return _as_dict(state.spare_solar).get("total_kwh")
+
+        if self._sensor_key == "marginal_cost":
+            return _as_dict(state.marginal_cost).get("pence")
 
         if self._sensor_key == "import_plan_end":
             plan = state.last_import_plan
@@ -215,6 +223,16 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 "best_window_end": window.get("end"),
                 "best_window_kwh": window.get("kwh"),
                 "hours": spare.get("hours", []),
+            }
+        if self._sensor_key == "marginal_cost":
+            cost = _as_dict(state.marginal_cost)
+            cheapest = _as_dict(cost.get("cheapest_hour_today"))
+            return {
+                "source": cost.get("source"),
+                "cheapest_hour_today": cheapest.get("hour"),
+                "cheapest_hour_pence": cheapest.get("pence"),
+                "cheapest_hour_source": cheapest.get("source"),
+                "reserve_soc": cost.get("reserve_soc"),
             }
         if self._sensor_key == "last_error":
             attrs: dict[str, Any] = {}

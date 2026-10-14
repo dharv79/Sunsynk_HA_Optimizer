@@ -1,6 +1,6 @@
 # Phase 40 — Daytime load spike alert
 
-**Status:** Planned, not built. **Size:** XS–S, ~20-30k est. **Origin:** improvement list 3, 14/10/2026 (item 10).
+**Status:** Done, merged (33fb1fd, PR #63). **Size:** XS, ~20k actual. **Origin:** improvement list 3, 14/10/2026 (item 10).
 
 ## Goal
 

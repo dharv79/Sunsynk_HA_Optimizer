@@ -144,6 +144,9 @@ from .planning import (
     DAYTIME_IMPORT_THRESHOLD_W,
     DAYTIME_IMPORT_UNTIL_HOUR,
     daytime_import_anomaly,
+    cheapest_hour_today,
+    marginal_cost_pence,
+    solar_is_spare,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
     manual_free_event_error,
@@ -1782,6 +1785,7 @@ class SunsynkOptimizer:
         await self._guarded(self.async_run_peak_cover, "Peak cover")
         await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
         await self._guarded(self._async_daytime_import_check, "Daytime import check")
+        await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
 
     async def _async_track_clipped_solar(self) -> None:
         """Tally solar lost while the battery is full and export is at the limit (phase 29); no writes."""
@@ -2189,6 +2193,7 @@ class SunsynkOptimizer:
         new_state = event.data.get("new_state")
         if new_state is None:
             return
+        await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
         if self._slots_held():
             return
 
@@ -2260,6 +2265,29 @@ class SunsynkOptimizer:
 
         elif soc > 85 and not is_full_day:
             await self.async_run_flux2_check()
+
+    async def _async_refresh_marginal_cost(self) -> None:
+        """Recompute sensor.cost_of_1_kwh_now (phase 38); read-only, writes state only when it changes."""
+        cfg = self.cfg
+        now = dt_util.now()
+        minutes = now.hour * 60 + now.minute
+        prices, _sources = self._tariff_prices(now.date())
+        export_bands = flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export")
+        soc = self._essential_state(self.battery_soc_entity)
+        # Battery must still cover the house from now (or 16:00) to 02:00.
+        start = minutes - 24 * 60 if minutes < 2 * 60 else max(minutes, 16 * 60)
+        hours = max(0.0, (26 * 60 - start) / 60.0)
+        reserve = evening_reserve_soc(self._plan_load_kw(cfg), self._capacity_kwh(cfg), hours=hours)
+        pv_parts = [self._essential_state(e) for e in (self.pv_mppt0_entity, self.pv_mppt1_entity)]
+        pv_w = sum(p for p in pv_parts if p is not None) if any(p is not None for p in pv_parts) else None
+        spare = solar_is_spare(self._essential_state(self.grid_pac_entity), pv_w)
+        result = marginal_cost_pence(minutes, soc, reserve, spare, prices, export_bands, self._wear_pence())
+        spare_solar = self.coordinator.state.spare_solar or {}
+        spare_hours = spare_solar.get("hours") if spare_solar.get("date") == now.date().isoformat() else None
+        result["cheapest_hour_today"] = cheapest_hour_today(now.hour, prices, export_bands, spare_hours)
+        result["reserve_soc"] = reserve
+        if result != self.coordinator.state.marginal_cost:
+            self.coordinator.update_state(touch=False, marginal_cost=result)
 
     def _refresh_spare_solar(self) -> dict[str, Any] | None:
         """Recompute the spare-solar estimate into state (no inverter writes); None without a forecast."""
