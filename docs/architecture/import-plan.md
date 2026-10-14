@@ -159,3 +159,7 @@ Catches a night where the Flux 1 charge silently fails (cloud write lost, invert
 ## Battery limits (14/10/2026)
 
 `planning.BATTERY_BOTTOM_SOC = 20` (the inverter stops discharging) and `BATTERY_LOW_SOC = 25` (it starts slowing discharge). The bottom is the floor for the solar bridge, the evening reserve / KPI reserve and the saving-session minimum floor. The low mark is the target for the estimated 06:00 SOC (`apply_soc_adjustments`) and the peak-cover floor, so the house gets full-power discharge through the morning and the 16:00–19:00 peak. Values unchanged; previously literals.
+
+## Plan push retry (14/10/2026)
+
+Phase 32. When the 01:55 (or startup) plan push fails, `_arm_plan_retry` re-pushes the same payload every `PLAN_RETRY_INTERVAL_MINUTES` (10) while `planning.plan_retry_due` holds: the retry lands between 01:30 and 02:40 and fewer than 5 retries have run. A daytime startup failure therefore doesn't retry. The handle is unpersisted; any new plan run cancels it. Each retry stops in monitor mode or while `_slots_held()`. On success it sets `api_ok`/`retrying` on `last_import_plan` (and `nightly_import_plan` when the payload matches), clears `last_error` and notifies "import plan set (retry N)". When the window runs out it notifies "import plan NOT applied". The plan notification says "retrying every 10 min" while a retry is armed. The 02:20 watchdog may also re-push; both pushes are idempotent. Tests: `test_plan_retry_due`.
