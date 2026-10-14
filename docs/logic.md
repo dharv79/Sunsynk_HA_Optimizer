@@ -209,6 +209,10 @@ The 1-hour hold allows the battery cells to fully condition at 100% before trimm
 
 Both trims sell down to `max(82%, evening_reserve_soc)`, and skip when that is not below the current SOC.
 
+### Trim time guard (14/10/2026)
+
+Neither trim runs 19:00–05:00, and before 16:00 the floor also includes the target tonight's plan charged to (`planning.trim_target_soc(..., minutes=, plan_target_soc=)`). Selling at the night/day export rate and rebuying later loses money, and an overnight trim fights the charge.
+
 ```
 evening_reserve_soc = min(100, ceil(20 + load_kw × 7 h / battery_capacity_kwh × 100))
 ```

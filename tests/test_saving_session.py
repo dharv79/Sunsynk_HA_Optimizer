@@ -118,3 +118,14 @@ def test_wear_cost_can_stop_the_precharge_and_boost(planning):
     plan = _plan(planning, wear_pence=250.0)
     assert plan.floor_reason == "evening_reserve" and not plan.precharge and not plan.offpeak_boost
     assert _plan(planning, wear_pence=None).precharge
+
+
+def test_precharge_never_buys_in_the_peak_for_an_evening_session(planning):
+    # 19:30 session, 5 kWh to fill at 3 kW: filling up to the start would begin at 17:50.
+    start = START.replace(hour=19, minute=30)
+    plan = _plan(planning, session_start=start, session_end=start + timedelta(hours=1), soc=50.0)
+    assert plan.precharge_end == START.replace(hour=16)
+    # A late session with a short fill still tops up right before it.
+    late = START.replace(hour=22)
+    plan = _plan(planning, session_start=late, session_end=late + timedelta(hours=1), soc=80.0)
+    assert plan.precharge_end == late

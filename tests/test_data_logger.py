@@ -188,3 +188,26 @@ def test_import_plan_log_keeps_fields_read_back_by_pairing(DataLogger):
     paired = logger._pair_records([rec, actuals])
     assert paired[0]["away"] is True
     assert DataLogger.last_known_charge_rate_kw(paired) == 2.4
+
+
+# --------------------------------------------------------------------------- #
+# Unavailable readings are None, never 0, and are left out of learning          #
+# --------------------------------------------------------------------------- #
+
+def test_forecast_correction_skips_days_without_actual_solar(dl):
+    n = dl._MIN_DAYS_FORECAST_CORRECTION
+    days = [make_day(actual_solar_kwh=30.0) for _ in range(n)] + [make_day(actual_solar_kwh=None)] * 5
+    assert dl.compute_forecast_correction(days) == 1.5
+    assert dl.count_forecast_correction_days(days) == n
+
+
+def test_evening_nudge_ignores_days_without_evening_soc(dl):
+    days = [make_day(evening_soc=None) for _ in range(10)]
+    assert dl.compute_soc_target_adjustment(days, "summer_like") == 0
+    assert dl.count_soc_adjustment_days(days, "summer_like") == 0
+
+
+def test_charge_rate_counter_matches_the_calibration_filter(dl):
+    # 02:00 -> 04:30 used to count only from >2.5h; 02:15 (0.25h) charges count in both.
+    days = [make_day(target_soc=80, initial_soc=40, flux1_end=end) for end in ("02:15", "04:30", "06:30")]
+    assert dl.count_charge_rate_calibration_days(days) == 2

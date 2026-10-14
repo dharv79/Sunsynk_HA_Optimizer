@@ -26,13 +26,16 @@ from .const import STORAGE_KEY, STORAGE_VERSION, CONF_PASSWORD, CONF_USERNAME
 from .flux_helpers import merge_entry_data
 from .optimizer import SunsynkOptimizer
 
+_SAVE_DELAY_SECONDS = 1
+
 
 @dataclass
 class OptimizerState:
     """Single source of truth for all optimizer runtime state.
 
-    Every field is persisted to HA storage on each mutation via update_state(),
-    so state survives HA restarts. All entity property methods read from here.
+    Every field is persisted to HA storage after each mutation via update_state()
+    (writes within a second coalesce; flushed on unload and HA shutdown), so state
+    survives HA restarts. All entity property methods read from here.
     """
 
     selected_full_charge_day: str | None = None
@@ -53,7 +56,6 @@ class OptimizerState:
     next_import_window: str | None = None
     current_soc_target: int | None = None
     operation_mode: str = "auto"
-    last_payload_hash: str | None = None
     last_morning_state: dict = field(default_factory=dict)
     # Most recent 22:00 day-actuals capture (evening SOC, actual solar, and the
     # v1.0.10 load/grid daily totals). Not previously persisted — captured only
@@ -136,6 +138,8 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
 
     async def async_shutdown(self) -> None:
         await self.optimizer.async_shutdown()
+        # Flush any pending delayed save before a reload re-reads the store.
+        await self._async_save_state()
 
     def update_state(self, touch: bool = True, **kwargs: Any) -> None:
         """Update one or more state fields and persist to storage.
@@ -149,7 +153,8 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
         if touch:
             self.state.updated_at = datetime.now(timezone.utc).isoformat()
         self.async_set_updated_data(self.state)
-        self.hass.async_create_task(self._async_save_state())
+        # Bursts of updates (several per callback) coalesce into one write.
+        self.storage.async_delay_save(lambda: dict(self.state.__dict__), _SAVE_DELAY_SECONDS)
 
     async def _async_save_state(self) -> None:
         """Persist state to storage with error handling.
@@ -158,7 +163,7 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
         and surface via last_error so the user notices on the dashboard.
         """
         try:
-            await self.storage.async_save(self.state.__dict__)
+            await self.storage.async_save(dict(self.state.__dict__))
         except Exception as exc:  # pragma: no cover
             self.logger.exception("Failed to persist optimizer state")
             self.state.last_error = f"State persistence failed: {exc}"

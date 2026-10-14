@@ -20,12 +20,13 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .data_logger import DataLogger
 
 
 _ADAPTIVE_THRESHOLDS = {
-    "forecast_correction": 7,        # _MIN_DAYS_FORECAST_CORRECTION
-    "overnight_drain_adjustment": 5,  # _MIN_DAYS_SOC_ADJUSTMENT
-    "evening_soc_adjustment": 5,      # _MIN_DAYS_SOC_ADJUSTMENT
+    "forecast_correction": DataLogger._MIN_DAYS_FORECAST_CORRECTION,
+    "overnight_drain_adjustment": DataLogger._MIN_DAYS_SOC_ADJUSTMENT,
+    "evening_soc_adjustment": DataLogger._MIN_DAYS_SOC_ADJUSTMENT,
     "effective_charge_rate": 3,       # min for compute_effective_charge_rate_kw
 }
 
@@ -61,7 +62,8 @@ async def async_setup_entry(
     async_add_entities(
         [
             SunsynkOptimizerSensor(coordinator, entry, "selected_full_charge_day", "Selected full charge day"),
-            SunsynkOptimizerSensor(coordinator, entry, "import_plan_end", "Import plan"),
+            # Explicit entity id: the dashboard references the pre-rename id.
+            SunsynkOptimizerSensor(coordinator, entry, "import_plan_end", "Import plan", entity_id="sensor.import_plan_end"),
             SunsynkOptimizerSensor(coordinator, entry, "flux2_action", "Flux 2 action"),
             SunsynkOptimizerSensor(coordinator, entry, "next_import_window", "Next import window"),
             SunsynkOptimizerSensor(coordinator, entry, "current_soc_target", "Current SOC target"),
@@ -90,8 +92,11 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         sensor_key: str,
         name: str,
         entity_category: EntityCategory | None = None,
+        entity_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
+        if entity_id:
+            self.entity_id = entity_id  # used for new installs only; the registry keeps existing ids
         self._sensor_key = sensor_key
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"

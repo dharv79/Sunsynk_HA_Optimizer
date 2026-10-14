@@ -165,10 +165,3 @@ CONF_FREE_EVENT_EXPORT_RATE_KW = "free_event_export_rate_kw"
 # events entity — blank disables auto-detect.
 CONF_SAVING_SESSION_REWARD_PENCE = "saving_session_reward_pence"
 CONF_OCTOPUS_SAVING_SESSION_ENTITY = "octopus_saving_session_entity"
-
-SERVICE_RECALCULATE_FULL_CHARGE_DAY = "recalculate_full_charge_day"
-SERVICE_RUN_IMPORT_PLAN_NOW = "run_import_plan_now"
-SERVICE_RUN_FLUX2_CHECK_NOW = "run_flux2_check_now"
-SERVICE_PUSH_CURRENT_CONFIG = "push_current_config"
-SERVICE_PUSH_FLUX_OVERRIDE = "push_flux_override"
-SERVICE_RESET_FLUX_DEFAULTS = "reset_flux_defaults"

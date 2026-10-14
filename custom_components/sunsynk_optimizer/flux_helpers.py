@@ -56,7 +56,7 @@ def default_flux_products() -> list[dict[str, Any]]:
 
 
 def _parse_minutes(hhmm: str) -> int:
-    hours, minutes = hhmm.split(":")
+    hours, minutes = hhmm.split(":")[:2]
     return int(hours) * 60 + int(minutes)
 
 
@@ -100,15 +100,6 @@ def band_price_pence_per_kwh(
         if _minutes_in_range(midpoint, row.get("startRange"), row.get("endRange")):
             return float(row["price"])
     return None
-
-
-def peak_import_price_pence_per_kwh(
-    charges: list[dict[str, Any]],
-    window_start: str = "16:00",
-    window_end: str = "19:00",
-) -> float | None:
-    """Import price for the peak window; None when no import row matches (never 0p)."""
-    return band_price_pence_per_kwh(charges, window_start, window_end, "import")
 
 
 # Flux bands the KPIs and decisions price: key -> (start, end, status).

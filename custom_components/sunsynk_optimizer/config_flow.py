@@ -214,13 +214,13 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             ),
             vol.Optional(
                 CONF_FREE_EVENT_CHARGE_RATE_KW,
-                default=values.get(CONF_FREE_EVENT_CHARGE_RATE_KW) or values.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE),
+                description={"suggested_value": values.get(CONF_FREE_EVENT_CHARGE_RATE_KW)},
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
             vol.Optional(
                 CONF_FREE_EVENT_EXPORT_RATE_KW,
-                default=values.get(CONF_FREE_EVENT_EXPORT_RATE_KW) or values.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE),
+                description={"suggested_value": values.get(CONF_FREE_EVENT_EXPORT_RATE_KW)},
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
@@ -411,7 +411,6 @@ class SunsynkOptimizerOptionsFlow(config_entries.OptionsFlow):
     """
 
     def __init__(self, config_entry):
-        self._config_entry = config_entry
         self._working = merge_entry_data(dict(config_entry.data), dict(config_entry.options))
 
     async def async_step_init(self, user_input=None):
@@ -419,6 +418,10 @@ class SunsynkOptimizerOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             errors = await _validate_input(self.hass, user_input, validate_login=False)
             if not errors:
+                # An emptied optional field is left out of user_input: drop it so "blank = off" sticks.
+                for key in _base_schema(self._working, include_credentials=False).schema:
+                    if isinstance(key, vol.Optional) and key.schema not in user_input:
+                        self._working.pop(key.schema, None)
                 self._working.update(user_input)
                 self._working.setdefault(CONF_NOTIFY_TARGET, DEFAULT_NOTIFY_TARGET)
                 self._working.setdefault(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
