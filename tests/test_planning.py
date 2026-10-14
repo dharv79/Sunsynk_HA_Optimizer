@@ -696,3 +696,12 @@ def test_grid_current_drift(planning):
     assert planning.grid_current_drift(40.0, "90") == [
         {"slot": None, "field": "grid_charge_current_a", "expected": 40.0, "actual": 90.0}
     ]
+
+
+def test_tariff_price_changes(planning):
+    configured = {"offpeak": 14.0, "day": 23.28, "peak": 32.6, "export_peak": 28.5}
+    assert planning.tariff_price_changes(configured, dict(configured)) == []
+    assert planning.tariff_price_changes(configured, {"day": 23.284}) == []  # rounding
+    assert planning.tariff_price_changes(configured, {"day": 24.10, "peak": None}) == [("day", 23.28, 24.1)]
+    # Missing Octopus band or missing configured price: ignored, never "0p".
+    assert planning.tariff_price_changes({"day": None}, {"day": 24.1, "offpeak": 0.0}) == []

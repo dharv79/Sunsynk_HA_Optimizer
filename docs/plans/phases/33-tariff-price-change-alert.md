@@ -1,6 +1,6 @@
 # Phase 33 — Tariff price-change alert
 
-**Status:** Planned, not built. **Size:** XS–S, ~20-30k est. **Origin:** improvement list 3, 14/10/2026 (item 3).
+**Status:** Done, merged (PR #59). **Size:** XS, ~15k actual. Runs at 06:10 (after the 06:00/06:05 jobs). **Origin:** improvement list 3, 14/10/2026 (item 3).
 
 ## Goal
 

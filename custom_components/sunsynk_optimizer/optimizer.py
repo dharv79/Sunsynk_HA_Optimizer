@@ -109,6 +109,7 @@ from .flux_helpers import (
     merge_entry_data,
     octopus_rate_pence_per_kwh,
     price_source,
+    kpi_prices_pence,
     tariff_prices_pence,
 )
 from .planning import (
@@ -146,6 +147,7 @@ from .planning import (
     expected_grid_current_a,
     flux_drift,
     grid_current_drift,
+    tariff_price_changes,
     plan_retry_due,
     apply_soc_adjustments,
     charge_efficiency,
@@ -224,6 +226,9 @@ def _drift_line(diff: dict[str, Any]) -> str:
         return f"Grid charge current: plan {diff['expected']} A, inverter {diff['actual']} A"
     name = _DRIFT_SLOT_NAMES.get(diff["slot"], f"Slot {diff['slot']}")
     return f"{name} {diff['field']}: plan {diff['expected']}, inverter {diff['actual']}"
+
+
+TARIFF_BAND_LABELS = {"offpeak": "Off-peak", "day": "Day", "peak": "Peak", "export_peak": "Peak export"}
 
 
 def _session_api_note(api_ok: bool | None) -> str:
@@ -360,6 +365,7 @@ class SunsynkOptimizer:
             (CHARGE_WATCHDOG_MINUTES // 60, CHARGE_WATCHDOG_MINUTES % 60, self._async_charge_watchdog),
             (6, 0, self._async_capture_morning_state),
             (6, 5, self._async_spare_solar_morning),
+            (6, 10, self._async_tariff_price_check),
             (22, 0, self._async_capture_day_actuals),  # also takes the 22:00 meter snapshot
             # Phase 14 KPI snapshots at the Flux band edges.
             (2, 0, self._async_meter_snapshot),
@@ -2007,6 +2013,11 @@ class SunsynkOptimizer:
     def _tariff_prices(self, on_date=None) -> tuple[dict[str, float | None], dict[str, str | None]]:
         """Band prices (p/kWh) + per-band source: Octopus rate entities first, then `charges` (phase 18)."""
         cfg = self.cfg
+        return tariff_prices_pence(cfg.get(CONF_CHARGES, []), self._octopus_band_prices(on_date, cfg))
+
+    def _octopus_band_prices(self, on_date=None, cfg=None) -> dict[str, float | None]:
+        """Per-band p/kWh from the Octopus rate entities; bands without an entity are absent."""
+        cfg = cfg or self.cfg
         entities = {
             "import": self._cfg_str(CONF_OCTOPUS_IMPORT_RATES_ENTITY, cfg),
             "export": self._cfg_str(CONF_OCTOPUS_EXPORT_RATES_ENTITY, cfg),
@@ -2018,7 +2029,34 @@ class SunsynkOptimizer:
                 octopus[key] = octopus_rate_pence_per_kwh(
                     state.state, dict(state.attributes), start, end, on_date, dt_util.DEFAULT_TIME_ZONE
                 )
-        return tariff_prices_pence(cfg.get(CONF_CHARGES, []), octopus)
+        return octopus
+
+    async def _async_tariff_price_check(self, _now) -> None:
+        await self._guarded(self.async_run_tariff_price_check, "Tariff price check")
+
+    async def async_run_tariff_price_check(self) -> None:
+        """06:10: alert once when the Octopus rates no longer match the configured `charges` (phase 33)."""
+        octopus = self._octopus_band_prices(dt_util.now().date())
+        if not octopus:
+            return  # No Octopus rate entities configured.
+        changes = tariff_price_changes(kpi_prices_pence(self.cfg.get(CONF_CHARGES, [])), octopus)
+        previous = self.coordinator.state.tariff_price_alert.get("signature")
+        if not changes:
+            if previous:
+                self.coordinator.update_state(tariff_price_alert={})
+            return
+        signature = json.dumps(changes)
+        if signature == previous:
+            return
+        self.coordinator.update_state(
+            tariff_price_alert={"signature": signature, "since": dt_util.now().date().isoformat(), "changes": changes}
+        )
+        await self.async_notify(
+            "🔋 Sunsynk: Flux prices changed",
+            "; ".join(f"{TARIFF_BAND_LABELS.get(b, b)} {mine:.2f}p → {theirs:.2f}p" for b, mine, theirs in changes)
+            + ". Decisions already use the Octopus rates; update Configure → tariff rows so the "
+            "Sunsynk app's income figures and the fallback match.",
+        )
 
     def _peak_export_holds_flux2(self, now_local) -> bool:
         """True while today's live peak export window owns Flux 2 (16:00-19:00)."""
@@ -2321,10 +2359,15 @@ class SunsynkOptimizer:
             f"{TARIFF_LABELS[k]}: " + (f"£{v:.2f}" if v is not None else "n/a")
             for k, v in result["net_gbp"].items()
         ]
+        stale = (
+            " Flux prices here are your configured tariff rows, which differ from Octopus's current rates."
+            if self.coordinator.state.tariff_price_alert.get("changes")
+            else ""
+        )
         await self.async_notify(
             "🔋 Sunsynk: tariff comparison for " + month,
             f"{result['days_compared']} days, net of export, same usage. " + " · ".join(lines)
-            + f". Unit rates only (as of {TARIFF_RATES_AS_OF}); battery use would differ on another tariff.",
+            + f". Unit rates only (as of {TARIFF_RATES_AS_OF}); battery use would differ on another tariff.{stale}",
         )
 
     async def _async_capture_day_actuals(self, _now) -> None:
