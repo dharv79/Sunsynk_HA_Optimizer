@@ -39,7 +39,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 29. Clipped solar detection | Done, merged (cee4395, PR #52) | S, ~30k actual |
 | 30. Peak cover (reach 16:00 with enough battery for the peak window) | Done, merged (38d333b, PR #47) | S–M, ~45k actual |
 | 31. Inverter drift check | Planned, not built | S, ~30-45k |
-| 32. Retry a failed overnight plan push | Planned, not built | XS, ~15-25k |
+| 32. Retry a failed overnight plan push | Done, merged (PR #57) | XS, ~20k |
 | 33. Tariff price-change alert | Planned, not built | XS–S, ~20-30k |
 | 34. Battery capacity tracking | Planned, not built | M, ~45-70k |
 | 35. Fuller tariff comparison (standing charges, VAT, Agile/Intelligent) | Planned, not built | M, ~50-80k |
