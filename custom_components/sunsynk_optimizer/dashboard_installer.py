@@ -567,6 +567,21 @@ Status cards show the latest calculated import window, Flux 2 action, and mode."
                                     {"entity": "sensor.consumption", "type": "attribute", "attribute": "net_cost_gbp", "name": "Net cost (£)"},
                                 ],
                             },
+                            {
+                                "type": "entities",
+                                "title": "Bill check and battery health",
+                                "show_header_toggle": False,
+                                "entities": [
+                                    {"entity": "number.billed_last_month", "name": "Billed last month (£)"},
+                                    {"entity": "number.billed_last_month", "type": "attribute", "attribute": "month", "name": "Bill month"},
+                                    {"entity": "number.billed_last_month", "type": "attribute", "attribute": "logged_gbp", "name": "Logged cost (£)"},
+                                    {"entity": "number.billed_last_month", "type": "attribute", "attribute": "gap_gbp", "name": "Gap (£)"},
+                                    {"entity": "number.billed_last_month", "type": "attribute", "attribute": "days_logged", "name": "Days logged"},
+                                    {"entity": "sensor.battery_capacity_estimate", "name": "Battery capacity estimate (kWh)"},
+                                    {"entity": "sensor.battery_capacity_estimate", "type": "attribute", "attribute": "pct_of_configured", "name": "Of configured (%)"},
+                                    {"entity": "sensor.battery_capacity_estimate", "type": "attribute", "attribute": "samples", "name": "Samples"},
+                                ],
+                            },
                         ],
                     },
                     {
