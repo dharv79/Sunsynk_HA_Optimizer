@@ -586,6 +586,13 @@ def test_capacity_low(planning):
     assert not planning.capacity_low(None, 9.58)
 
 
+def test_capacity_estimate_pending(planning):
+    assert planning.capacity_estimate_pending(None)
+    assert planning.capacity_estimate_pending({})
+    assert planning.capacity_estimate_pending({"estimate_kwh": None, "samples": 4})
+    assert not planning.capacity_estimate_pending({"estimate_kwh": 9.4, "samples": 5})
+
+
 # ---- Phase 36: bill reconciliation ----
 
 

@@ -153,6 +153,7 @@ from .planning import (
     no_battery_baseline,
     CAPACITY_HISTORY_DAYS,
     capacity_estimate,
+    capacity_estimate_pending,
     capacity_low,
     capacity_samples,
     logged_day_cost_gbp,
@@ -435,7 +436,7 @@ class SunsynkOptimizer:
         self.coordinator.update_state(operation_mode=self.operation_mode)
         self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
         self.unsubs.append(async_call_later(self.hass, 90, lambda _now: self._refresh_spare_solar()))
-        if not self.coordinator.state.battery_capacity_estimate:
+        if capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
             self.unsubs.append(async_call_later(self.hass, 120, self._async_initial_capacity_estimate))
 
         if self._free_event_active():
@@ -1910,6 +1911,9 @@ class SunsynkOptimizer:
         await self._guarded(lambda: self.async_capture_meter_snapshot(time), "Meter snapshot")
         if time == "05:00":
             await self._guarded(self._async_overnight_load_check, "Overnight baseload check")
+        # Until a first estimate exists, re-measure after each sample-closing snapshot.
+        if time in ("05:00", "22:00") and capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
+            await self._guarded(lambda: self.async_run_capacity_estimate(notify=False), "Battery capacity estimate")
 
     async def _async_auto_away(self) -> None:
         """Set away mode from person/calendar signals (phase 27); no config = no-op."""

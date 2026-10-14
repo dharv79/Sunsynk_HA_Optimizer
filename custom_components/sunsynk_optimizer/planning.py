@@ -2083,6 +2083,11 @@ def capacity_low(estimate: float | None, configured_kwh: float, fraction: float 
     return estimate is not None and configured_kwh > 0 and estimate < configured_kwh * fraction
 
 
+def capacity_estimate_pending(record: dict[str, Any] | None) -> bool:
+    """No usable capacity estimate stored yet, so re-measure before the monthly run."""
+    return not record or record.get("estimate_kwh") is None
+
+
 # Bill reconciliation (phase 36).
 BILL_GAP_ALERT_GBP = 2.0
 
