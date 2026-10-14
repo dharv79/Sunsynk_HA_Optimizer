@@ -163,3 +163,14 @@ Catches a night where the Flux 1 charge silently fails (cloud write lost, invert
 ## Plan push retry (14/10/2026)
 
 Phase 32. When the 01:55 (or startup) plan push fails, `_arm_plan_retry` re-pushes the same payload every `PLAN_RETRY_INTERVAL_MINUTES` (10) while `planning.plan_retry_due` holds: the retry lands between 01:30 and 02:40 and fewer than 5 retries have run. A daytime startup failure therefore doesn't retry. The handle is unpersisted; any new plan run cancels it. Each retry stops in monitor mode or while `_slots_held()`. On success it sets `api_ok`/`retrying` on `last_import_plan` (and `nightly_import_plan` when the payload matches), clears `last_error` and notifies "import plan set (retry N)". When the window runs out it notifies "import plan NOT applied". The plan notification says "retrying every 10 min" while a retry is armed. The 02:20 watchdog may also re-push; both pushes are idempotent. Tests: `test_plan_retry_due`.
+
+## Multi-day low-solar planning, shadow (14/10/2026)
+
+Phase 39. This is shadow only: nothing it decides is pushed. `_async_multi_day_outlook` reads today's forecast and the tomorrow forecast sensor, each pessimistic (`min(raw, corrected)`, rule 8). `planning.low_solar_run` then counts the consecutive days below `LOW_SOLAR_THRESHOLD_KWH`, and a missing forecast ends the run.
+
+In a run of 2 or more days, `multi_day_shadow` records what would change and logs it as a `multi_day_plan` record (not deduped; one per stage):
+- **01:55 plan:** target 100%.
+- **Daytime trims:** off.
+- **16:00 peak export:** sells no lower than `multi_day_peak_floor_soc`. That is the reserve plus tomorrow's 05:00–19:00 shortfall, where shortfall = plan load × 14 h − tomorrow's solar − overnight refill (plan charge rate × 3 h × efficiency), clamped to [reserve, 100]. It holds back only what the cheap window can't put back, since a sale at peak that is refilled off-peak still pays.
+
+With a single low day or a missing forecast, nothing is logged and behaviour is unchanged. A live option comes after the shadow log has been reviewed. Tests: `test_low_solar_run`, `test_multi_day_peak_floor_soc`, `test_multi_day_shadow`.

@@ -127,6 +127,10 @@ from .planning import (
     agile_region_override,
     octopus_region,
     tariff_vat_percent,
+    MULTI_DAY_NEED_HOURS,
+    low_solar_run,
+    multi_day_peak_floor_soc,
+    multi_day_shadow,
     parse_half_hourly_charges,
     auto_away,
     CLIPPED_SOC_PCT,
@@ -1142,6 +1146,8 @@ class SunsynkOptimizer:
             last_effective_charge_rate_kw=effective_charge_rate,
         )
         await self._async_notify_import_plan(plan_state)
+        if source != STARTUP_PLAN_SOURCE:
+            await self._async_log_multi_day_shadow("plan", target_soc=target_soc)
 
     def _cancel_plan_retry(self) -> None:
         if self._plan_retry:
@@ -2015,6 +2021,42 @@ class SunsynkOptimizer:
         }
         await self.data_logger.async_log_peak_export(
             **{k: v for k, v in self._peak_export.items() if k != "type"}
+        )
+        await self._async_log_multi_day_shadow("peak_export", peak_target_soc=plan["target_soc"], reserve=reserve)
+
+    async def _async_multi_day_outlook(self, cfg: dict[str, Any]) -> tuple[int, float | None]:
+        """(low-solar run length from today, tomorrow's pessimistic forecast kWh) — phase 39."""
+        tomorrow_id = str(cfg.get(CONF_TOMORROW_FORECAST_SENSOR, DEFAULT_TOMORROW_FORECAST_SENSOR) or "").strip()
+        raw = [
+            self._essential_state(cfg[CONF_SOLAR_FORECAST_SENSOR]),
+            self._essential_state(tomorrow_id) if tomorrow_id else None,
+        ]
+        paired_days = await self.data_logger.async_load_paired_days(days=30)
+        correction = self.data_logger.compute_forecast_correction(paired_days)
+        # Pessimistic of raw vs corrected, as for every low-solar decision (rule 8).
+        days = [None if kwh is None else round(min(kwh, kwh * correction), 2) for kwh in raw]
+        return low_solar_run(days), days[1]
+
+    async def _async_log_multi_day_shadow(
+        self, stage: str, target_soc: int | None = None, peak_target_soc: int | None = None, reserve: int = 0
+    ) -> None:
+        """Log what multi-day low-solar planning would change (phase 39, shadow only — no writes)."""
+        cfg = self.cfg
+        run_days, tomorrow_kwh = await self._async_multi_day_outlook(cfg)
+        floor = None
+        if peak_target_soc is not None:
+            plan = self.coordinator.state.nightly_import_plan or {}
+            rate, efficiency = plan.get("used_charge_rate_kw"), plan.get("charge_efficiency")
+            refill = rate * CHEAP_WINDOW_HOURS * efficiency if rate is not None and efficiency is not None else None
+            floor = multi_day_peak_floor_soc(
+                reserve, self._capacity_kwh(cfg), self._plan_load_kw(cfg) * MULTI_DAY_NEED_HOURS, tomorrow_kwh, refill
+            )
+        shadow = multi_day_shadow(run_days, target_soc, peak_target_soc, floor)
+        if shadow is None:
+            return
+        await self.data_logger.async_log_multi_day_plan(
+            date=dt_util.now().date().isoformat(), stage=stage, tomorrow_solar_kwh=tomorrow_kwh,
+            peak_floor_soc=floor, **shadow,
         )
 
     def _tariff_prices(self, on_date=None) -> tuple[dict[str, float | None], dict[str, str | None]]:
