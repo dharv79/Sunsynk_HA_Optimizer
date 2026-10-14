@@ -138,6 +138,12 @@ from .planning import (
     is_clipping,
     overnight_target_too_high,
     baseload_anomaly,
+    DAYTIME_IMPORT_AWAY_THRESHOLD_W,
+    DAYTIME_IMPORT_CHECKS,
+    DAYTIME_IMPORT_FROM_HOUR,
+    DAYTIME_IMPORT_THRESHOLD_W,
+    DAYTIME_IMPORT_UNTIL_HOUR,
+    daytime_import_anomaly,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
     manual_free_event_error,
@@ -289,6 +295,8 @@ class SunsynkOptimizer:
         self._peak_window_start: dict[str, Any] | None = None
         # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
         self._clipped: dict[str, Any] = {}
+        # Phase 40: today's daytime grid_pac samples and whether it alerted; unpersisted.
+        self._daytime_import: dict[str, Any] = {}
         # Cost-aware export-disable shadow-mode tally (v1.0.11 Part 3). Counts
         # how many 30-minute checks the cost trigger disagreed with the live
         # Watt trigger, and a rough £ estimate of the exposure. Not persisted —
@@ -1773,6 +1781,7 @@ class SunsynkOptimizer:
         await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
         await self._guarded(self.async_run_peak_cover, "Peak cover")
         await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
+        await self._guarded(self._async_daytime_import_check, "Daytime import check")
 
     async def _async_track_clipped_solar(self) -> None:
         """Tally solar lost while the battery is full and export is at the limit (phase 29); no writes."""
@@ -1795,6 +1804,39 @@ class SunsynkOptimizer:
         self._clipped["periods"] += 1
         if lost is not None:
             self._clipped["kwh"] = (self._clipped["kwh"] or 0.0) + lost
+
+    async def _async_daytime_import_check(self) -> None:
+        """05:00-16:00: alert once a day on sustained grid import while the battery should cover the house (phase 40).
+
+        Read-only, so it runs in monitor mode too. Skipped while an event or
+        peak cover holds the slots (import is intended then).
+        """
+        if not self.cfg.get(CONF_BASELOAD_ALERT, DEFAULT_BASELOAD_ALERT):
+            return
+        now = dt_util.now()
+        today = now.date().isoformat()
+        if self._daytime_import.get("date") != today:
+            self._daytime_import = {"date": today, "samples": [], "alerted": False}
+        state = self._daytime_import
+        if not DAYTIME_IMPORT_FROM_HOUR <= now.hour < DAYTIME_IMPORT_UNTIL_HOUR or state["alerted"]:
+            return
+        if self._slots_held() or (self._peak_cover or {}).get("pushed"):
+            state["samples"] = []
+            return
+        state["samples"] = (state["samples"] + [self._essential_state(self.grid_pac_entity)])[-DAYTIME_IMPORT_CHECKS:]
+        away = bool(self.coordinator.state.away_mode)
+        threshold = DAYTIME_IMPORT_AWAY_THRESHOLD_W if away else DAYTIME_IMPORT_THRESHOLD_W
+        anomaly = daytime_import_anomaly(
+            state["samples"], self._essential_state(self.battery_soc_entity), threshold
+        )
+        if anomaly is None:
+            return
+        state["alerted"] = True
+        await self.async_notify(
+            "🔋 Sunsynk: daytime grid import",
+            f"Importing {anomaly['grid_w']} W from the grid for the last {anomaly['checks']} checks "
+            f"with the battery at {anomaly['soc']}% — inverter limit, wrong priority or a heater left on?",
+        )
 
     async def _async_track_peak_window_usage(self) -> None:
         """Snapshot load/grid meters at the 16:00-19:00 window edges and log the delta.

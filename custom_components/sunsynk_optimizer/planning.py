@@ -1316,6 +1316,37 @@ def baseload_anomaly(
     return None
 
 
+# Daytime load spike alert (phase 40): day-rate grid import while the battery
+# should be covering the house.
+DAYTIME_IMPORT_THRESHOLD_W = 1500.0
+DAYTIME_IMPORT_AWAY_THRESHOLD_W = 750.0
+DAYTIME_IMPORT_CHECKS = 2
+DAYTIME_IMPORT_SOC_MARGIN = 5
+DAYTIME_IMPORT_FROM_HOUR = 5
+DAYTIME_IMPORT_UNTIL_HOUR = 16
+
+
+def daytime_import_anomaly(
+    samples: list[float | None],
+    soc: float | None,
+    threshold_w: float = DAYTIME_IMPORT_THRESHOLD_W,
+    checks: int = DAYTIME_IMPORT_CHECKS,
+) -> dict[str, Any] | None:
+    """Return {"grid_w", "soc", "checks"} when grid import stayed above ``threshold_w``, else None.
+
+    ``samples`` are the most recent grid_pac readings (W, import positive),
+    oldest first. The last ``checks`` must all be present and above the
+    threshold, and SOC must be above ``BATTERY_LOW_SOC`` + margin (below that
+    the inverter imports by design). Missing readings never alert.
+    """
+    if not isinstance(soc, (int, float)) or soc <= BATTERY_LOW_SOC + DAYTIME_IMPORT_SOC_MARGIN:
+        return None
+    recent = samples[-checks:]
+    if len(recent) < checks or not all(isinstance(s, (int, float)) and s > threshold_w for s in recent):
+        return None
+    return {"grid_w": round(min(recent)), "soc": round(soc), "checks": checks}
+
+
 DEFAULT_AUTO_AWAY_MIN_HOURS = 24.0
 
 
