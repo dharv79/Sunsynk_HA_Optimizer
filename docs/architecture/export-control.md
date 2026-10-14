@@ -136,3 +136,24 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 - Summer behaviour is unchanged whenever the plan target is ≤82%.
 
 **Verification.** `tests/test_planning.py::test_trim_never_at_night_or_below_tonights_charge`. In HA: on a night planned above 85%, `last_flux2_action` stays `none`/`no_trigger` through the charge, and the 06:00 SOC reaches the plan target.
+
+## Flux slot ownership (14/10/2026)
+
+Every push rebuilds both Flux slots: the slot a caller doesn't override reverts to the configured baseline (`apply_flux_override`). So any two writers can undo each other. Precedence, highest first:
+
+| Writer | Slot | Guarded by |
+|---|---|---|
+| Free event / saving session (holding) | 1 and 2 | owns both; everything else checks `_slots_held()` |
+| Export pause (watt/cost trigger, 16–19) | 2 → 100% | wins over peak export; restore keeps it (`restore_flux2_slot`) |
+| Live peak export (16:00) | 2 | skipped while slots held, export paused, or a saving session is due later today |
+| Trims (daytime, full-charge day) | 2 | 05:00–19:00 only; floor ≥ tonight's plan target before 16:00; skip during live peak export, export pause, held slots, or a session due later today |
+| Live peak cover (12–16) | 1 | skipped while slots held; restored at 16:00 |
+| 01:55 plan / watchdog retry | 1 and 2 | skipped while slots held; reload one-shot never 16:00–19:00 |
+
+**Fixed here.**
+- **Event end vs export pause:** a free event or saving session ending 16–19 restored the default Flux 2 slot (85%) while state still said paused, so the pause was lost until the trigger cleared and re-fired.
+- **Full-charge-day trim:** its 1-hour timer could fire into a free event or saving session (replacing its slots), or into an export pause (selling down, then the pause re-pushed: flip-flop).
+- **Saving session later today:** the 16:00 peak export and the trims sold at the plain export rate what the session sells at export rate + reward.
+- **Reload 16–19:** the one-shot plan undid a live peak export (it was only skipped while paused).
+
+**Verification.** `tests/test_planning.py` (`restore_flux2_slot`, `saving_session_later_today`).

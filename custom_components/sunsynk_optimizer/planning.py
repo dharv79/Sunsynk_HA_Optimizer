@@ -1515,3 +1515,30 @@ def compare_tariffs(
         "cheapest": cheapest,
         "rates_as_of": TARIFF_RATES_AS_OF,
     }
+
+
+# Flux 2 slots shared by the plan, the export pause and the post-event restore.
+DEFAULT_FLUX2_SLOT = {"startTime": "16:00", "endTime": "16:15", "targetSoc": 85}
+EXPORT_PAUSE_FLUX2_SLOT = {"startTime": "16:00", "endTime": "16:15", "targetSoc": 100}
+
+
+def restore_flux2_slot(export_paused: bool, minutes: int) -> dict[str, Any]:
+    """Flux 2 slot to put back after an event: keeps an active export pause inside 16:00-19:00.
+
+    Restoring the default slot there would drop the pause while state still says
+    paused, so the Flux 2 check (idempotent on "already disabled") never re-pushes it.
+    """
+    paused = export_paused and PEAK_START_MINUTES <= minutes < PEAK_END_MINUTES
+    return dict(EXPORT_PAUSE_FLUX2_SLOT if paused else DEFAULT_FLUX2_SLOT)
+
+
+def saving_session_later_today(session: dict[str, Any], now: datetime) -> bool:
+    """A scheduled saving session starts later today, so the battery is kept for it.
+
+    Trims and the 16:00 peak export would otherwise sell at the plain export rate
+    what the session sells at export rate + reward.
+    """
+    if session.get("phase") != "scheduled":
+        return False
+    start = _as_aware(session.get("session_start"), now.tzinfo)
+    return start is not None and start > now and start.astimezone(now.tzinfo).date() == now.date()
