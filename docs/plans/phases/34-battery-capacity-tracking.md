@@ -1,6 +1,6 @@
 # Phase 34 — Battery capacity tracking
 
-**Status:** Planned, not built. **Size:** M, ~45-70k est. **Origin:** improvement list 3, 14/10/2026 (item 4).
+**Status:** Done, merged (PR #66), shadow. **Size:** S, ~35k actual. **Origin:** improvement list 3, 14/10/2026 (item 4).
 
 ## Goal
 
@@ -16,3 +16,7 @@ Measure usable capacity over time (datasheet: Sunsynk W5.3, 4.79 kWh usable per 
 ## Acceptance
 
 - Tests: clean samples, small swings excluded, missing meters → `None`, away days allowed (physical property).
+
+## As built
+
+The discharge sample uses 19:00→22:00, in October–March only: the meters reset at midnight, so the 22:00–24:00 hours are missing, and summer evenings have solar. The estimate is shown as a diagnostic sensor rather than an attribute.

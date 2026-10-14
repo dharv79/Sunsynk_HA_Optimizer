@@ -2027,3 +2027,57 @@ def battery_value_summary(days: list[dict[str, Any]]) -> dict[str, Any]:
     """{"saving_gbp", "days"} over days with a `battery_saving_gbp`; saving None when none has one."""
     values = [d["battery_saving_gbp"] for d in days if isinstance(d.get("battery_saving_gbp"), (int, float))]
     return {"saving_gbp": round(sum(values), 2) if values else None, "days": len(values)}
+
+
+# Battery capacity tracking (phase 34). Shadow: never changes battery_capacity.
+CAPACITY_MIN_SWING_SOC = 30.0
+CAPACITY_MIN_SAMPLES = 5
+CAPACITY_ALERT_FRACTION = 0.9
+CAPACITY_DISCHARGE_MONTHS = (10, 11, 12, 1, 2, 3)  # no solar after 19:00
+CAPACITY_HISTORY_DAYS = 60
+
+
+def capacity_samples(
+    snapshots: dict[str, dict[str, Any]], month: int, efficiency: float = CHARGE_EFFICIENCY
+) -> list[dict[str, Any]]:
+    """Usable kWh per 100% SOC from one day's meter snapshots: up to one charge and one discharge sample.
+
+    Charge 02:00→05:00: (grid in − load − export) × efficiency over SOC gained.
+    Discharge 19:00→22:00 (Oct–Mar only, so no solar is mixed in):
+    (load − grid in + export) / efficiency over SOC lost. Swings under
+    ``CAPACITY_MIN_SWING_SOC`` or any missing meter give no sample.
+    """
+    out = []
+    windows = [("02:00", "05:00", "charge")]
+    if month in CAPACITY_DISCHARGE_MONTHS:
+        windows.append(("19:00", "22:00", "discharge"))
+    for start, end, kind in windows:
+        imp = _snap_delta(snapshots, start, end, "grid_import_kwh")
+        exp = _snap_delta(snapshots, start, end, "grid_export_kwh")
+        load = _snap_delta(snapshots, start, end, "load_kwh")
+        soc_a, soc_b = _snap(snapshots, start, "soc"), _snap(snapshots, end, "soc")
+        if None in (imp, exp, load, soc_a, soc_b):
+            continue
+        swing = soc_b - soc_a if kind == "charge" else soc_a - soc_b
+        if swing < CAPACITY_MIN_SWING_SOC:
+            continue
+        energy = (imp - load - exp) * efficiency if kind == "charge" else (load - imp + exp) / efficiency
+        if energy <= 0:
+            continue
+        out.append({"kind": kind, "kwh_per_100": round(energy / swing * 100, 2), "swing_soc": round(swing, 1)})
+    return out
+
+
+def capacity_estimate(samples: list[dict[str, Any]], min_samples: int = CAPACITY_MIN_SAMPLES) -> float | None:
+    """Median kWh per 100% SOC over ``samples``; None with fewer than ``min_samples``."""
+    values = sorted(
+        float(s["kwh_per_100"]) for s in samples if isinstance(s.get("kwh_per_100"), (int, float)) and s["kwh_per_100"] > 0
+    )
+    if len(values) < min_samples:
+        return None
+    return round(_median(values), 2)
+
+
+def capacity_low(estimate: float | None, configured_kwh: float, fraction: float = CAPACITY_ALERT_FRACTION) -> bool:
+    """Measured capacity below ``fraction`` of the configured figure; False when unknown."""
+    return estimate is not None and configured_kwh > 0 and estimate < configured_kwh * fraction

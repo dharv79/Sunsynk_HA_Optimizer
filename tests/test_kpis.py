@@ -538,3 +538,49 @@ def test_battery_value_summary(planning):
     days = [{"battery_saving_gbp": 1.5}, {"battery_saving_gbp": None}, {"battery_saving_gbp": 0.75}, {}]
     assert planning.battery_value_summary(days) == {"saving_gbp": 2.25, "days": 2}
     assert planning.battery_value_summary([{}]) == {"saving_gbp": None, "days": 0}
+
+
+# ---- Phase 34: battery capacity tracking ----
+
+
+def _cap_snaps(imp02=0.0, imp05=5.0, soc02=40, soc05=80, load02=1.0, load05=1.6):
+    return {
+        "02:00": {"grid_import_kwh": imp02, "grid_export_kwh": 0.0, "load_kwh": load02, "soc": soc02},
+        "05:00": {"grid_import_kwh": imp05, "grid_export_kwh": 0.0, "load_kwh": load05, "soc": soc05},
+        "19:00": {"grid_import_kwh": imp05, "grid_export_kwh": 0.0, "load_kwh": 10.0, "soc": 90},
+        "22:00": {"grid_import_kwh": imp05, "grid_export_kwh": 0.0, "load_kwh": 14.5, "soc": 40},
+    }
+
+
+def test_capacity_clean_charge_sample(planning):
+    out = planning.capacity_samples(_cap_snaps(), month=7)  # summer: no discharge sample
+    assert out == [{"kind": "charge", "kwh_per_100": round(4.4 * planning.CHARGE_EFFICIENCY / 40 * 100, 2), "swing_soc": 40.0}]
+
+
+def test_capacity_discharge_sample_in_winter(planning):
+    out = planning.capacity_samples(_cap_snaps(), month=12)
+    discharge = [s for s in out if s["kind"] == "discharge"][0]
+    assert discharge["kwh_per_100"] == round(4.5 / planning.CHARGE_EFFICIENCY / 50 * 100, 2)
+
+
+def test_capacity_small_swing_excluded(planning):
+    assert planning.capacity_samples(_cap_snaps(soc05=60), month=7) == []
+
+
+def test_capacity_missing_meter_no_sample(planning):
+    snaps = _cap_snaps()
+    snaps["05:00"]["load_kwh"] = None
+    assert planning.capacity_samples(snaps, month=7) == []
+
+
+def test_capacity_estimate_median_needs_samples(planning):
+    samples = [{"kwh_per_100": v} for v in (9.0, 9.4, 9.6, 9.2, 30.0)]
+    assert planning.capacity_estimate(samples) == 9.4
+    assert planning.capacity_estimate(samples[:4]) is None
+    assert planning.capacity_estimate([]) is None
+
+
+def test_capacity_low(planning):
+    assert planning.capacity_low(8.5, 9.58)
+    assert not planning.capacity_low(9.0, 9.58)
+    assert not planning.capacity_low(None, 9.58)
