@@ -191,7 +191,7 @@ A swing under 30% SOC or any missing meter gives no sample. Away days count, bec
 - updates `state.battery_capacity_estimate`;
 - alerts "🔋 Sunsynk: battery capacity low" when the estimate is below 90% of the configured `battery_capacity` (`planning.capacity_low`).
 
-On startup with no stored estimate it fills the state without logging or alerting.
+While no estimate exists yet (`planning.capacity_estimate_pending`: no record, or `estimate_kwh` is `None` because there are fewer than 5 samples), it also runs at startup and after the 05:00 and 22:00 snapshots. These runs fill the state without logging or alerting, so the sensor shows a value as soon as the 5th sample lands rather than waiting for the monthly run (14/10/2026).
 
 Exposed as the diagnostic sensor `sensor.battery_capacity_estimate` (kWh; attributes: samples, configured_kwh, pct_of_configured). Shadow: it never changes `battery_capacity`; that is an option for later. Tests: `test_capacity_*` in `tests/test_kpis.py`.
 
