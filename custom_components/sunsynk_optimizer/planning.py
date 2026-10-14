@@ -250,6 +250,8 @@ def window_grid_kwh(
 # reaches the target by the end of the 02:00-05:00 cheap window.
 CHEAP_WINDOW_HOURS = 3.0
 CHEAP_WINDOW_END = "05:00"
+PEAK_START_MINUTES = 16 * 60  # Flux peak band 16:00-19:00
+PEAK_END_MINUTES = 19 * 60
 GENTLE_CHARGE_MARGIN = 1.2
 GENTLE_CHARGE_MIN_CURRENT_A = 10
 DEFAULT_BATTERY_VOLTAGE = 51.2
@@ -292,9 +294,9 @@ def minutes_to_hhmm(minutes: int) -> str:
 
 
 def hhmm_to_minutes(hhmm: str) -> int | None:
-    """Minutes after midnight for an "HH:MM" string, or None when malformed."""
+    """Minutes after midnight for "HH:MM" (or "HH:MM:SS"), or None when malformed."""
     try:
-        hours, minutes = str(hhmm).split(":")
+        hours, minutes = str(hhmm).split(":")[:2]
         return int(hours) * 60 + int(minutes)
     except (ValueError, TypeError):
         return None
@@ -369,9 +371,13 @@ def daily_report_plans(nightly: dict[str, Any], latest: dict[str, Any], date: st
 
 def score_full_charge_day(item: dict[str, Any], day_name: str) -> float:
     """Score one weekday's weather forecast for full-charge suitability."""
-    cloud = float(item.get("cloud_coverage", 50) or 50)
-    rain = float(item.get("precipitation_probability", 0) or 0)
-    temp = float(item.get("temperature", 15) or 15)
+    def _num(key: str, default: float) -> float:
+        value = item.get(key)
+        return float(default if value is None else value)
+
+    cloud = _num("cloud_coverage", 50)
+    rain = _num("precipitation_probability", 0)
+    temp = _num("temperature", 15)
     # Rain weighted 0.7x because partial rain still allows some generation.
     score = 100 - cloud - (rain * 0.7)
     score += _CONDITION_ADJUSTMENTS.get(str(item.get("condition", "unknown")), 0)
@@ -520,10 +526,7 @@ def learned_load_kw(
             rates = matching
     if len(rates) < min_days:
         return None, len(rates)
-    values = sorted(r for r, _ in rates)
-    mid = len(values) // 2
-    median = values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
-    return round(median, 3), len(values)
+    return round(_median([r for r, _ in rates]), 3), len(rates)
 
 
 def resolve_load_kw(config_kw: float, learned_kw: float | None) -> tuple[float, str]:
@@ -537,7 +540,6 @@ def resolve_load_kw(config_kw: float, learned_kw: float | None) -> tuple[float, 
 # Phase 14: cumulative daily-meter snapshots at the Flux band edges. The
 # SolarSynkV3 daily totals reset at midnight, so 22:00 closes the KPI day
 # (22:00-24:00 is not covered, same as day_actuals).
-METER_SNAPSHOT_TIMES = ("02:00", "05:00", "16:00", "19:00", "22:00")
 KPI_RESERVE_SOC = 20  # same floor as bridge_soc
 KPI_LATE_LOAD_HOURS = 4.0  # 22:00 → next 02:00 charge
 DAY_KPI_FIELDS = (
@@ -685,7 +687,7 @@ def import_feedback_adjustment(
         and not d.get("is_full_day")
         and not d.get("evening_export_disabled")
         and bool(d.get("away", False)) == away
-        and (d.get("target_soc") or 0) < 100
+        and d.get("target_soc") is not None and d["target_soc"] < 100
         and d.get("grid_import_morning_kwh") is not None
     ]
     if len(relevant) < IMPORT_FEEDBACK_MIN_DAYS:
@@ -711,9 +713,30 @@ def evening_reserve_soc(
     return min(100, math.ceil(floor_soc + load_kw * hours / battery_capacity_kwh * 100))
 
 
-def trim_target_soc(soc: float, reserve_soc: int | None, default: int = DEFAULT_TRIM_TARGET_SOC) -> int | None:
-    """Sell-down target floored at the evening reserve; None when that leaves nothing to trim."""
-    target = max(default, reserve_soc or 0)
+TRIM_FROM_MINUTES = 5 * 60  # end of the cheap import window
+
+
+def trim_target_soc(
+    soc: float,
+    reserve_soc: int | None,
+    default: int = DEFAULT_TRIM_TARGET_SOC,
+    *,
+    minutes: int | None = None,
+    plan_target_soc: int | None = None,
+) -> int | None:
+    """Sell-down target floored at the evening reserve; None when that leaves nothing to trim.
+
+    With ``minutes`` (local minute of day): no trim 19:00-05:00, where selling at the
+    night/day export rate and rebuying later loses money and would fight the overnight
+    charge. Before the 16:00 peak the floor also includes ``plan_target_soc``, the SOC
+    tonight's plan bought at the cheap rate to bridge to solar.
+    """
+    if minutes is not None and not TRIM_FROM_MINUTES <= minutes < PEAK_END_MINUTES:
+        return None
+    floors = [default, reserve_soc or 0]
+    if plan_target_soc is not None and (minutes is None or minutes < PEAK_START_MINUTES):
+        floors.append(plan_target_soc)
+    target = max(floors)
     return target if target < soc else None
 
 
@@ -794,7 +817,7 @@ PEAK_COVER_MARGIN = 1.1
 PEAK_COVER_MIN_SHORTFALL_SOC = 3
 PEAK_COVER_LEAD_MINUTES = 45  # start this long before the charge needs to begin
 PEAK_COVER_FROM_MINUTES = 12 * 60
-PEAK_COVER_PEAK_START_MINUTES = 16 * 60
+PEAK_COVER_PEAK_START_MINUTES = PEAK_START_MINUTES
 PEAK_COVER_LAST_LOG_MINUTES = 15 * 60 + 30
 PEAK_COVER_MIN_LOAD_HOURS = 2.0  # hours of 05:00-now data before the observed load is trusted
 PEAK_COVER_LOAD_PERCENTILE = 75
@@ -1052,10 +1075,6 @@ def manual_free_event_error(
 # house from it and export the rest during the session (Flux 2 to a floor).
 SAVING_SESSION_MIN_FLOOR_SOC = KPI_RESERVE_SOC
 OCTOPOINTS_PER_PENNY = 8  # 800 Octopoints = £1
-PEAK_START_MINUTES = 16 * 60
-PEAK_END_MINUTES = 19 * 60
-
-
 @dataclass
 class SavingSessionPlan:
     """Outcome of plan_saving_session — see phases/21-octopus-saving-sessions.md."""
@@ -1085,11 +1104,12 @@ def saving_session_value_pence(reward_pence: float | None, export_pence: float |
     return round(sum(parts), 3) if parts else None
 
 
-def _precharge_end(session_start: datetime) -> datetime:
-    """Day-rate top-up ends at the session start, or at 16:00 if the session starts inside the peak."""
-    minutes = session_start.hour * 60 + session_start.minute
-    if PEAK_START_MINUTES < minutes <= PEAK_END_MINUTES:
-        return session_start.replace(hour=16, minute=0, second=0, microsecond=0)
+def _precharge_end(session_start: datetime, fill_hours: float) -> datetime:
+    """Day-rate top-up ends at the session start, or at 16:00 when filling up to the start would buy in the peak."""
+    peak_start = session_start.replace(hour=PEAK_START_MINUTES // 60, minute=0, second=0, microsecond=0)
+    peak_end = session_start.replace(hour=PEAK_END_MINUTES // 60, minute=0, second=0, microsecond=0)
+    if session_start > peak_start and session_start - timedelta(hours=fill_hours) < peak_end:
+        return peak_start
     return session_start
 
 
@@ -1128,8 +1148,8 @@ def plan_saving_session(
     precharge = bool(arbitrage_worth_it(day_pence, value, wear_pence=wear_pence)) and soc < 100 and charge_rate_kw > 0
     precharge_start = precharge_end = None
     if precharge:
-        precharge_end = _precharge_end(session_start)
         fill_hours = (100 - soc) / 100 * capacity_kwh / charge_rate_kw
+        precharge_end = _precharge_end(session_start, fill_hours)
         precharge_start = precharge_end - timedelta(hours=fill_hours)
 
     start_soc = 100 if (precharge or offpeak_boost) else soc
@@ -1264,8 +1284,7 @@ def baseload_anomaly(
     )
     if len(values) < min_nights:
         return None
-    mid = len(values) // 2
-    usual = values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
+    usual = _median(values)
     if tonight_kwh >= usual * factor and tonight_kwh - usual >= min_extra_kwh:
         return {"tonight_kwh": round(tonight_kwh, 2), "usual_kwh": round(usual, 2), "nights": len(values)}
     return None
@@ -1364,14 +1383,6 @@ TARIFF_LABELS = {"flux": "Flux", "go": "Octopus Go", "cosy": "Cosy Octopus"}
 HALF_HOURS_PER_DAY = 48
 
 
-def _hhmm_minutes(value: Any) -> int | None:
-    try:
-        hh, mm = str(value).split(":")[:2]
-        return int(hh) * 60 + int(mm)
-    except (ValueError, TypeError):
-        return None
-
-
 def band_price(bands: list[tuple[int, int, float]], minute: int) -> float | None:
     """Price (p/kWh) of the band covering ``minute`` of the day; None when no band does."""
     for start, end, price in bands:
@@ -1387,7 +1398,7 @@ def bands_from_rates(
     """Resolve a (start, end, rate key) spec into minute bands; bands with a bad key or time are dropped."""
     out: list[tuple[int, int, float]] = []
     for start, end, key in spec:
-        s, e, price = _hhmm_minutes(start), _hhmm_minutes(end), rates.get(key)
+        s, e, price = hhmm_to_minutes(start), hhmm_to_minutes(end), rates.get(key)
         if s is not None and e is not None and isinstance(price, (int, float)):
             out.append((s, e, float(price)))
     return out
@@ -1399,7 +1410,7 @@ def flux_bands_from_charges(charges: Any, status: str) -> list[tuple[int, int, f
     for row in charges if isinstance(charges, list) else []:
         if not isinstance(row, dict) or row.get("status") != status:
             continue
-        s, e = _hhmm_minutes(row.get("startRange")), _hhmm_minutes(row.get("endRange"))
+        s, e = hhmm_to_minutes(row.get("startRange")), hhmm_to_minutes(row.get("endRange"))
         price = row.get("price")
         if s is not None and e is not None and isinstance(price, (int, float)):
             out.append((s, e, float(price)))

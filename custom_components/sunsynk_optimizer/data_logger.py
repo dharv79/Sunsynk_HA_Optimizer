@@ -123,7 +123,7 @@ class DataLogger:
     async def async_log_morning_state(
         self,
         date: str,
-        morning_soc: float,
+        morning_soc: float | None,
         morning_pv_power: float,
         overnight_load_kwh: float | None = None,
     ) -> None:
@@ -139,7 +139,7 @@ class DataLogger:
             _record(
                 "morning_state",
                 date=date,
-                morning_soc=round(morning_soc, 1),
+                morning_soc=round_or_none(morning_soc, 1),
                 morning_pv_power=round(morning_pv_power, 1),
                 overnight_load_kwh=round_or_none(overnight_load_kwh),
             )
@@ -205,8 +205,8 @@ class DataLogger:
     async def async_log_day_actuals(
         self,
         date: str,
-        evening_soc: float,
-        actual_solar_kwh: float,
+        evening_soc: float | None,
+        actual_solar_kwh: float | None,
         evening_export_disabled: bool,
         day_load_kwh: float | None = None,
         day_grid_import_kwh: float | None = None,
@@ -224,8 +224,8 @@ class DataLogger:
             _record(
                 "day_actuals",
                 date=date,
-                evening_soc=round(evening_soc, 1),
-                actual_solar_kwh=round(actual_solar_kwh, 2),
+                evening_soc=round_or_none(evening_soc, 1),
+                actual_solar_kwh=round_or_none(actual_solar_kwh),
                 evening_export_disabled=evening_export_disabled,
                 day_load_kwh=round_or_none(day_load_kwh),
                 day_grid_import_kwh=round_or_none(day_grid_import_kwh),
@@ -268,7 +268,7 @@ class DataLogger:
         records = await self.hass.async_add_executor_job(self._read_recent, days)
         out: tuple[dict[str, list[float]], dict[str, list[float]]] = ({}, {})
         for rec in records:
-            for target, kind in zip(out, ("import", "export")):
+            for target, kind in zip(out, ("import", "export"), strict=True):
                 if rec.get("type") == f"half_hourly_{kind}" and rec.get("date") and isinstance(rec.get("kwh"), list):
                     target[str(rec["date"])] = rec["kwh"]
         return out
@@ -400,14 +400,14 @@ class DataLogger:
                 "raw_forecast_kwh": plan.get("raw_forecast_kwh"),
                 "effective_charge_rate_kw": plan.get("effective_charge_rate_kw"),
                 "away": bool(plan.get("away", False)),
-                "actual_solar_kwh": actual.get("actual_solar_kwh", 0.0),
+                "actual_solar_kwh": actual.get("actual_solar_kwh"),
                 "forecast_band": plan.get("forecast_band"),
                 "target_soc": target_soc,
                 "morning_soc": morning_soc,
                 "morning_pv_power": morning_pv_power,
                 "overnight_load_kwh": morning.get("overnight_load_kwh"),
                 "overnight_drain_pct": overnight_drain_pct,
-                "evening_soc": actual.get("evening_soc", 0.0),
+                "evening_soc": actual.get("evening_soc"),
                 "evening_export_disabled": actual.get("evening_export_disabled", False),
                 "day_load_kwh": actual.get("day_load_kwh"),
                 "day_grid_import_kwh": actual.get("day_grid_import_kwh"),
@@ -441,7 +441,7 @@ class DataLogger:
         Returns 1.0 (no correction) until at least 7 paired days exist.
         Skips days where forecast was near-zero to avoid division noise.
         """
-        valid = [d for d in paired_days if d["solar_forecast_kwh"] > 0.5]
+        valid = [d for d in paired_days if self._is_forecast_sample(d)]
         if len(valid) < self._MIN_DAYS_FORECAST_CORRECTION:
             return 1.0
         ratios = sorted(d["actual_solar_kwh"] / d["solar_forecast_kwh"] for d in valid)
@@ -464,7 +464,9 @@ class DataLogger:
             if d["forecast_band"] == forecast_band
             and not d["is_full_day"]
             and not d["evening_export_disabled"]
-            and d.get("actual_solar_kwh", 0) < self._HIGH_SOLAR_THRESHOLD_KWH
+            and d.get("evening_soc") is not None
+            and d.get("actual_solar_kwh") is not None
+            and d["actual_solar_kwh"] < self._HIGH_SOLAR_THRESHOLD_KWH
             and bool(d.get("away", False)) == away
         ]
         if len(relevant) < self._MIN_DAYS_SOC_ADJUSTMENT:
@@ -552,7 +554,12 @@ class DataLogger:
 
     def count_forecast_correction_days(self, paired_days: list[dict[str, Any]]) -> int:
         """Return how many valid paired days exist toward the forecast correction threshold."""
-        return len([d for d in paired_days if d["solar_forecast_kwh"] > 0.5])
+        return len([d for d in paired_days if self._is_forecast_sample(d)])
+
+    @staticmethod
+    def _is_forecast_sample(d: dict[str, Any]) -> bool:
+        """A day usable for the forecast correction: a real forecast and a logged actual."""
+        return d["solar_forecast_kwh"] > 0.5 and d.get("actual_solar_kwh") is not None
 
     def count_drain_adjustment_days(self, paired_days: list[dict[str, Any]], away: bool = False) -> int:
         """Return how many valid drain-night samples exist toward the drain threshold.
@@ -576,6 +583,7 @@ class DataLogger:
             if d["forecast_band"] == forecast_band
             and not d["is_full_day"]
             and not d["evening_export_disabled"]
+            and d.get("evening_soc") is not None
             and bool(d.get("away", False)) == away
         ])
 
@@ -623,26 +631,12 @@ class DataLogger:
 
         rates = []
         for d in paired_days:
-            initial = d.get("initial_soc")
-            target = d.get("target_soc")
-            morning = d.get("morning_soc")
-            flux1 = d.get("flux1_end", "")
-            if (
-                initial is None or target is None or morning is None
-                or initial <= 0 or not flux1
-                or target - initial < 10
-                or d.get("morning_pv_power", 0) >= 200
-                or d.get("is_full_day")
-                or d.get("away", False)
-            ):
+            end_h = self._charge_calibration_end_hours(d)
+            if end_h is None:
                 continue
-            end_h = self._flux1_end_hours(flux1)
             charge_h = end_h - 2.0
-            drain_h = 6.0 - end_h
-            if charge_h < 0.25 or drain_h < 0:
-                continue
-            est_end_soc = min(morning + drain_rate * drain_h, float(target))
-            gained = max(0.0, est_end_soc - initial)
+            est_end_soc = min(d["morning_soc"] + drain_rate * (6.0 - end_h), float(d["target_soc"]))
+            gained = max(0.0, est_end_soc - d["initial_soc"])
             if gained < 5:
                 continue
             rates.append((gained / 100.0 * battery_kwh) / charge_h)
@@ -666,17 +660,27 @@ class DataLogger:
 
     def count_charge_rate_calibration_days(self, paired_days: list[dict[str, Any]]) -> int:
         """Return how many valid charging days exist toward charge rate calibration (needs 3)."""
-        return len([
-            d for d in paired_days
-            if d.get("initial_soc") is not None
-            and d.get("target_soc") is not None
-            and d["target_soc"] - d["initial_soc"] >= 10
-            and d.get("morning_soc") is not None
-            and d.get("morning_pv_power", 0) < 200
-            and not d.get("is_full_day")
-            and not d.get("away", False)
-            and self._flux1_end_hours(d.get("flux1_end", "")) > 2.5
-        ])
+        return len([d for d in paired_days if self._charge_calibration_end_hours(d) is not None])
+
+    def _charge_calibration_end_hours(self, d: dict[str, Any]) -> float | None:
+        """Flux 1 end (hours) of a night usable to calibrate the charge rate, else None.
+
+        One predicate for compute_effective_charge_rate_kw and its progress counter:
+        a home, non-full-charge night that charged 10%+ for 15 min+ and ended by 06:00.
+        """
+        initial, target, morning = d.get("initial_soc"), d.get("target_soc"), d.get("morning_soc")
+        flux1 = d.get("flux1_end", "")
+        if (
+            initial is None or target is None or morning is None
+            or initial <= 0 or not flux1
+            or target - initial < 10
+            or d.get("morning_pv_power", 0) >= 200
+            or d.get("is_full_day")
+            or d.get("away", False)
+        ):
+            return None
+        end_h = self._flux1_end_hours(flux1)
+        return end_h if end_h - 2.0 >= 0.25 and end_h <= 6.0 else None
 
     # ------------------------------------------------------------------ #
     # Retention                                                            #

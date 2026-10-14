@@ -43,7 +43,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 11. Missing cost is `None`, never 0 — `planning.net_cost_gbp`.
 12. `daily_cost` is dated per sensor and merged fill-only; never overwrite or misdate — `data_logger.merge_daily_cost_fields`, `optimizer._read_octopus_previous_day_cost`.
 13. Other per-day record types dedup at write — `data_logger._write_record` / `_DEDUP_TYPES`.
-14. `cost_trigger` stays `None` when no price applies, never 0p — `flux_helpers.peak_import_price_pence_per_kwh`.
+14. `cost_trigger` stays `None` when no price applies, never 0p — `flux_helpers.tariff_prices_pence`.
 15. Shadow mode defaults on (watt trigger drives export-disable) — `CONF_COST_AWARE_EXPORT_SHADOW_MODE`.
 16. Monitor mode makes no API writes (except undoing its own gentle-charge current) — `optimizer.py` early returns.
 17. Test plan button is a pure dry run (no push, log or state) — `async_run_import_plan(dry_run=True)`.

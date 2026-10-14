@@ -594,3 +594,17 @@ def test_trim_target_floored_at_reserve(planning):
     assert planning.trim_target_soc(86, 88) is None  # nothing left to trim
     assert planning.trim_target_soc(100, 100) is None
     assert planning.trim_target_soc(90, None) == 82
+
+
+def test_trim_never_at_night_or_below_tonights_charge(planning):
+    # Overnight charge crossing 85% (03:00) must not be trimmed — the 12/10 stall at ~83%.
+    assert planning.trim_target_soc(86, 73, minutes=3 * 60, plan_target_soc=95) is None
+    assert planning.trim_target_soc(95, 73, minutes=4 * 60 + 59) is None
+    assert planning.trim_target_soc(95, 73, minutes=19 * 60) is None
+    assert planning.trim_target_soc(95, 73, minutes=23 * 60) is None
+    # Daytime: never below what the plan bought; solar excess above it is still trimmed.
+    assert planning.trim_target_soc(95, 73, minutes=5 * 60, plan_target_soc=95) is None
+    assert planning.trim_target_soc(99, 73, minutes=11 * 60, plan_target_soc=90) == 90
+    assert planning.trim_target_soc(95, 73, minutes=11 * 60, plan_target_soc=70) == 82
+    # Peak window sells at the peak rate, so tonight's target no longer floors it.
+    assert planning.trim_target_soc(95, 73, minutes=17 * 60, plan_target_soc=100) == 82

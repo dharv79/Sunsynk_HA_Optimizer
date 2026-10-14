@@ -32,7 +32,8 @@ async def async_setup_entry(
             SunsynkOptimizerButton(coordinator, entry, "choose_best_day", "Run choose best day"),
             SunsynkOptimizerButton(coordinator, entry, "test_plan", "Test plan"),
             SunsynkOptimizerButton(coordinator, entry, "reset_baseline", "Reset to baseline"),
-            SunsynkOptimizerButton(coordinator, entry, "install_dashboard", "Update dashboard"),
+            # Explicit entity id: the dashboard references the pre-rename id.
+            SunsynkOptimizerButton(coordinator, entry, "install_dashboard", "Update dashboard", "button.install_dashboard"),
             SunsynkOptimizerButton(coordinator, entry, "cancel_free_event", "Cancel free event"),
             SunsynkOptimizerButton(coordinator, entry, "cancel_saving_session", "Cancel saving session"),
         ]
@@ -42,8 +43,10 @@ async def async_setup_entry(
 class SunsynkOptimizerButton(CoordinatorEntity, ButtonEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry: ConfigEntry, key: str, name: str) -> None:
+    def __init__(self, coordinator, entry: ConfigEntry, key: str, name: str, entity_id: str | None = None) -> None:
         super().__init__(coordinator)
+        if entity_id:
+            self.entity_id = entity_id  # used for new installs only; the registry keeps existing ids
         self._entry = entry
         self._key = key
         self._attr_name = name

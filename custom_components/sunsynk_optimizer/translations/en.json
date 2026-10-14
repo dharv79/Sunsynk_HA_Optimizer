@@ -141,6 +141,14 @@
         "title": "Flux windows",
         "description": "Configure the baseline Flux import/export windows."
       }
+    },
+    "error": {
+      "cannot_connect": "Could not log in to Sunsynk.",
+      "battery_soc_not_found": "Battery SOC sensor was not found for this inverter serial.",
+      "grid_pac_not_found": "Grid power (grid_pac) sensor was not found for this inverter serial.",
+      "entity_not_found": "Entity was not found.",
+      "invalid_service": "Service must be in domain.service format.",
+      "service_not_found": "Service was not found."
     }
   }
 }

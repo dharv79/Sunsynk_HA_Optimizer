@@ -15,7 +15,7 @@ CLAUDE.md keeps the one-line rule; the "why" lives here. Numbering matches CLAUD
 11. **Missing cost is `None`, never 0** (`planning.net_cost_gbp`). A missing sensor treated as zero would look like a real zero-cost day and corrupt year-to-date.
 12. **`daily_cost` merges fill-only and is dated per sensor** (`data_logger.merge_daily_cost_fields`, `optimizer._read_octopus_previous_day_cost`). Never overwrite a logged value, never log under the wrong date; gas often settles a day after electricity. See octopus-cost.md.
 13. **Other per-day record types dedup at write** (`data_logger._write_record`, `_DEDUP_TYPES`). HA restarts that cross a scheduled boundary would otherwise double-log and corrupt pairing.
-14. **`cost_trigger` stays `None` when no price applies** (`flux_helpers.peak_import_price_pence_per_kwh`, `optimizer.async_run_flux2_check`). Coercing to a 0p price would make the cost trigger never fire.
+14. **`cost_trigger` stays `None` when no price applies** (`flux_helpers.tariff_prices_pence` / `band_price_pence_per_kwh`, `optimizer.async_run_flux2_check`). Coercing to a 0p price would make the cost trigger never fire.
 15. **Shadow mode defaults on: `watt_trigger` drives export-disable** (`CONF_COST_AWARE_EXPORT_SHADOW_MODE`). Keeps upgrades behaviour-neutral until the user opts in. See export-control.md.
 16. **Monitor mode makes no API writes** (`optimizer.py` early returns in the three main logic paths). One exception: the 05:00 grid-charge current restore (phase 23) still runs, because it only undoes this integration's own earlier write.
 17. **Test plan button is a pure dry run** (`async_run_import_plan(dry_run=True)`): no inverter push, no log write, no state change. The old push buttons pushed daytime SOC readings to the inverter.

@@ -415,6 +415,40 @@ class SunsynkOptimizer:
         """Stripped string config value ('' when unset) — blank means feature disabled."""
         return str((cfg if cfg is not None else self.cfg).get(key, "")).strip()
 
+    def _capacity_kwh(self, cfg: dict[str, Any] | None = None) -> float:
+        """Configured battery capacity (kWh), floored so it never divides by zero."""
+        return max(0.1, float((cfg if cfg is not None else self.cfg).get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+
+    def _event_rates_kw(self, cfg: dict[str, Any]) -> tuple[float, float]:
+        """(charge, export) kW for free events and saving sessions; blank = the charge rate."""
+        default_rate = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
+        return (
+            float(cfg.get(CONF_FREE_EVENT_CHARGE_RATE_KW) or default_rate),
+            float(cfg.get(CONF_FREE_EVENT_EXPORT_RATE_KW) or default_rate),
+        )
+
+    def _regime_load_kw(self, cfg: dict[str, Any], away: bool, is_weekend: bool = False) -> float:
+        """Configured overnight load for the occupancy regime: away beats weekend beats weekday."""
+        if away:
+            return float(cfg.get(CONF_AWAY_AVG_CONSUMPTION_KW, DEFAULT_AWAY_AVG_CONSUMPTION_KW))
+        if is_weekend:
+            return float(cfg.get(CONF_WEEKEND_AVG_CONSUMPTION_KW, DEFAULT_WEEKEND_AVG_CONSUMPTION_KW))
+        return float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+
+    def _plan_load_kw(self, cfg: dict[str, Any]) -> float:
+        """Tonight's plan load rate (phase 12 learned or config), else the config weekday rate."""
+        load_kw = (self.coordinator.state.last_import_plan or {}).get("avg_consumption_kw")
+        return float(load_kw if load_kw is not None else cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+
+    def _hourly_or_synthetic_forecast(self, cfg: dict[str, Any], now: datetime) -> dict[int, float] | None:
+        """The hourly forecast sensor, else a sine profile from the raw daily forecast."""
+        hourly = self._get_hourly_forecast_kwh()
+        if hourly is None:
+            raw_daily, _ = self._resolve_raw_forecast(cfg[CONF_SOLAR_FORECAST_SENSOR], now)
+            if raw_daily is not None:
+                hourly = self._synthetic_hourly_forecast(raw_daily)
+        return hourly
+
     def _sun_times(self) -> tuple[Any, Any] | None:
         """Return (next_rising, next_setting) as local datetimes from sun.sun, or None."""
         sun_state = self.hass.states.get("sun.sun")
@@ -489,10 +523,6 @@ class SunsynkOptimizer:
             last_api_result={"ok": True, **(result if isinstance(result, dict) else {"result": result})},
         )
         return True
-
-    async def async_push_current_config(self) -> bool:
-        """Push the baseline Flux config from settings to the Sunsynk API without any overrides."""
-        return await self._async_post_with_status(build_payload(self.cfg))
 
     async def async_push_flux_override(self, payload: dict[str, Any]) -> bool:
         """Merge a Flux 1/2 override dict onto the config baseline and push to the API.
@@ -634,11 +664,8 @@ class SunsynkOptimizer:
             # Pessimistic of raw vs corrected, as for low-solar decisions.
             tomorrow_kwh = round(min(raw_kwh, raw_kwh * correction), 2)
 
-        battery_capacity_kwh = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
-        if self.coordinator.state.away_mode:
-            avg_consumption_kw = float(cfg.get(CONF_AWAY_AVG_CONSUMPTION_KW, DEFAULT_AWAY_AVG_CONSUMPTION_KW))
-        else:
-            avg_consumption_kw = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        battery_capacity_kwh = self._capacity_kwh(cfg)
+        avg_consumption_kw = self._regime_load_kw(cfg, bool(self.coordinator.state.away_mode))
         needed_kwh = solar_kwh_to_fill(battery_capacity_kwh, avg_consumption_kw)
 
         weather_scores = await self._async_weekday_weather_scores() or {}
@@ -824,7 +851,7 @@ class SunsynkOptimizer:
             )
             return
 
-        battery_capacity_kwh = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        battery_capacity_kwh = self._capacity_kwh(cfg)
         charge_rate_kw = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
         # Occupancy regime for this plan: home vs away (holiday). Drain and the
         # evening-SOC nudge are learned per-regime so a low-load holiday can't skew
@@ -833,12 +860,7 @@ class SunsynkOptimizer:
         is_weekend = today in ("Saturday", "Sunday")
         # Away takes precedence over weekday/weekend: on holiday the house load is
         # low regardless of the day, so the solar bridge sizes to the lower figure.
-        if away:
-            avg_consumption_kw = float(cfg.get(CONF_AWAY_AVG_CONSUMPTION_KW, DEFAULT_AWAY_AVG_CONSUMPTION_KW))
-        elif is_weekend:
-            avg_consumption_kw = float(cfg.get(CONF_WEEKEND_AVG_CONSUMPTION_KW, DEFAULT_WEEKEND_AVG_CONSUMPTION_KW))
-        else:
-            avg_consumption_kw = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        avg_consumption_kw = self._regime_load_kw(cfg, away, is_weekend)
 
         paired_days = await self.data_logger.async_load_paired_days(days=30)
         # Phase 12: home nights use the overnight rate learned from the 06:00
@@ -1248,9 +1270,8 @@ class SunsynkOptimizer:
 
         # Trim if SOC exceeds 85% on a non-full-charge day. Target 82% leaves a 3% gap
         # below the trigger so normal fluctuation doesn't immediately re-trigger a trim.
-        # Phase 16: never below the evening reserve (19:00 → 02:00 load).
-        reserve = self._evening_reserve_soc()
-        trim_target = trim_target_soc(soc, reserve)
+        # Never below the evening reserve, never at night, never below tonight's charge.
+        trim_target, reserve = self._trim_target(soc, now_local)
         if (
             not is_full_day and soc > 85 and trim_target is not None
             and not self._peak_export_holds_flux2(now_local) and self._cooldown_ok()
@@ -1556,7 +1577,7 @@ class SunsynkOptimizer:
         end_minutes = hhmm_to_minutes(plan.get("flux1_end")) if plan else None
         if plan is None or end_minutes is None or end_minutes <= now_minutes:
             return
-        capacity = max(0.1, float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        capacity = self._capacity_kwh()
         soc_now = self._essential_state(self.battery_soc_entity)
         grid_import_w = self._essential_state(self.grid_pac_entity)
         result = charge_progress_ok(
@@ -1593,7 +1614,7 @@ class SunsynkOptimizer:
         plan = self._charge_watchdog_plan(now)
         if plan is None:
             return
-        capacity = max(0.1, float(self.cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        capacity = self._capacity_kwh()
         soc_now = self._essential_state(self.battery_soc_entity)
         grid_import_w = self._essential_state(self.grid_pac_entity)
         # If the window ended before the re-check, judge only the minutes it was open.
@@ -1680,6 +1701,8 @@ class SunsynkOptimizer:
             start = self._peak_window_start
             self._peak_window_start = None
             end = self._read_daily_meters()
+            if any(v is None for v in (*start.values(), *end.values())):
+                return  # an unavailable meter would log a whole-day or negative delta
             peak_load_kwh = max(0.0, end["load"] - start["load"])
             peak_grid_import_kwh = max(0.0, end["grid_import"] - start["grid_import"])
             peak_grid_export_kwh = max(0.0, end["grid_export"] - start["grid_export"])
@@ -1804,7 +1827,7 @@ class SunsynkOptimizer:
         kpis = day_kpis(
             snapshots,
             prices,
-            max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))),
+            self._capacity_kwh(cfg),
             late_load_kw,
         )
         record = {
@@ -1843,7 +1866,7 @@ class SunsynkOptimizer:
         plan = peak_export_plan(
             soc,
             reserve,
-            max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))),
+            self._capacity_kwh(cfg),
             prices["export_peak"],
             prices["offpeak"],
             wear_pence=self._wear_pence(),
@@ -1904,24 +1927,30 @@ class SunsynkOptimizer:
             and 16 <= now_local.hour < 19
         )
 
+    def _trim_target(self, soc: float, now_local: datetime) -> tuple[int | None, int]:
+        """(sell-down target or None, evening reserve) for the daytime and full-day trims."""
+        reserve = self._evening_reserve_soc()
+        plan = self.coordinator.state.nightly_import_plan or {}
+        plan_target = plan.get("target_soc") if plan.get("date") == now_local.date().isoformat() else None
+        target = trim_target_soc(
+            soc, reserve, minutes=now_local.hour * 60 + now_local.minute, plan_target_soc=plan_target
+        )
+        return target, reserve
+
     def _evening_reserve_soc(self) -> int:
         """Phase 16: SOC to hold at 19:00 so the house runs to the 02:00 off-peak start.
 
         Load is tonight's plan rate (phase 12 learned or config), else config.
         """
         cfg = self.cfg
-        load_kw = (self.coordinator.state.last_import_plan or {}).get("avg_consumption_kw")
-        if load_kw is None:
-            load_kw = cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW)
-        capacity = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
-        return evening_reserve_soc(float(load_kw), capacity)
+        return evening_reserve_soc(self._plan_load_kw(cfg), self._capacity_kwh(cfg))
 
-    def _read_daily_meters(self) -> dict[str, float]:
-        """SolarSynkV3 cumulative daily load / grid import / grid export (kWh)."""
+    def _read_daily_meters(self) -> dict[str, float | None]:
+        """SolarSynkV3 cumulative daily load / grid import / grid export (kWh); None when unavailable."""
         return {
-            "load": self._state_float(self.day_load_entity, 0),
-            "grid_import": self._state_float(self.day_grid_import_entity, 0),
-            "grid_export": self._state_float(self.day_grid_export_entity, 0),
+            "load": self._essential_state(self.day_load_entity),
+            "grid_import": self._essential_state(self.day_grid_import_entity),
+            "grid_export": self._essential_state(self.day_grid_export_entity),
         }
 
     async def _async_battery_soc_changed(self, event: Event) -> None:
@@ -1947,10 +1976,8 @@ class SunsynkOptimizer:
                 current_soc = self._state_float(self.battery_soc_entity, 0)
                 if current_soc < 99.5:
                     return
-                # Phase 16: floor the sell-down at the evening reserve.
-                reserve = self._evening_reserve_soc()
-                trim_target = trim_target_soc(current_soc, reserve)
                 now_local = dt_util.now()
+                trim_target, reserve = self._trim_target(current_soc, now_local)
                 # A live peak export (phase 17) already sells lower; don't replace it.
                 if trim_target is None or self._peak_export_holds_flux2(now_local):
                     return
@@ -2001,14 +2028,11 @@ class SunsynkOptimizer:
         cfg = self.cfg
         now = dt_util.now()
         soc = self._essential_state(self.battery_soc_entity)
-        capacity = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
-        hourly = self._get_hourly_forecast_kwh()
-        raw_daily, _ = self._resolve_raw_forecast(cfg[CONF_SOLAR_FORECAST_SENSOR], now)
-        if hourly is None and raw_daily is not None:
-            hourly = self._synthetic_hourly_forecast(raw_daily)
+        capacity = self._capacity_kwh(cfg)
+        hourly = self._hourly_or_synthetic_forecast(cfg, now)
         plan = self.coordinator.state.last_import_plan or {}
         correction = float(plan.get("forecast_correction_factor") or 1.0)
-        load_kw = float(plan.get("avg_consumption_kw") or cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        load_kw = self._plan_load_kw(cfg)
         headroom = capacity * (100.0 - soc) / 100.0 if soc is not None else 0.0
         result = expected_spare_solar(
             hourly, correction, load_kw, headroom, from_hour=max(SPARE_SOLAR_FIRST_HOUR, now.hour + now.minute / 60.0)
@@ -2041,7 +2065,7 @@ class SunsynkOptimizer:
         real 00:00-06:00 household consumption — a direct energy figure to
         cross-check against the SOC-derived overnight_drain_pct.
         """
-        soc = self._state_float(self.battery_soc_entity, 0)
+        soc = self._essential_state(self.battery_soc_entity)
         pv_power = (
             self._state_float(self.pv_mppt0_entity, 0)
             + self._state_float(self.pv_mppt1_entity, 0)
@@ -2059,7 +2083,7 @@ class SunsynkOptimizer:
             last_morning_state={
                 "type": "morning_state",
                 "date": date,
-                "morning_soc": round(soc, 1),
+                "morning_soc": round_or_none(soc, 1),
                 "morning_pv_power": round(pv_power, 1),
                 "overnight_load_kwh": round_or_none(overnight_load_kwh),
             },
@@ -2161,7 +2185,9 @@ class SunsynkOptimizer:
         month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         imp, exp = await self.data_logger.async_load_half_hourly()
         rates = merge_tariff_rates(self.cfg.get(CONF_TARIFF_RATE_OVERRIDES))
-        export_flat = lambda r: [(0, 1440, r["export"])]  # noqa: E731
+        def export_flat(r: dict[str, float]) -> list[tuple[int, int, float]]:
+            return [(0, 1440, r["export"])]
+
         tariffs = {
             "flux": (
                 flux_bands_from_charges(self.cfg.get(CONF_CHARGES), "import"),
@@ -2182,16 +2208,14 @@ class SunsynkOptimizer:
                 json.dumps({"type": "monthly_tariff_comparison", **result}),
                 target=data_report_target,
             )
-        notify_target = self._cfg_str(CONF_NOTIFY_TARGET)
         lines = [
             f"{TARIFF_LABELS[k]}: " + (f"£{v:.2f}" if v is not None else "n/a")
             for k, v in result["net_gbp"].items()
         ]
         await self.async_notify(
-            "🔋 Sunsynk: Tariff comparison for " + month,
+            "🔋 Sunsynk: tariff comparison for " + month,
             f"{result['days_compared']} days, net of export, same usage. " + " · ".join(lines)
             + f". Unit rates only (as of {TARIFF_RATES_AS_OF}); battery use would differ on another tariff.",
-            target=notify_target or None,
         )
 
     async def _async_capture_day_actuals(self, _now) -> None:
@@ -2204,9 +2228,9 @@ class SunsynkOptimizer:
         """
         await self._guarded(self._async_auto_away, "Auto away check")
         await self._async_capture_daily_cost()
-        soc = self._state_float(self.battery_soc_entity, 0)
-        actual_solar_kwh = self._state_float(self.day_pv_energy_entity, 0)
-        # Unavailable meters log None, not 0.0 — a zero load would skew learning.
+        # Unavailable meters log None, not 0 — a zero would skew learning.
+        soc = self._essential_state(self.battery_soc_entity)
+        actual_solar_kwh = self._essential_state(self.day_pv_energy_entity)
         day_load_kwh = self._essential_state(self.day_load_entity)
         day_grid_import_kwh = self._essential_state(self.day_grid_import_entity)
         day_grid_export_kwh = self._essential_state(self.day_grid_export_entity)
@@ -2230,8 +2254,8 @@ class SunsynkOptimizer:
         actuals_rec = {
             "type": "day_actuals",
             "date": date,
-            "evening_soc": round(soc, 1),
-            "actual_solar_kwh": round(actual_solar_kwh, 2),
+            "evening_soc": round_or_none(soc, 1),
+            "actual_solar_kwh": round_or_none(actual_solar_kwh),
             "evening_export_disabled": evening_export_disabled,
             "day_load_kwh": round_or_none(day_load_kwh),
             "day_grid_import_kwh": round_or_none(day_grid_import_kwh),
@@ -2367,10 +2391,8 @@ class SunsynkOptimizer:
             return False
 
         cfg = self.cfg
-        battery_capacity_kwh = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
-        default_rate = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
-        charge_rate_kw = float(cfg.get(CONF_FREE_EVENT_CHARGE_RATE_KW) or default_rate)
-        export_rate_kw = float(cfg.get(CONF_FREE_EVENT_EXPORT_RATE_KW) or default_rate)
+        battery_capacity_kwh = self._capacity_kwh(cfg)
+        charge_rate_kw, export_rate_kw = self._event_rates_kw(cfg)
 
         result = plan_free_event(free_start, free_end, soc, battery_capacity_kwh, charge_rate_kw, export_rate_kw)
 
@@ -2622,10 +2644,8 @@ class SunsynkOptimizer:
             return False
 
         cfg = self.cfg
-        capacity_kwh = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
-        default_rate = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
-        charge_rate_kw = float(cfg.get(CONF_FREE_EVENT_CHARGE_RATE_KW) or default_rate)
-        export_rate_kw = float(cfg.get(CONF_FREE_EVENT_EXPORT_RATE_KW) or default_rate)
+        capacity_kwh = self._capacity_kwh(cfg)
+        charge_rate_kw, export_rate_kw = self._event_rates_kw(cfg)
         if reward_pence is None and cfg.get(CONF_SAVING_SESSION_REWARD_PENCE):
             reward_pence = float(cfg[CONF_SAVING_SESSION_REWARD_PENCE])
         prices, sources = self._tariff_prices(start.date())
@@ -2911,11 +2931,9 @@ class SunsynkOptimizer:
         if soc is None:
             return
         cfg = self.cfg
-        capacity = max(0.1, float(cfg.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
+        capacity = self._capacity_kwh(cfg)
         charge_rate_kw = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
-        fallback_kw = float((self.coordinator.state.last_import_plan or {}).get("avg_consumption_kw") or cfg.get(
-            CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW
-        ))
+        fallback_kw = self._plan_load_kw(cfg)
         snapshots = await self.data_logger.async_load_meter_snapshots(today)
         load_at_05 = (snapshots.get("05:00") or {}).get("load_kwh")
         load_now = self._essential_state(self.day_load_entity)
@@ -2924,10 +2942,7 @@ class SunsynkOptimizer:
             await self.data_logger.async_recent_peak_loads(), 3.0 * load_kw
         )
         # Pessimistic solar, like the low-solar decisions: the raw (uncorrected) forecast.
-        hourly = self._get_hourly_forecast_kwh()
-        raw_daily, _ = self._resolve_raw_forecast(cfg[CONF_SOLAR_FORECAST_SENSOR], now)
-        if hourly is None and raw_daily is not None:
-            hourly = self._synthetic_hourly_forecast(raw_daily)
+        hourly = self._hourly_or_synthetic_forecast(cfg, now)
         solar_kwh = solar_until_kwh(hourly, now.hour + now.minute / 60.0)
         prices, sources = self._tariff_prices(now.date())
         if solar_kwh is None:
