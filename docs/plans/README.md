@@ -46,7 +46,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 36. Bill reconciliation | Planned, not built | S, ~30-45k |
 | 37. Value-of-the-system report | Planned, not built | S, ~30-45k |
 | 38. "Cost of 1 kWh now" sensor | Planned, not built | S, ~25-40k |
-| 39. Multi-day low-solar planning | Done, merged (PR #61), shadow | S, ~30k |
+| 39. Multi-day low-solar planning | Done, merged (1935017, PR #61), shadow | S, ~30k |
 | 40. Daytime load spike alert | Planned, not built | XS–S, ~20-30k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
