@@ -1,6 +1,6 @@
 # Phase 34 — Battery capacity tracking
 
-**Status:** Done, merged (PR #66), shadow. **Size:** S, ~35k actual. **Origin:** improvement list 3, 14/10/2026 (item 4).
+**Status:** Done, merged (2c8963c, PR #66), shadow. **Size:** S, ~35k actual. **Origin:** improvement list 3, 14/10/2026 (item 4).
 
 ## Goal
 

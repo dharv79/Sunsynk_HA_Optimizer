@@ -584,3 +584,39 @@ def test_capacity_low(planning):
     assert planning.capacity_low(8.5, 9.58)
     assert not planning.capacity_low(9.0, 9.58)
     assert not planning.capacity_low(None, 9.58)
+
+
+# ---- Phase 36: bill reconciliation ----
+
+
+def test_reconcile_matching_month(planning):
+    out = planning.reconcile_month([1.0] * 30, 30, 30.5)
+    assert out["logged_gbp"] == 30.0 and out["gap_gbp"] == 0.5 and not out["partial"] and not out["alert"]
+
+
+def test_reconcile_gap_over_threshold(planning):
+    out = planning.reconcile_month([1.0] * 30, 30, 35.0)
+    assert out["alert"] and out["gap_gbp"] == 5.0 and out["gap_pct"] == round(5 / 35 * 100, 1)
+
+
+def test_reconcile_missing_days_partial_no_alert(planning):
+    out = planning.reconcile_month([1.0] * 25 + [None], 30, 40.0)
+    assert out["partial"] and out["days_logged"] == 25 and not out["alert"]
+
+
+def test_reconcile_billed_unknown(planning):
+    out = planning.reconcile_month([1.0] * 30, 30, None)
+    assert out["gap_gbp"] is None and not out["alert"]
+    assert planning.reconcile_month([], 30, 20.0)["logged_gbp"] is None
+
+
+def test_reconcile_standing_added_when_excluded(planning):
+    assert planning.reconcile_month([1.0] * 30, 30, 50.0, standing_p_per_day=50.0)["logged_gbp"] == 45.0
+
+
+def test_logged_day_cost(planning):
+    day = {"actual_import_cost_gbp": 2.0, "actual_export_income_gbp": 0.5, "actual_gas_cost_gbp": 1.0}
+    assert planning.logged_day_cost_gbp(day, include_gas=True) == 2.5
+    assert planning.logged_day_cost_gbp(day, include_gas=False) == 1.5
+    assert planning.logged_day_cost_gbp({**day, "actual_gas_cost_gbp": None}, include_gas=True) is None
+    assert planning.logged_day_cost_gbp({"actual_import_cost_gbp": 2.0}, include_gas=False) is None

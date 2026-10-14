@@ -57,3 +57,7 @@ action:
 ### Battery capacity estimate (phase 34, 14/10/2026)
 
 Diagnostic `sensor.battery_capacity_estimate` (kWh): the measured usable capacity, with the `capacity_estimate` record as attributes. See import-plan.md.
+
+### Billed last month (phase 36, 14/10/2026)
+
+`number.billed_last_month` (£, box entry): enter last month's billed net £ from the Octopus statement to reconcile it against the logged cost. See weekly-reports.md.

@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 DOMAIN = "sunsynk_optimizer"
-PLATFORMS = ["sensor", "button", "binary_sensor", "switch", "datetime"]
+PLATFORMS = ["sensor", "button", "binary_sensor", "switch", "datetime", "number"]
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}_state"
 

@@ -120,6 +120,8 @@ class OptimizerState:
     # Battery capacity tracking (phase 34): date, estimate_kwh, samples,
     # configured_kwh, pct_of_configured. Shadow: never changes battery_capacity.
     battery_capacity_estimate: dict[str, Any] = field(default_factory=dict)
+    # Bill reconciliation (phase 36): month, billed_gbp (user-entered) and the last result.
+    bill_reconciliation: dict[str, Any] = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
