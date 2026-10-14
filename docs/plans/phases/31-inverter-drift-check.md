@@ -1,6 +1,6 @@
 # Phase 31 — Inverter drift check
 
-**Status:** Planned, not built. **Size:** S, ~30-45k est. **Origin:** improvement list 3, 14/10/2026 (item 1).
+**Status:** Done, merged (PR #58); Flux read-back endpoint unverified live. **Size:** S, ~40k actual. **Origin:** improvement list 3, 14/10/2026 (item 1).
 
 ## Goal
 

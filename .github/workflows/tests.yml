@@ -17,8 +17,10 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install pytest
-        run: pip install pytest
+        run: pip install pytest pyflakes
       - name: Compile check
         run: python -m py_compile custom_components/sunsynk_optimizer/*.py
+      - name: Lint (undefined names, unused imports)
+        run: python -m pyflakes custom_components/sunsynk_optimizer/*.py
       - name: Run tests
         run: python -m pytest
