@@ -107,6 +107,11 @@ class OptimizerState:
     gentle_charge: dict[str, Any] = field(default_factory=dict)
     # Spare solar for flexible loads (phase 25): total_kwh, best window, per-hour list.
     spare_solar: dict[str, Any] = field(default_factory=dict)
+    # Inverter drift check (phase 31): fluxProducts of the last successful
+    # income POST (the expected side), and the current drift episode's
+    # signature so one episode alerts once.
+    last_pushed_flux: list[dict[str, Any]] = field(default_factory=list)
+    inverter_drift: dict[str, Any] = field(default_factory=dict)
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

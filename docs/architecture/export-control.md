@@ -157,3 +157,13 @@ Every push rebuilds both Flux slots: the slot a caller doesn't override reverts 
 - **Reload 16–19:** the one-shot plan undid a live peak export (it was only skipped while paused).
 
 **Verification.** `tests/test_planning.py` (`restore_flux2_slot`, `saving_session_later_today`).
+
+## Inverter drift check (14/10/2026)
+
+Phase 31. `_async_post_with_status` stores the pushed `fluxProducts` in `state.last_pushed_flux`. Every successful income POST or settings write re-arms a check 10 minutes later, and a 2-hourly interval runs the check too. `async_run_drift_check` (skipped in monitor mode) reads back:
+- **Flux slots:** `api.async_read_flux_products` (`GET /api/v1/plant/{plant_id}/income`). This endpoint is undocumented. If the response carries no `fluxProducts`, the Flux check switches itself off until restart (`_flux_read_supported = False`, one warning). The 2-hourly loop keeps running for the grid-current check.
+- **Grid-charge current:** the `sdBatteryCurrent` setting, compared only while the integration owns it (`planning.expected_grid_current_a`: gentle value while applied, restored value on the restore day).
+
+`planning.flux_drift` compares start/end as minutes and targetSoc as a number. It skips any field missing or unparseable on either side. `grid_current_drift` uses a 1 A tolerance. Each new drift signature (stored in `state.inverter_drift`) sends a notification, "⚠️ Sunsynk: inverter settings differ from plan", and logs an `inverter_drift` record. A repeat of the same drift is silent, and a clean read clears the episode. Nothing is re-pushed. Tests: `test_flux_drift_*`, `test_expected_grid_current`, `test_grid_current_drift`.
+
+**Live check needed:** confirm the plant income GET returns `data.fluxProducts`. If the log shows "Plant income read returned no fluxProducts", the Flux half goes On hold.

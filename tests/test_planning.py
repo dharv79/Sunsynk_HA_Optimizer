@@ -650,3 +650,49 @@ def test_battery_limits_bottom_20_low_25(planning):
 )
 def test_plan_retry_due(planning, now_minutes, attempts, due):
     assert planning.plan_retry_due(now_minutes, attempts) is due
+
+
+_PUSHED = [
+    {"startTime": "02:00", "endTime": "05:00", "targetSoc": 85, "direction": 1},
+    {"startTime": "16:00", "endTime": "16:15", "targetSoc": 85, "direction": 0},
+]
+
+
+def test_flux_drift_equal_and_hhmmss(planning):
+    actual = [
+        {"startTime": "02:00:00", "endTime": "05:00:00", "targetSoc": "85"},
+        {"startTime": "16:00", "endTime": "16:15", "targetSoc": 85.0},
+    ]
+    assert planning.flux_drift(_PUSHED, actual) == []
+
+
+def test_flux_drift_reports_differing_slot(planning):
+    actual = [dict(_PUSHED[0]), {**_PUSHED[1], "targetSoc": 100}]
+    assert planning.flux_drift(_PUSHED, actual) == [
+        {"slot": 2, "field": "targetSoc", "expected": 85, "actual": 100}
+    ]
+
+
+def test_flux_drift_missing_fields_no_false_alarm(planning):
+    actual = [{"startTime": "02:00"}, {"endTime": None, "targetSoc": "n/a"}]
+    assert planning.flux_drift(_PUSHED, actual) == []
+    assert planning.flux_drift(_PUSHED, []) == []
+    assert planning.flux_drift(None, _PUSHED) == []
+
+
+def test_expected_grid_current(planning):
+    assert planning.expected_grid_current_a({"phase": "applied", "current_a": 40}, "2026-10-14") == 40
+    restored = {"phase": "restored", "date": "2026-10-14", "restore_current_a": 90}
+    assert planning.expected_grid_current_a(restored, "2026-10-14") == 90
+    assert planning.expected_grid_current_a(restored, "2026-10-15") is None
+    assert planning.expected_grid_current_a({}, "2026-10-14") is None
+
+
+def test_grid_current_drift(planning):
+    assert planning.grid_current_drift(40.0, "40") == []
+    assert planning.grid_current_drift(40.0, "40.5") == []
+    assert planning.grid_current_drift(None, "90") == []
+    assert planning.grid_current_drift(40.0, None) == []
+    assert planning.grid_current_drift(40.0, "90") == [
+        {"slot": None, "field": "grid_charge_current_a", "expected": 40.0, "actual": 90.0}
+    ]

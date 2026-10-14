@@ -50,3 +50,4 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh` |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |
+| `tests/test_code_integrity.py` | AST guard: every `self.<name>` read in `SunsynkOptimizer` is defined on the class (catches a dropped `def` line). CI also runs `pyflakes` |

@@ -157,6 +157,14 @@ class SunsynkApiClient:
         """POST an income/Flux config payload to the Sunsynk API (keyed by plant_id)."""
         return await self._authorized_json("POST", f"{BASE_API}/api/v1/plant/{plant_id}/income", payload)
 
+    async def async_read_flux_products(self, plant_id: str) -> list[dict[str, Any]] | None:
+        """Read back the plant's income config; its fluxProducts, or None when the
+        response doesn't carry them (the GET twin of async_post_income is undocumented)."""
+        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/plant/{plant_id}/income")
+        body = data.get("data") if isinstance(data, dict) else None
+        products = body.get("fluxProducts") if isinstance(body, dict) else None
+        return products if isinstance(products, list) else None
+
     async def async_read_settings(self, inverter_sn: str) -> dict[str, Any]:
         """Read the inverter's settings (keyed by the inverter serial, not plant_id)."""
         data = await self._authorized_json("GET", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/read")

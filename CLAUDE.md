@@ -63,7 +63,8 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 
 ```bash
 pip install pytest && python3 -m pytest                          # HA-free unit tests
-python3 -m py_compile custom_components/sunsynk_optimizer/*.py  # syntax check (CI runs both)
+python3 -m py_compile custom_components/sunsynk_optimizer/*.py  # syntax check
+pip install pyflakes && python3 -m pyflakes custom_components/sunsynk_optimizer/*.py  # undefined names (CI runs all three)
 ```
 Real behaviour needs an HA instance; use the **Test plan (dry run)** button. Details: `docs/architecture/testing.md`.
 

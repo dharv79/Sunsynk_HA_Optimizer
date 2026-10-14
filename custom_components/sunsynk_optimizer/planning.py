@@ -1567,3 +1567,62 @@ def saving_session_later_today(session: dict[str, Any], now: datetime) -> bool:
         return False
     start = _as_aware(session.get("session_start"), now.tzinfo)
     return start is not None and start > now and start.astimezone(now.tzinfo).date() == now.date()
+
+
+# --------------------------------------------------------------------------- #
+# Inverter drift check (phase 31)                                              #
+# --------------------------------------------------------------------------- #
+
+DRIFT_CHECK_INTERVAL_HOURS = 2
+DRIFT_CHECK_AFTER_PUSH_MINUTES = 10
+GRID_CURRENT_DRIFT_TOLERANCE_A = 1.0
+_FLUX_TIME_FIELDS = ("startTime", "endTime")
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def flux_drift(expected: list[dict[str, Any]] | None, actual: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Per-slot differences between the last pushed fluxProducts and what the plant holds.
+
+    Compares startTime/endTime as minutes (so "02:00" == "02:00:00") and
+    targetSoc as a number. A field missing or unparseable on either side is
+    skipped rather than reported, so a sparse read never raises a false alarm.
+    """
+    diffs: list[dict[str, Any]] = []
+    for slot, (exp, act) in enumerate(zip(expected or [], actual or []), start=1):
+        if not isinstance(exp, dict) or not isinstance(act, dict):
+            continue
+        for key in (*_FLUX_TIME_FIELDS, "targetSoc"):
+            parse = hhmm_to_minutes if key in _FLUX_TIME_FIELDS else _as_float
+            e = parse(exp.get(key)) if exp.get(key) is not None else None
+            a = parse(act.get(key)) if act.get(key) is not None else None
+            if e is not None and a is not None and e != a:
+                diffs.append({"slot": slot, "field": key, "expected": exp.get(key), "actual": act.get(key)})
+    return diffs
+
+
+def expected_grid_current_a(gentle: dict[str, Any] | None, today_iso: str) -> float | None:
+    """The grid-charge current this integration last set, while it still applies.
+
+    The gentle value while applied; the restored value on the day it was put
+    back. Otherwise None: the user owns the setting and nothing is checked.
+    """
+    gentle = gentle or {}
+    if gentle.get("phase") == "applied":
+        return _as_float(gentle.get("current_a"))
+    if gentle.get("phase") == "restored" and gentle.get("date") == today_iso:
+        return _as_float(gentle.get("restore_current_a"))
+    return None
+
+
+def grid_current_drift(expected: float | None, actual: Any) -> list[dict[str, Any]]:
+    """A one-item drift list when the inverter's grid-charge current differs from expected."""
+    actual_a = _as_float(actual)
+    if expected is None or actual_a is None or abs(actual_a - expected) < GRID_CURRENT_DRIFT_TOLERANCE_A:
+        return []
+    return [{"slot": None, "field": "grid_charge_current_a", "expected": expected, "actual": actual_a}]

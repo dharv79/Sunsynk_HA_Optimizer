@@ -239,6 +239,10 @@ class DataLogger:
         """Log the nightly charge watchdog outcome (phase 22): one record per night."""
         await self._async_append(_record("charge_watchdog", **fields))
 
+    async def async_log_inverter_drift(self, **fields: Any) -> None:
+        """Log an inverter drift episode (phase 31): one record per new drift signature."""
+        await self._async_append(_record("inverter_drift", **fields))
+
     async def async_log_meter_snapshot(self, **fields: Any) -> None:
         """Log a cumulative daily-meter snapshot (phase 14): one per date+time."""
         await self._async_append(_record("meter_snapshot", **fields))

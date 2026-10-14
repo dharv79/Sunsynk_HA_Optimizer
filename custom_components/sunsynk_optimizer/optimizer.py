@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from copy import deepcopy
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, Callable
@@ -140,6 +141,11 @@ from .planning import (
     CHARGE_WATCHDOG_MINUTES,
     CHARGE_WATCHDOG_RECHECK_MINUTES,
     PLAN_RETRY_INTERVAL_MINUTES,
+    DRIFT_CHECK_AFTER_PUSH_MINUTES,
+    DRIFT_CHECK_INTERVAL_HOURS,
+    expected_grid_current_a,
+    flux_drift,
+    grid_current_drift,
     plan_retry_due,
     apply_soc_adjustments,
     charge_efficiency,
@@ -207,6 +213,17 @@ _INITIAL_REFRESH_MAX_RETRIES = 5  # 60 s apart: covers slow first poll after res
 
 def _api_note(api_ok: bool) -> str:
     return "" if api_ok else " (inverter NOT updated)"
+
+
+_DRIFT_SLOT_NAMES = {1: "Flux 1 (import)", 2: "Flux 2 (export)"}
+
+
+def _drift_line(diff: dict[str, Any]) -> str:
+    """One human line per drift item: "Flux 1 (import) targetSoc: plan 85, inverter 100"."""
+    if diff["slot"] is None:
+        return f"Grid charge current: plan {diff['expected']} A, inverter {diff['actual']} A"
+    name = _DRIFT_SLOT_NAMES.get(diff["slot"], f"Slot {diff['slot']}")
+    return f"{name} {diff['field']}: plan {diff['expected']}, inverter {diff['actual']}"
 
 
 def _session_api_note(api_ok: bool | None) -> str:
@@ -279,6 +296,11 @@ class SunsynkOptimizer:
         # Phase 32 failed-plan-push retry handle. Not persisted: a restart runs
         # the startup plan push instead.
         self._plan_retry = None
+        # Phase 31 drift check 10 min after a push; None = the plant income GET
+        # is untested, False = it returned no fluxProducts (Flux check disabled
+        # until restart). Both unpersisted.
+        self._drift_check_unsub = None
+        self._flux_read_supported: bool | None = None
         # Today's 16:00 peak export decision (phase 17). Not persisted: after a
         # restart mid-window a trim may replace a live export window, and the
         # 22:00 bundle omits the line (the JSONL record survives).
@@ -354,6 +376,11 @@ class SunsynkOptimizer:
             async_track_time_interval(self.hass, self._async_periodic_flux2_check, timedelta(minutes=30))
         )
         self.unsubs.append(
+            async_track_time_interval(
+                self.hass, self._async_drift_check, timedelta(hours=DRIFT_CHECK_INTERVAL_HOURS)
+            )
+        )
+        self.unsubs.append(
             async_track_state_change_event(self.hass, [self.battery_soc_entity], self._async_battery_soc_changed)
         )
         saving_entity = self._cfg_str(CONF_OCTOPUS_SAVING_SESSION_ENTITY)
@@ -391,6 +418,9 @@ class SunsynkOptimizer:
             self._charge_watchdog_recheck()
             self._charge_watchdog_recheck = None
         self._cancel_plan_retry()
+        if self._drift_check_unsub:
+            self._drift_check_unsub()
+            self._drift_check_unsub = None
         if self.pending_full_trim_cancel:
             self.pending_full_trim_cancel()
             self.pending_full_trim_cancel = None
@@ -531,7 +561,9 @@ class SunsynkOptimizer:
             return False
         self.coordinator.update_state(
             last_api_result={"ok": True, **(result if isinstance(result, dict) else {"result": result})},
+            last_pushed_flux=deepcopy(payload.get("fluxProducts") or []),
         )
+        self._schedule_drift_check()
         return True
 
     async def async_push_flux_override(self, payload: dict[str, Any]) -> bool:
@@ -1143,6 +1175,8 @@ class SunsynkOptimizer:
                 "⚠️ Sunsynk: import plan NOT applied",
                 f"Inverter NOT updated after {attempt} retries; tonight's charge runs on the existing settings.",
             )
+
+    async def _async_skip_plan(self, msg: str) -> None:
         _LOGGER.warning(msg)
         self.coordinator.update_state(last_error=msg)
         await self.async_notify("⚠️ Sunsynk: plan skipped", msg)
@@ -2912,6 +2946,7 @@ class SunsynkOptimizer:
             )
             return False, None
         self.coordinator.update_state(last_api_result={"ok": True, "setting": key, "value": value})
+        self._schedule_drift_check()
         return True, previous
 
     async def _async_apply_gentle_charge(self, current_a: int, now: datetime) -> tuple[bool, float | None]:
@@ -2982,6 +3017,76 @@ class SunsynkOptimizer:
                 f"Still {gentle['current_a']} A after the gentle overnight charge; retrying every 30 minutes. "
                 f"If this persists, set Grid charge back to {gentle['restore_current_a']} A in the Sunsynk app.",
             )
+
+    # ------------------------------------------------------------------ #
+    # Inverter drift check (phase 31)                                      #
+    # ------------------------------------------------------------------ #
+
+    def _schedule_drift_check(self) -> None:
+        """(Re)arm a drift check DRIFT_CHECK_AFTER_PUSH_MINUTES after the latest write."""
+        if self._drift_check_unsub:
+            self._drift_check_unsub()
+        self._drift_check_unsub = async_call_later(
+            self.hass, DRIFT_CHECK_AFTER_PUSH_MINUTES * 60, self._async_drift_check
+        )
+
+    async def _async_drift_check(self, _now=None) -> None:
+        self._drift_check_unsub = None
+        await self._guarded(self.async_run_drift_check, "Inverter drift check")
+
+    async def _async_read_flux_drift(self) -> list[dict[str, Any]]:
+        expected = self.coordinator.state.last_pushed_flux
+        if not expected or self._flux_read_supported is False:
+            return []
+        try:
+            actual = await self.coordinator.api.async_read_flux_products(self.plant_id)
+        except Exception as exc:  # pragma: no cover - network
+            _LOGGER.debug("Flux read-back failed: %s", exc)
+            return []
+        if actual is None:
+            _LOGGER.warning("Plant income read returned no fluxProducts; Flux drift check off until restart")
+            self._flux_read_supported = False
+            return []
+        self._flux_read_supported = True
+        return flux_drift(expected, actual)
+
+    async def _async_read_current_drift(self, now) -> list[dict[str, Any]]:
+        expected = expected_grid_current_a(self.coordinator.state.gentle_charge, now.date().isoformat())
+        if expected is None:
+            return []
+        try:
+            settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
+        except Exception as exc:  # pragma: no cover - network
+            _LOGGER.debug("Settings read-back failed: %s", exc)
+            return []
+        return grid_current_drift(expected, settings.get(GENTLE_CHARGE_SETTING))
+
+    async def async_run_drift_check(self) -> None:
+        """Read back what the inverter holds and alert once per drift episode.
+
+        Read-only: never re-pushes. Skipped in monitor mode (nothing pushed is
+        authoritative there).
+        """
+        if self.operation_mode == "monitor":
+            return
+        now = dt_util.now()
+        diffs = await self._async_read_flux_drift() + await self._async_read_current_drift(now)
+        previous = self.coordinator.state.inverter_drift.get("signature")
+        if not diffs:
+            if previous:
+                self.coordinator.update_state(inverter_drift={})
+            return
+        signature = json.dumps(diffs, sort_keys=True)
+        if signature == previous:
+            return
+        self.coordinator.update_state(
+            inverter_drift={"signature": signature, "since": now.isoformat(), "diffs": diffs}
+        )
+        await self.data_logger.async_log_inverter_drift(date=now.date().isoformat(), time=now.strftime("%H:%M"), diffs=diffs)
+        await self.async_notify(
+            "⚠️ Sunsynk: inverter settings differ from plan",
+            "; ".join(_drift_line(d) for d in diffs) + ". Not re-pushed; check the Sunsynk app.",
+        )
 
     # ------------------------------------------------------------------ #
     # Peak cover (phase 30)                                                #
