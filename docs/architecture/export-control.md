@@ -48,7 +48,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 
 - In shadow the decision is only logged.
 - Live (and not in monitor mode, do-not-break 16) pushes Flux 2 (index 1, do-not-break 3) 16:00–19:00 to the target as action `peak_export`, via `_async_post_with_status`. It notifies "🔋 Sunsynk: selling surplus at peak rate" or "⚠️ Sunsynk: peak export NOT applied", gated on the bool.
-- While a successful live export holds Flux 2, the daytime and full-charge-day trims are skipped so they don't replace the window (`_peak_export_holds_flux2`, unpersisted `_peak_export`).
+- While a successful live export holds Flux 2, the daytime and full-charge-day trims are skipped so they don't replace the window (`_peak_export_holds_flux2`, reading the persisted `state.peak_export`).
 - The export is skipped entirely while a free event holds the slots (do-not-break 7).
 
 **Logged.** A `peak_export` record (deduped per day) holds `soc`, `evening_reserve_soc`, `decision`, `target_soc`, `export_kwh`, `export_gbp`, `gain_gbp` (export income minus replacement cost), `live` and `api_ok`.
@@ -65,6 +65,8 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 - record dedup and export-only pairing.
 
 The free-event, monitor-mode and export-disable gates are early returns in the HA-only listener. In HA, the 22:00 bundle shows a `peak_export` line with `live: false`.
+
+**Persisted decision (15/10/2026).** The 16:00 record is stored in `OptimizerState.peak_export` (via `update_state`) instead of an instance attribute. Root cause: an HA restart between 16:00 and 22:00 (e.g. an update) dropped the day's `peak_export` line from the 22:00 debug bundle and released a live export's hold on Flux 2. `planning.record_for_date` returns it only for today. Test: `test_record_for_date`.
 
 ## Tariff rates from the Octopus integration (09/10/2026, phase 18)
 

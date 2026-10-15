@@ -154,6 +154,7 @@ from .planning import (
     CAPACITY_HISTORY_DAYS,
     capacity_estimate,
     capacity_estimate_pending,
+    record_for_date,
     capacity_low,
     capacity_samples,
     logged_day_cost_gbp,
@@ -342,7 +343,6 @@ class SunsynkOptimizer:
         # Today's 16:00 peak export decision (phase 17). Not persisted: after a
         # restart mid-window a trim may replace a live export window, and the
         # 22:00 bundle omits the line (the JSONL record survives).
-        self._peak_export: dict[str, Any] | None = None
         # Today's peak-cover state (phase 30): date, logged/pushed flags and the
         # record. Not persisted: after a restart it re-evaluates (one push a day
         # is re-allowed, harmless — the slot is idempotent).
@@ -2081,7 +2081,7 @@ class SunsynkOptimizer:
                 f"SOC {round(soc, 1)}%: exporting about {plan['export_kwh']} kWh down to "
                 f"{plan['target_soc']}% (evening reserve {reserve}%) until 19:00.{_api_note(api_ok)}",
             )
-        self._peak_export = {
+        record = {
             "type": "peak_export",
             "date": now.date().isoformat(),
             "soc": soc,
@@ -2091,9 +2091,8 @@ class SunsynkOptimizer:
             "live": live,
             "api_ok": api_ok,
         }
-        await self.data_logger.async_log_peak_export(
-            **{k: v for k, v in self._peak_export.items() if k != "type"}
-        )
+        self.coordinator.update_state(touch=False, peak_export=record)
+        await self.data_logger.async_log_peak_export(**{k: v for k, v in record.items() if k != "type"})
         await self._async_log_multi_day_shadow("peak_export", peak_target_soc=plan["target_soc"], reserve=reserve)
 
     async def _async_multi_day_outlook(self, cfg: dict[str, Any]) -> tuple[int, float | None]:
@@ -2181,10 +2180,9 @@ class SunsynkOptimizer:
 
     def _peak_export_holds_flux2(self, now_local) -> bool:
         """True while today's live peak export window owns Flux 2 (16:00-19:00)."""
-        rec = self._peak_export or {}
+        rec = record_for_date(self.coordinator.state.peak_export, now_local.date().isoformat())
         return (
             rec.get("api_ok") is True
-            and rec.get("date") == now_local.date().isoformat()
             and 16 <= now_local.hour < 19
         )
 
@@ -2741,7 +2739,7 @@ class SunsynkOptimizer:
             peak_rec = self.coordinator.state.last_peak_window_usage or {}
             if peak_rec.get("date") != date:
                 peak_rec = {}
-            peak_export_rec = self._peak_export if (self._peak_export or {}).get("date") == date else {}
+            peak_export_rec = record_for_date(self.coordinator.state.peak_export, date)
             cover = (self._peak_cover or {}).get("record") or {}
             peak_cover_rec = {"type": "peak_cover", **cover} if cover.get("date") == date else {}
             # daily_cost is captured this morning tagged with YESTERDAY's date

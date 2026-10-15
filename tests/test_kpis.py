@@ -593,6 +593,14 @@ def test_capacity_estimate_pending(planning):
     assert not planning.capacity_estimate_pending({"estimate_kwh": 9.4, "samples": 5})
 
 
+def test_record_for_date(planning):
+    rec = {"date": "2026-10-14", "decision": "export"}
+    assert planning.record_for_date(rec, "2026-10-14") is rec
+    assert planning.record_for_date(rec, "2026-10-15") == {}
+    assert planning.record_for_date({}, "2026-10-14") == {}
+    assert planning.record_for_date(None, "2026-10-14") == {}
+
+
 # ---- Phase 36: bill reconciliation ----
 
 
