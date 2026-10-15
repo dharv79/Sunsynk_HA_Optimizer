@@ -2088,6 +2088,11 @@ def capacity_estimate_pending(record: dict[str, Any] | None) -> bool:
     return not record or record.get("estimate_kwh") is None
 
 
+def record_for_date(record: dict[str, Any] | None, date: str) -> dict[str, Any]:
+    """The stored record if it is for `date`, else {} (a stale day is never re-sent)."""
+    return record if record and record.get("date") == date else {}
+
+
 # Bill reconciliation (phase 36).
 BILL_GAP_ALERT_GBP = 2.0
 
