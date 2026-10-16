@@ -1028,9 +1028,12 @@ FREE_EVENT_MIN_FLOOR_SOC = 40
 # Longest sell window before a free period (16/10/2026: was the free period's
 # own length, which left a full battery unable to take the free import).
 FREE_EVENT_MAX_SELL_HOURS = 4.0
-# The sell window is re-planned on the day from the live SOC and solar
-# forecast, this long before the free start (longest sell window + margin).
-FREE_EVENT_REPLAN_LEAD_HOURS = FREE_EVENT_MAX_SELL_HOURS + 0.5
+# The sell start is decided live: from FREE_EVENT_MAX_SELL_HOURS before the free
+# start, every FREE_EVENT_WATCH_MINUTES, from the SOC and its recent trend.
+FREE_EVENT_WATCH_MINUTES = 10
+FREE_EVENT_TREND_MINUTES = 30  # SOC trend window (the battery's real charge rate)
+FREE_EVENT_TREND_MIN_MINUTES = 5  # shorter spans are too noisy at 1% SOC steps
+FREE_EVENT_SELL_MARGIN_HOURS = 0.25
 
 
 @dataclass
@@ -1052,26 +1055,23 @@ def plan_free_event(
     capacity_kwh: float,
     charge_rate_kw: float,
     export_rate_kw: float,
-    solar_kwh: float = 0.0,
     max_sell_hours: float = FREE_EVENT_MAX_SELL_HOURS,
 ) -> FreeEventPlan:
     """Plan the sell-before / refill-during shape of a free electricity event.
 
     Sells down to a "refillable floor" — the SOC that free-period charging at
     charge_rate_kw can top back up to 100% — never below FREE_EVENT_MIN_FLOOR_SOC.
-    ``solar_kwh`` is the net solar expected into the battery before the free
-    start (forecast minus house load); it is sold too, or it would refill the
-    room the free import needs. The sell window ends at free_start and is only
-    as long as needed at export_rate_kw, capped at ``max_sell_hours``. Nothing
-    to sell → skip_sell=True (the free-period import still happens).
+    The sell window ends at free_start and is only as long as needed at
+    export_rate_kw, capped at ``max_sell_hours``. This is the estimate shown
+    when the event is scheduled; the real sell start is decided live on the day
+    (free_event_sell_decision). Nothing to sell → skip_sell=True.
     """
     free_hours = (free_end - free_start).total_seconds() / 3600
     refill_kwh = charge_rate_kw * free_hours
     raw_floor = 100 - (refill_kwh / capacity_kwh * 100 if capacity_kwh > 0 else 0)
     sell_floor_soc = int(max(FREE_EVENT_MIN_FLOOR_SOC, min(100, round(raw_floor))))
 
-    solar_kwh = max(0.0, solar_kwh)
-    energy_to_sell_kwh = (soc - sell_floor_soc) / 100 * capacity_kwh + solar_kwh
+    energy_to_sell_kwh = (soc - sell_floor_soc) / 100 * capacity_kwh
     skip_sell = energy_to_sell_kwh <= 0.05
     sell_hours = 0.0
     expected_export_kwh = 0.0
@@ -1080,7 +1080,7 @@ def plan_free_event(
         expected_export_kwh = round(sell_hours * export_rate_kw, 2)
 
     if capacity_kwh > 0:
-        soc_at_free_start = min(100.0, max(0.0, soc + (solar_kwh - expected_export_kwh) / capacity_kwh * 100))
+        soc_at_free_start = min(100.0, max(0.0, soc - expected_export_kwh / capacity_kwh * 100))
     else:
         soc_at_free_start = soc
     headroom_kwh = max(0.0, capacity_kwh - soc_at_free_start / 100 * capacity_kwh)
@@ -1098,16 +1098,55 @@ def plan_free_event(
     )
 
 
-def free_event_replan_at(free_start: datetime) -> datetime:
-    """When the sell window is re-planned from the live SOC and solar forecast."""
-    return free_start - timedelta(hours=FREE_EVENT_REPLAN_LEAD_HOURS)
+def free_event_watch_from(free_start: datetime) -> datetime:
+    """When the live sell-start watch begins (the longest sell window before the free start)."""
+    return free_start - timedelta(hours=FREE_EVENT_MAX_SELL_HOURS)
 
 
-def free_event_net_solar_kwh(solar_kwh: float | None, load_kw: float, hours: float) -> float:
-    """Solar expected into the battery before the free start: forecast minus house load, ≥ 0; 0 without a forecast."""
-    if solar_kwh is None or hours <= 0:
-        return 0.0
-    return round(max(0.0, solar_kwh - load_kw * hours), 2)
+def soc_trend_kw(samples: list[tuple[datetime, float]], capacity_kwh: float, now: datetime) -> float | None:
+    """Battery charge rate (kW, negative = discharging) from SOC samples in the last
+    FREE_EVENT_TREND_MINUTES; None until they span FREE_EVENT_TREND_MIN_MINUTES."""
+    recent = [(ts, soc) for ts, soc in samples if (now - ts).total_seconds() <= FREE_EVENT_TREND_MINUTES * 60]
+    if len(recent) < 2:
+        return None
+    (t0, s0), (t1, s1) = recent[0], recent[-1]
+    hours = (t1 - t0).total_seconds() / 3600
+    if hours * 60 < FREE_EVENT_TREND_MIN_MINUTES or capacity_kwh <= 0:
+        return None
+    return round((s1 - s0) / 100 * capacity_kwh / hours, 2)
+
+
+def free_event_sell_decision(
+    soc: float,
+    floor_soc: float,
+    capacity_kwh: float,
+    trend_kw: float | None,
+    export_rate_kw: float,
+    hours_left: float,
+    margin_hours: float = FREE_EVENT_SELL_MARGIN_HOURS,
+) -> dict[str, Any]:
+    """Whether to start selling now ahead of a free period.
+
+    Projects the SOC at the free start from the measured charge trend (solar
+    going into the battery, capped at 100%; a falling trend is ignored), then
+    the hours needed to export down to the floor. Start once that, plus a
+    margin, reaches the time left.
+    """
+    charge_kw = max(0.0, trend_kw or 0.0)
+    projected_soc = min(100.0, soc + (charge_kw * hours_left / capacity_kwh * 100 if capacity_kwh > 0 else 0.0))
+    energy_kwh = max(0.0, (projected_soc - floor_soc) / 100 * capacity_kwh)
+    needed_hours = energy_kwh / export_rate_kw if export_rate_kw > 0 else None
+    sell_now = (
+        energy_kwh > 0.05 and needed_hours is not None and needed_hours + margin_hours >= hours_left
+    )
+    return {
+        "sell_now": sell_now,
+        "trend_kw": trend_kw,
+        "projected_soc": round(projected_soc, 1),
+        "energy_kwh": round(energy_kwh, 2),
+        "needed_hours": round(needed_hours, 2) if needed_hours is not None else None,
+        "hours_left": round(hours_left, 2),
+    }
 
 
 def free_event_target_cap(
