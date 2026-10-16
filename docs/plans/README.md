@@ -28,7 +28,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 18. Read tariff rates from the Octopus integration (1.0.12b4) | Done, merged (b4adfc9, PR #43) | S, ~30k actual |
 | 19. Pick the full-charge day from the solar forecast (daily re-check) (1.0.12b2) | Done, merged (449434d, PR #32) | S, ~45k actual |
 | 20. Faster, seasonal forecast correction (shadow) (1.0.12b2) | Done, merged (6b1702b, PR #33) | XS, ~25k actual |
-| 21. Octopus Saving Sessions (1.0.12b4) | Done, merged (e24e307, PR #44) | M, ~55k actual |
+| 21. Octopus Saving Sessions (1.0.12b4) | Superseded by removal (16/10/2026, 1.0.12b16) | M, ~55k actual |
 | 22. Charge watchdog (1.0.12b3) | Done, merged (3e59565, PR #36) | S, ~40k actual |
 | 23. Gentler charging across the cheap window (1.0.12b4) | Done, merged (dff4259, PR #45) | S, ~40k actual |
 | 24. Battery wear cost in decisions | Done, merged (7c8e7b6, PR #48) | S, ~25k |

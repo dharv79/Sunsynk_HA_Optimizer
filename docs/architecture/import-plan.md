@@ -146,7 +146,7 @@ Catches a night where the Flux 1 charge silently fails (cloud write lost, invert
 
 **Maths.** `planning.gentle_charge_current_a(kwh_needed, 3 h, battery_voltage, max_current_a, margin=1.2, min 10 A)`: `ceil(kWh × 1000 × margin / (V × h))`, clamped to `[min, max]`; `None` when nothing to charge. `max_current_a` = nameplate `charge_rate` / voltage. `kwh_needed` is the battery-side `energy_needed_kwh`; the margin covers in-window house load and calibration error.
 
-**Logged first.** Every plan (including the dry run) records `gentle_current_a`, `gentle_max_current_a`, `gentle_charge_rate_kw`, `battery_voltage` and `gentle_charge_applied`; `gentle_current_a` / `gentle_charge_applied` (and phase 21's `saving_session_boost`) are in `_IMPORT_PLAN_FIELDS` so phase 14 KPIs can compare kWh imported per SOC% on gentle vs normal nights.
+**Logged first.** Every plan (including the dry run) records `gentle_current_a`, `gentle_max_current_a`, `gentle_charge_rate_kw`, `battery_voltage` and `gentle_charge_applied`; `gentle_current_a` / `gentle_charge_applied` are in `_IMPORT_PLAN_FIELDS` so phase 14 KPIs can compare kWh imported per SOC% on gentle vs normal nights.
 
 **Live (`gentle_charge_live`, default off).** Applies only when the gentle current is below the max, before 05:00 (so a daytime reload never throttles), and while no event holds the slots. `_async_write_setting` reads the settings, refuses if the current value isn't numeric, and writes the gentle current; on success Flux 1 ends at 05:00 instead of the physics-sized end and `OptimizerState.gentle_charge` (persisted) holds `restore_current_a` / `restore_at`. A re-plan before 05:00 keeps the original restore value rather than reading back its own. If the write fails the normal window is pushed unchanged. With the option off, window sizing is untouched.
 
@@ -158,7 +158,7 @@ Catches a night where the Flux 1 charge silently fails (cloud write lost, invert
 
 ## Battery limits (14/10/2026)
 
-`planning.BATTERY_BOTTOM_SOC = 20` (the inverter stops discharging) and `BATTERY_LOW_SOC = 25` (it starts slowing discharge). The bottom is the floor for the solar bridge, the evening reserve / KPI reserve and the saving-session minimum floor. The low mark is the target for the estimated 06:00 SOC (`apply_soc_adjustments`) and the peak-cover floor, so the house gets full-power discharge through the morning and the 16:00–19:00 peak. Values unchanged; previously literals.
+`planning.BATTERY_BOTTOM_SOC = 20` (the inverter stops discharging) and `BATTERY_LOW_SOC = 25` (it starts slowing discharge). The bottom is the floor for the solar bridge and the evening reserve / KPI reserve. The low mark is the target for the estimated 06:00 SOC (`apply_soc_adjustments`) and the peak-cover floor, so the house gets full-power discharge through the morning and the 16:00–19:00 peak. Values unchanged; previously literals.
 
 ## Plan push retry (14/10/2026)
 

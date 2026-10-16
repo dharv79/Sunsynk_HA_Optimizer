@@ -619,21 +619,9 @@ def test_restore_keeps_an_active_export_pause(planning):
     assert planning.DEFAULT_FLUX2_SLOT["targetSoc"] == 85
 
 
-def test_saving_session_later_today(planning):
-    from datetime import datetime, timezone
-    now = datetime(2026, 10, 14, 15, 0, tzinfo=timezone.utc)
-    later = {"phase": "scheduled", "session_start": "2026-10-14T17:00:00+00:00"}
-    assert planning.saving_session_later_today(later, now)
-    assert not planning.saving_session_later_today({**later, "phase": "exporting"}, now)
-    assert not planning.saving_session_later_today({**later, "session_start": "2026-10-15T17:00:00+00:00"}, now)
-    assert not planning.saving_session_later_today({**later, "session_start": "2026-10-14T14:00:00+00:00"}, now)
-    assert not planning.saving_session_later_today({"phase": "scheduled"}, now)
-    assert not planning.saving_session_later_today({}, now)
-
-
 def test_battery_limits_bottom_20_low_25(planning):
     assert planning.BATTERY_BOTTOM_SOC == 20 and planning.BATTERY_LOW_SOC == 25
-    assert planning.KPI_RESERVE_SOC == planning.SAVING_SESSION_MIN_FLOOR_SOC == 20
+    assert planning.KPI_RESERVE_SOC == 20
     assert planning.PEAK_COVER_FLOOR_SOC == 25
 
 

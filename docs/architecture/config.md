@@ -37,9 +37,9 @@ The options flow is multi-step: `init` → `charges_1` (import tariff rows 1–4
 
 `octopus_import_rates_entity` / `octopus_export_rates_entity` (optional, free text): an Octopus Energy current-rate sensor or day-rates event. Blank keeps pricing on `charges`. See export-control.md.
 
-## Saving sessions (phase 21)
+## Saving sessions (phase 21) — removed 16/10/2026
 
-`saving_session_reward_pence` (optional, p/kWh) prices manual sessions; blank = unknown reward (the plan keeps the evening reserve and doesn't top up). `octopus_saving_session_entity` (optional, free text): the Octopus Energy `event.…_octoplus_saving_session_events` or `event.…_octoplus_power_down_events` entity; blank disables auto-detect. Charge/export rates reuse `free_event_charge_rate_kw` / `free_event_export_rate_kw`. See free-electricity.md.
+`saving_session_reward_pence` and `octopus_saving_session_entity` are gone from the options flow. Stale values left in `entry.options` are ignored. See free-electricity.md.
 
 ## Automatic away mode (13/10/2026, phase 27)
 

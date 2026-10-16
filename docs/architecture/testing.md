@@ -42,11 +42,10 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_kpis.py` | Phase 14 `day_kpis` / `week_kpis`, KPI prices, meter_snapshot dedup and pairing, `tools/backtest.py` replay and forecast-error report; phase 15 `import_feedback_adjustment`; phase 17 `arbitrage_worth_it` / `peak_export_plan` and peak_export pairing; phase 24 wear cost; phase 25 `expected_spare_solar`; phase 26 `baseload_anomaly`; phase 40 `daytime_import_anomaly`; phase 38 `marginal_cost_pence` / `cheapest_hour_today`; phase 37 `no_battery_baseline` / `battery_value_summary`; phase 34 `capacity_samples` / `capacity_estimate` / `capacity_low`; phase 36 `reconcile_month` / `logged_day_cost_gbp` |
 | `tests/test_flux_helpers_cost.py` | Peak import price behind the cost trigger (`band_price_pence_per_kwh`) |
 | `tests/test_octopus_rates.py` | Phase 18 Octopus rate-entity window pricing, `tariff_prices_pence` fallback to `charges`, `price_source` labels |
-| `tests/test_saving_session.py` | Phase 21 `plan_saving_session` (floor, off-peak boost, day-rate top-up, missing prices), Octopoints conversion, labelled manual validation, `next_joined_saving_session` parsing |
 | `tests/test_planning_auto_away.py` | Phase 27 `auto_away` (anyone home, min hours away, unavailable persons, calendar only, no signal) |
 | `tests/test_clipped_solar.py` | Phase 29 `is_clipping`, `estimate_clipped_kwh` (missing → None), `overnight_target_too_high` |
 | `tests/test_tariff_comparison.py` | Phase 28 band boundaries, `cost_under_tariff` (missing slot → None), `parse_half_hourly_charges`, `compare_tariffs`, rate overrides; phase 35 standing charge × days, VAT, Intelligent window, Agile slot pricing and unavailability, `agile_prices_by_date`, `newest_agile_product`, region/VAT overrides |
-| `tests/test_gentle_charging.py` | Phase 23 `gentle_charge_current_a` (margin, clamps, zero need), `max_charge_current_a`, `gentle_current_lowers` (never above the user's Grid Amps), gentle/saving-session fields on the logged import plan |
+| `tests/test_gentle_charging.py` | Phase 23 `gentle_charge_current_a` (margin, clamps, zero need), `max_charge_current_a`, `gentle_current_lowers` (never above the user's Grid Amps), gentle fields on the logged import plan |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh` |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |

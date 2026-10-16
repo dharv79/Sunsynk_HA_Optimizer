@@ -72,8 +72,6 @@ from .const import (
     CONF_TARIFF_RATE_OVERRIDES,
     CONF_OCTOPUS_IMPORT_RATES_ENTITY,
     CONF_OCTOPUS_EXPORT_RATES_ENTITY,
-    CONF_OCTOPUS_SAVING_SESSION_ENTITY,
-    CONF_SAVING_SESSION_REWARD_PENCE,
     CONF_USERNAME,
     CONF_WEATHER_ENTITY,
     DEFAULT_AVG_CONSUMPTION_KW,
@@ -225,12 +223,6 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 selector.NumberSelectorConfig(min=0.5, max=20, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
             vol.Optional(
-                CONF_SAVING_SESSION_REWARD_PENCE,
-                description={"suggested_value": values.get(CONF_SAVING_SESSION_REWARD_PENCE)},
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=0, max=1000, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="p/kWh")
-            ),
-            vol.Optional(
                 CONF_BATTERY_COST_GBP,
                 description={"suggested_value": values.get(CONF_BATTERY_COST_GBP)},
             ): selector.NumberSelector(
@@ -280,7 +272,6 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Optional(CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR, default=values.get(CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR, "")): selector.TextSelector(),
             vol.Optional(CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR, default=values.get(CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR, "")): selector.TextSelector(),
             vol.Optional(CONF_TARIFF_RATE_OVERRIDES, default=values.get(CONF_TARIFF_RATE_OVERRIDES, "")): selector.TextSelector(),
-            vol.Optional(CONF_OCTOPUS_SAVING_SESSION_ENTITY, default=values.get(CONF_OCTOPUS_SAVING_SESSION_ENTITY, "")): selector.TextSelector(),
             vol.Optional(
                 CONF_DATA_REPORT_TARGET,
                 default=values.get(CONF_DATA_REPORT_TARGET, ""),

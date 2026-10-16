@@ -159,9 +159,6 @@ DEFAULT_ENABLE_AI_WEEKLY_INSIGHT = False
 CONF_FREE_EVENT_CHARGE_RATE_KW = "free_event_charge_rate_kw"
 CONF_FREE_EVENT_EXPORT_RATE_KW = "free_event_export_rate_kw"
 
-# Octopus Saving Sessions (phase 21). The reward (p/kWh) prices manual
-# sessions; Octopus-detected sessions carry their own Octopoints rate. The
-# entity is the Octopus Energy integration's saving-session (or Power Down)
-# events entity — blank disables auto-detect.
-CONF_SAVING_SESSION_REWARD_PENCE = "saving_session_reward_pence"
-CONF_OCTOPUS_SAVING_SESSION_ENTITY = "octopus_saving_session_entity"
+# Saving sessions (phase 21) were removed on 16/10/2026: entities left in the
+# registry by older versions, removed at setup (__init__._remove_stale_entities).
+REMOVED_ENTITY_KEYS = ("saving_session", "saving_session_start", "saving_session_end", "cancel_saving_session")

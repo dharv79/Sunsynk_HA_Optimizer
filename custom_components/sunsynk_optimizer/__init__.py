@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, PLATFORMS
+from .const import DOMAIN, PLATFORMS, REMOVED_ENTITY_KEYS
 from .coordinator import SunsynkOptimizerCoordinator
 
 
@@ -29,8 +30,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
+    _remove_stale_entities(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def _remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop registry entries for entities a removed feature left behind (saving sessions)."""
+    stale = {f"{entry.entry_id}_{key}" for key in REMOVED_ENTITY_KEYS}
+    registry = er.async_get(hass)
+    for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if reg_entry.unique_id in stale:
+            registry.async_remove(reg_entry.entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

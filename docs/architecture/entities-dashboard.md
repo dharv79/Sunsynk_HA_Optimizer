@@ -27,7 +27,7 @@ At 05:00 (after the meter snapshot) the day-load meter, which resets at midnight
 
 ### Daytime load spike alert (phase 40, 14/10/2026)
 
-On the 30-minute tick between 05:00 and 16:00, `grid_pac` is sampled into an unpersisted per-day list. `planning.daytime_import_anomaly` alerts when the last 2 readings are both present and above 1.5 kW (0.75 kW in away mode) while SOC is above `BATTERY_LOW_SOC` + 5. The alert is "🔋 Sunsynk: daytime grid import", sent at most once a day. Samples reset while a free event or saving session holds the slots, or after peak cover pushed a top-up. Shares the `baseload_alert` option. Read-only, so also runs in monitor mode. Missing readings never alert. Tests: `test_daytime_import_*` in `tests/test_kpis.py`.
+On the 30-minute tick between 05:00 and 16:00, `grid_pac` is sampled into an unpersisted per-day list. `planning.daytime_import_anomaly` alerts when the last 2 readings are both present and above 1.5 kW (0.75 kW in away mode) while SOC is above `BATTERY_LOW_SOC` + 5. The alert is "🔋 Sunsynk: daytime grid import", sent at most once a day. Samples reset while a free event holds the slots, or after peak cover pushed a top-up. Shares the `baseload_alert` option. Read-only, so also runs in monitor mode. Missing readings never alert. Tests: `test_daytime_import_*` in `tests/test_kpis.py`.
 
 ### Cost of 1 kWh now (phase 38, 14/10/2026)
 

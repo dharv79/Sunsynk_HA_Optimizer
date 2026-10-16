@@ -79,8 +79,6 @@ from .const import (
     CONF_TARIFF_RATE_OVERRIDES,
     CONF_OCTOPUS_IMPORT_RATES_ENTITY,
     CONF_OCTOPUS_EXPORT_RATES_ENTITY,
-    CONF_OCTOPUS_SAVING_SESSION_ENTITY,
-    CONF_SAVING_SESSION_REWARD_PENCE,
     CONF_WEATHER_ENTITY,
     CONF_TOMORROW_FORECAST_SENSOR,
     DEFAULT_AVG_CONSUMPTION_KW,
@@ -201,17 +199,14 @@ from .planning import (
     max_charge_current_a,
     minutes_to_hhmm,
     net_cost_gbp,
-    next_joined_saving_session,
     peak_cover_plan,
     peak_export_plan,
     peak_export_skip_reason,
     event_report,
     free_event_result,
-    saving_session_result,
     wear_cost_pence_per_kwh,
     peak_load_estimate_kwh,
     plan_free_event,
-    plan_saving_session,
     resolve_load_kw,
     resolve_used_charge_rate,
     round_or_none,
@@ -227,7 +222,6 @@ from .planning import (
     DEFAULT_FLUX2_SLOT,
     EXPORT_PAUSE_FLUX2_SLOT,
     restore_flux2_slot,
-    saving_session_later_today,
     week_kpis,
     weighted_forecast_correction,
     window_grid_kwh,
@@ -267,13 +261,6 @@ def _drift_line(diff: dict[str, Any]) -> str:
 TARIFF_BAND_LABELS = {"offpeak": "Off-peak", "day": "Day", "peak": "Peak", "export_peak": "Peak export"}
 
 
-def _session_api_note(api_ok: bool | None) -> str:
-    """Saving-session push note: None means monitor mode (no API writes)."""
-    if api_ok is None:
-        return " (monitor mode — inverter not changed)"
-    return _api_note(api_ok)
-
-
 def _pence(value: float | None) -> str:
     return "?" if value is None else f"{round(value, 1)}p"
 
@@ -291,13 +278,6 @@ def _pct(value: float | None) -> str:
 
 def _kwh(value: float | None) -> str:
     return "? kWh" if value is None else f"{value} kWh"
-
-
-def _gbp(value: float | None) -> str:
-    return "£?" if value is None else f"£{value:.2f}"
-
-
-_SAVING_SESSION_PENDING = ("scheduled", "precharging", "exporting")
 
 
 def _reserve_note(trim_target: int, reserve: int) -> str:
@@ -335,9 +315,6 @@ class SunsynkOptimizer:
         # persisted — restart resumption re-arms them from coordinator.state.free_event
         # via _arm_free_event_timers, same tradeoff as pending_full_trim_cancel above.
         self._free_event_unsubs: list[Any] = []
-        # Saving session (phase 21) callback handles; re-armed from
-        # coordinator.state.saving_session on restart, same as the free event.
-        self._saving_session_unsubs: list[Any] = []
         # Gentler charging (phase 23) 05:00 restore handle; re-armed from
         # coordinator.state.gentle_charge on restart.
         self._gentle_restore_unsub = None
@@ -434,11 +411,6 @@ class SunsynkOptimizer:
         self.unsubs.append(
             async_track_state_change_event(self.hass, [self.battery_soc_entity], self._async_battery_soc_changed)
         )
-        saving_entity = self._cfg_str(CONF_OCTOPUS_SAVING_SESSION_ENTITY)
-        if saving_entity:
-            self.unsubs.append(
-                async_track_state_change_event(self.hass, [saving_entity], self._async_saving_session_entity_changed)
-            )
 
         if self.coordinator.state.selected_full_charge_day is None:
             self.coordinator.update_state(
@@ -453,8 +425,6 @@ class SunsynkOptimizer:
 
         if self._free_event_active():
             self._arm_free_event_timers(self.coordinator.state.free_event)
-        if self._saving_session_pending():
-            self._arm_saving_session_timers(self.coordinator.state.saving_session)
         if self.coordinator.state.gentle_charge.get("phase") == "applied":
             self._arm_gentle_restore()
 
@@ -463,7 +433,6 @@ class SunsynkOptimizer:
             unsub()
         self.unsubs.clear()
         self._clear_free_event_timers()
-        self._clear_saving_session_timers()
         if self._gentle_restore_unsub:
             self._gentle_restore_unsub()
             self._gentle_restore_unsub = None
@@ -513,7 +482,7 @@ class SunsynkOptimizer:
         return max(0.1, float((cfg if cfg is not None else self.cfg).get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY)))
 
     def _event_rates_kw(self, cfg: dict[str, Any]) -> tuple[float, float]:
-        """(charge, export) kW for free events and saving sessions; blank = the charge rate."""
+        """(charge, export) kW for free events; blank = the charge rate."""
         default_rate = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
         return (
             float(cfg.get(CONF_FREE_EVENT_CHARGE_RATE_KW) or default_rate),
@@ -1023,10 +992,6 @@ class SunsynkOptimizer:
             )
             nudge = feedback_adj if feedback_live else soc_adjustment
             target_soc = apply_soc_adjustments(target_soc, overnight_drain_adjustment, nudge)
-        # Phase 21: a saving session later today worth filling for → charge to 100%.
-        saving_session_boost = self._saving_session_boost_today(now)
-        if saving_session_boost:
-            target_soc = 100
 
         computed_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
             paired_days, battery_capacity_kwh, overnight_drain_adjustment
@@ -1080,7 +1045,7 @@ class SunsynkOptimizer:
             "flux_1": {"startTime": "02:00", "endTime": flux1_end, "targetSoc": target_soc},
             "flux_2": dict(DEFAULT_FLUX2_SLOT),
         }
-        # A free event or saving session holds Flux 1/2 for its own windows; the
+        # A free event holds Flux 1/2 for its own windows; the
         # plan is still computed and logged so it's ready to push the moment the
         # event ends (_async_restore_normal_plan reads it back).
         held_by = None if dry_run else self._slots_held_by()
@@ -1129,8 +1094,6 @@ class SunsynkOptimizer:
             "api_ok": api_ok,
             "retrying": retrying,
             "held_by_free_event": held_by == "free_event",
-            "held_by_saving_session": held_by == "saving_session",
-            "saving_session_boost": saving_session_boost,
             "battery_voltage": battery_voltage,
             "gentle_current_a": gentle_current_a,
             "gentle_max_current_a": round(gentle_max_a, 1),
@@ -1154,8 +1117,6 @@ class SunsynkOptimizer:
         }
 
         if dry_run:
-            if self._saving_session_pending():
-                plan_state["saving_session"] = dict(self.coordinator.state.saving_session)
             await self.async_notify(
                 f"🧪 Sunsynk: test plan (dry run) — {plan_state['date']}",
                 json.dumps(plan_state),
@@ -1273,9 +1234,6 @@ class SunsynkOptimizer:
         if plan.get("held_by_free_event"):
             title = "🔋 Sunsynk: import plan computed (held for free event)"
             api_note = " A free event holds the Flux slots; this plan pushes when it ends."
-        elif plan.get("held_by_saving_session"):
-            title = "🔋 Sunsynk: import plan computed (held for saving session)"
-            api_note = " A saving session holds the Flux slots; this plan pushes when it ends."
         else:
             title = "🔋 Sunsynk: import plan set" if api_ok else "⚠️ Sunsynk: import plan NOT applied"
             if api_ok:
@@ -1285,8 +1243,6 @@ class SunsynkOptimizer:
             else:
                 api_note = " Inverter NOT updated; will retry next cycle."
         full_day_note = " — full-charge day" if plan["is_full_day"] else ""
-        if plan.get("saving_session_boost"):
-            full_day_note += " — saving session today"
         away_note = " (away)" if plan["away"] else ""
         # "summer_like" → "summer-like": keep internal band names out of user text.
         season = plan["forecast_band"].replace("_", "-")
@@ -1427,7 +1383,6 @@ class SunsynkOptimizer:
         if (
             not is_full_day and soc > 85 and trim_target is not None
             and not self._peak_export_holds_flux2(now_local) and self._cooldown_ok()
-            and not saving_session_later_today(self.coordinator.state.saving_session, now_local)
         ):
             self._mark_trim()
             api_ok = await self._async_push_flux2_action(
@@ -1810,7 +1765,6 @@ class SunsynkOptimizer:
         """30-minute interval callback."""
         await self._guarded(self.async_run_flux2_check, "Periodic Flux 2 check")
         await self._guarded(self._async_track_peak_window_usage, "Peak-window usage tracking")
-        await self._guarded(self.async_check_octopus_saving_session, "Saving session auto-detect")
         await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
         await self._guarded(self.async_run_peak_cover, "Peak cover")
         await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
@@ -2052,8 +2006,8 @@ class SunsynkOptimizer:
 
         Shadow by default: the decision, kWh and £ are logged and nothing is
         pushed. Live (CONF_PEAK_EXPORT_LIVE) pushes Flux 2 16:00-19:00 to the
-        target via _async_post_with_status. Skipped while a free event or
-        saving session holds the slots; never pushes in monitor mode; the export-disable (watt
+        target via _async_post_with_status. Skipped while a free event
+        holds the slots; never pushes in monitor mode; the export-disable (watt
         trigger) wins — if it already fired, or fires later, it holds 100%.
         """
         now = dt_util.now()
@@ -2061,9 +2015,7 @@ class SunsynkOptimizer:
         if not slots_held:
             await self._async_peak_cover_end()
         soc = self._essential_state(self.battery_soc_entity)
-        skip = peak_export_skip_reason(
-            slots_held, saving_session_later_today(self.coordinator.state.saving_session, now), soc
-        )
+        skip = peak_export_skip_reason(slots_held, soc)
         if skip:
             # Logged so the 22:00 debug bundle always says why there was no export.
             record = {"type": "peak_export", "date": now.date().isoformat(), "soc": soc, "decision": skip}
@@ -2256,13 +2208,12 @@ class SunsynkOptimizer:
                 now_local = dt_util.now()
                 trim_target, reserve = self._trim_target(current_soc, now_local)
                 # Don't replace a live peak export (it already sells lower), an export
-                # pause, an event's slots, or sell what a saving session later today needs.
+                # pause or an event's slots.
                 if (
                     trim_target is None
                     or self._peak_export_holds_flux2(now_local)
                     or self.coordinator.state.evening_export_disabled
                     or self._slots_held()
-                    or saving_session_later_today(self.coordinator.state.saving_session, now_local)
                 ):
                     return
                 api_ok = await self._async_push_flux2_action(
@@ -2791,12 +2742,11 @@ class SunsynkOptimizer:
     # Free electricity event (phase 10 — manual entry)                     #
     # ------------------------------------------------------------------ #
 
-    async def _async_report_event(self, record_type: str, phase: str, event: dict[str, Any]) -> None:
-        """Send a free event / saving session lifecycle line to the debug channel (blank target = off)."""
+    async def _async_report_event(self, phase: str, event: dict[str, Any]) -> None:
+        """Send a free event lifecycle line to the debug channel (blank target = off)."""
         target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if target:
-            title = "Sunsynk Free Event" if record_type == "free_event" else "Sunsynk Saving Session"
-            await self.async_notify(title, json.dumps(event_report(record_type, phase, event)), target=target)
+            await self.async_notify("Sunsynk Free Event", json.dumps(event_report("free_event", phase, event)), target=target)
 
     def _free_event_active(self) -> bool:
         """True while a free event holds the Flux slots (scheduled/selling/charging)."""
@@ -2856,10 +2806,10 @@ class SunsynkOptimizer:
 
     async def async_schedule_free_event(self, free_start: datetime, free_end: datetime, source: str) -> bool:
         """Plan and arm a free-electricity event. Returns True if it was scheduled."""
-        if self._free_event_active() or self._saving_session_pending():
+        if self._free_event_active():
             await self.async_notify(
                 "⚠️ Sunsynk: free event NOT scheduled",
-                "A free event or saving session is already scheduled or in progress. Cancel it first.",
+                "A free event is already scheduled or in progress. Cancel it first.",
             )
             return False
 
@@ -2904,7 +2854,7 @@ class SunsynkOptimizer:
             ),
         )
         await self.data_logger.async_log_free_event({"phase": "scheduled", **event})
-        await self._async_report_event("free_event", "scheduled", event)
+        await self._async_report_event("scheduled", event)
         return True
 
     async def _async_free_event_sell_start(self, _now) -> None:
@@ -2977,7 +2927,7 @@ class SunsynkOptimizer:
             free_event=event, free_event_manual_start=None, free_event_manual_end=None
         )
         await self.data_logger.async_log_free_event({"phase": "done", **event})
-        await self._async_report_event("free_event", "done", event)
+        await self._async_report_event("done", event)
         await self.async_notify(
             "🔋 Sunsynk: free event finished",
             (
@@ -3014,292 +2964,15 @@ class SunsynkOptimizer:
         if was_holding_slots:
             await self._async_restore_normal_plan()
         await self.data_logger.async_log_free_event({"phase": "cancelled", **event})
-        await self._async_report_event("free_event", "cancelled", event)
+        await self._async_report_event("cancelled", event)
         await self.async_notify("🔋 Sunsynk: free event cancelled", "The free electricity event was cancelled.")
 
-    # ------------------------------------------------------------------ #
-    # Octopus Saving Session (phase 21)                                    #
-    # ------------------------------------------------------------------ #
-
-    def _saving_session_pending(self) -> bool:
-        """True while a saving session is scheduled, topping up or exporting."""
-        return self.coordinator.state.saving_session.get("phase") in _SAVING_SESSION_PENDING
-
     def _slots_held_by(self) -> str | None:
-        """Which event holds the Flux slots right now (do-not-break 7), if any.
-
-        A free event holds them from scheduling; a saving session only while it
-        tops up or exports, so the normal plan and evening logic keep running
-        in the hours or days before it.
-        """
-        if self._free_event_active():
-            return "free_event"
-        if self.coordinator.state.saving_session.get("phase") in ("precharging", "exporting"):
-            return "saving_session"
-        return None
+        """Which event holds the Flux slots right now (do-not-break 7), if any."""
+        return "free_event" if self._free_event_active() else None
 
     def _slots_held(self) -> bool:
         return self._slots_held_by() is not None
-
-    def _saving_session_boost_today(self, now: datetime) -> bool:
-        """The 01:55 plan charges to 100% when a scheduled session today is worth filling for."""
-        session = self.coordinator.state.saving_session
-        if session.get("phase") != "scheduled" or not session.get("offpeak_boost"):
-            return False
-        start = dt_util.parse_datetime(session.get("session_start") or "")
-        return start is not None and dt_util.as_local(start).date() == now.date()
-
-    def _session_export_pence(self, start: datetime, end: datetime, prices: dict[str, float | None]) -> float | None:
-        """Export price for the session window: the peak band (Octopus-aware) inside 16:00-19:00, else `charges`."""
-        mid = start + (end - start) / 2
-        if 16 <= mid.hour < 19:
-            return prices.get("export_peak")
-        return band_price_pence_per_kwh(self.cfg.get(CONF_CHARGES, []), start.strftime("%H:%M"), end.strftime("%H:%M"), "export")
-
-    def _clear_saving_session_timers(self) -> None:
-        for unsub in self._saving_session_unsubs:
-            unsub()
-        self._saving_session_unsubs = []
-
-    def _arm_saving_session_timers(self, session: dict[str, Any]) -> None:
-        """(Re-)arm the top-up, start and end callbacks; past times fire at once (restart resume)."""
-        self._clear_saving_session_timers()
-        now = dt_util.now()
-        phase = session.get("phase")
-
-        def _at(key: str, callback) -> None:
-            when = dt_util.as_local(dt_util.parse_datetime(session[key]))
-            self._saving_session_unsubs.append(
-                async_call_later(self.hass, max(0, (when - now).total_seconds()), callback)
-            )
-
-        if phase == "scheduled" and session.get("precharge_start"):
-            _at("precharge_start", self._async_saving_session_precharge)
-        if phase in ("scheduled", "precharging"):
-            _at("session_start", self._async_saving_session_start)
-        if phase in _SAVING_SESSION_PENDING:
-            _at("session_end", self._async_saving_session_end)
-
-    async def _async_saving_session_push(self, payload: dict[str, Any]) -> bool | None:
-        """Flux push for a saving session; None in monitor mode (no API writes, do-not-break 16)."""
-        if self.operation_mode == "monitor":
-            return None
-        return await self.async_push_flux_override(payload)
-
-    async def async_try_schedule_manual_saving_session(self, changed: str = "end") -> None:
-        """Called after either manual saving-session datetime entity is set (see the free event twin)."""
-        state = self.coordinator.state
-        if not state.saving_session_manual_start or not state.saving_session_manual_end:
-            return
-        start = dt_util.as_local(dt_util.parse_datetime(state.saving_session_manual_start))
-        end = dt_util.as_local(dt_util.parse_datetime(state.saving_session_manual_end))
-        now = dt_util.now()
-        error = manual_free_event_error(changed, start, end, now, "Saving session")
-        if error:
-            await self.async_notify("⚠️ Sunsynk: saving session NOT scheduled", error)
-            return
-        if end <= start or start <= now:
-            return  # stale counterpart: wait for the other field to be set
-        await self.async_schedule_saving_session(start, end, source="manual")
-
-    async def _async_saving_session_entity_changed(self, _event: Event) -> None:
-        await self._guarded(self.async_check_octopus_saving_session, "Saving session auto-detect")
-
-    async def async_check_octopus_saving_session(self) -> None:
-        """Schedule the next joined session from the Octopus events entity (blank config = off).
-
-        Runs on entity changes, every 30 minutes and after a session ends. A
-        session already seen (scheduled, done or cancelled) is not re-added;
-        one that clashes with a pending event waits until that event ends.
-        """
-        entity = self._cfg_str(CONF_OCTOPUS_SAVING_SESSION_ENTITY)
-        state = self.hass.states.get(entity) if entity else None
-        if state is None:
-            return
-        found = next_joined_saving_session(dict(state.attributes), dt_util.now())
-        if found is None:
-            return
-        start, end, reward = (dt_util.as_local(found[0]), dt_util.as_local(found[1]), found[2])
-        if self.coordinator.state.saving_session.get("session_start") == start.isoformat():
-            return
-        if self._saving_session_pending() or self._free_event_active():
-            return
-        await self.async_schedule_saving_session(start, end, source="octopus", reward_pence=reward)
-
-    async def async_schedule_saving_session(
-        self, start: datetime, end: datetime, source: str, reward_pence: float | None = None
-    ) -> bool:
-        """Plan and arm a saving session. Returns True if it was scheduled."""
-        if self._saving_session_pending() or self._free_event_active():
-            await self.async_notify(
-                "⚠️ Sunsynk: saving session NOT scheduled",
-                "A saving session or free event is already scheduled or in progress. Cancel it first.",
-            )
-            return False
-        soc = self._essential_state(self.battery_soc_entity)
-        if soc is None:
-            await self.async_notify(
-                "⚠️ Sunsynk: saving session NOT scheduled",
-                f"Battery SOC entity {self.battery_soc_entity} unavailable.",
-            )
-            return False
-
-        cfg = self.cfg
-        capacity_kwh = self._capacity_kwh(cfg)
-        charge_rate_kw, export_rate_kw = self._event_rates_kw(cfg)
-        if reward_pence is None and cfg.get(CONF_SAVING_SESSION_REWARD_PENCE):
-            reward_pence = float(cfg[CONF_SAVING_SESSION_REWARD_PENCE])
-        prices, sources = self._tariff_prices(start.date())
-        export_pence = self._session_export_pence(start, end, prices)
-        plan = plan_saving_session(
-            start, end, soc, capacity_kwh, charge_rate_kw, export_rate_kw, self._evening_reserve_soc(),
-            reward_pence, export_pence, prices["offpeak"], prices["day"],
-            wear_pence=self._wear_pence(),
-        )
-        session = {
-            "source": source,
-            "session_start": start.isoformat(),
-            "session_end": end.isoformat(),
-            "reward_pence": reward_pence,
-            "export_pence": export_pence,
-            "offpeak_pence": prices["offpeak"],
-            "day_pence": prices["day"],
-            "price_source": price_source(sources, "offpeak", "day"),
-            "value_pence": plan.value_pence,
-            "floor_soc": plan.floor_soc,
-            "floor_reason": plan.floor_reason,
-            "offpeak_boost": plan.offpeak_boost,
-            "precharge": plan.precharge,
-            "precharge_start": plan.precharge_start.isoformat() if plan.precharge_start else None,
-            "precharge_end": plan.precharge_end.isoformat() if plan.precharge_end else None,
-            "expected_export_kwh": plan.expected_export_kwh,
-            "soc_at_schedule": soc,
-            "charge_rate_kw": charge_rate_kw,
-            "export_rate_kw": export_rate_kw,
-            "phase": "scheduled",
-        }
-        self.coordinator.update_state(saving_session=session)
-        self._arm_saving_session_timers(session)
-
-        floor_note = (
-            "the reward beats buying it back" if plan.floor_reason == "reward_beats_rebuy" else "keeping the evening reserve"
-        )
-        fill_notes = []
-        if plan.offpeak_boost and start.date() > dt_util.now().date():
-            fill_notes.append("The 01:55 plan on the day charges to 100%.")
-        if plan.precharge:
-            fill_notes.append(
-                f"Day-rate top-up {plan.precharge_start.strftime('%H:%M')} → {plan.precharge_end.strftime('%H:%M')}."
-            )
-        monitor_note = " Monitor mode: the plan is tracked but the inverter won't be changed." if self.operation_mode == "monitor" else ""
-        await self.async_notify(
-            "🔋 Sunsynk: saving session scheduled",
-            (
-                f"Session {start.strftime('%a %d %b %H:%M')} → {end.strftime('%H:%M')} ({source}). "
-                f"Worth {_pence(plan.value_pence)}/kWh (reward {_pence(reward_pence)} + export {_pence(export_pence)}). "
-                f"Exporting down to {plan.floor_soc}% ({floor_note}), expected {plan.expected_export_kwh} kWh. "
-                f"{' '.join(fill_notes)}{monitor_note}"
-            ).strip(),
-        )
-        await self.data_logger.async_log_saving_session({"phase": "scheduled", **session})
-        await self._async_report_event("saving_session", "scheduled", session)
-        return True
-
-    async def _async_saving_session_precharge(self, _now) -> None:
-        await self._guarded(self._async_do_saving_session_precharge, "Saving session top-up")
-
-    async def _async_do_saving_session_precharge(self) -> None:
-        session = dict(self.coordinator.state.saving_session)
-        if session.get("phase") != "scheduled" or not session.get("precharge_end"):
-            return
-        now = dt_util.now()
-        precharge_end = dt_util.as_local(dt_util.parse_datetime(session["precharge_end"]))
-        if precharge_end <= now:
-            return  # scheduled too late to top up; the session itself still runs
-        api_ok = await self._async_saving_session_push(
-            {"flux_1": {"startTime": now.strftime("%H:%M"), "endTime": precharge_end.strftime("%H:%M"), "targetSoc": 100}}
-        )
-        session["phase"] = "precharging"
-        self.coordinator.update_state(saving_session=session)
-        title = (
-            "⚠️ Sunsynk: saving session top-up NOT applied" if api_ok is False
-            else "🔋 Sunsynk: saving session top-up started"
-        )
-        await self.async_notify(
-            title, f"Charging to 100% until {precharge_end.strftime('%H:%M')} ahead of the session.{_session_api_note(api_ok)}"
-        )
-
-    async def _async_saving_session_start(self, _now) -> None:
-        await self._guarded(self._async_do_saving_session_start, "Saving session start")
-
-    async def _async_do_saving_session_start(self) -> None:
-        session = dict(self.coordinator.state.saving_session)
-        if session.get("phase") not in ("scheduled", "precharging"):
-            return
-        now = dt_util.now()
-        session_end = dt_util.as_local(dt_util.parse_datetime(session["session_end"]))
-        api_ok = await self._async_saving_session_push(
-            {"flux_2": {"startTime": now.strftime("%H:%M"), "endTime": session_end.strftime("%H:%M"), "targetSoc": session["floor_soc"]}}
-        )
-        session["phase"] = "exporting"
-        session["soc_at_start"] = self._essential_state(self.battery_soc_entity)
-        session["meters_at_start"] = self._read_daily_meters()
-        self.coordinator.update_state(saving_session=session)
-        title = "⚠️ Sunsynk: saving session NOT applied" if api_ok is False else "🔋 Sunsynk: saving session started"
-        await self.async_notify(
-            title,
-            f"Running the house from the battery and exporting down to {session['floor_soc']}% "
-            f"until {session_end.strftime('%H:%M')}.{_session_api_note(api_ok)}",
-        )
-
-    async def _async_saving_session_end(self, _now) -> None:
-        await self._guarded(self._async_do_saving_session_end, "Saving session end")
-
-    async def _async_do_saving_session_end(self) -> None:
-        session = dict(self.coordinator.state.saving_session)
-        if session.get("phase") not in _SAVING_SESSION_PENDING:
-            return
-        held_slots = session.get("phase") in ("precharging", "exporting")
-        if held_slots and self.operation_mode != "monitor":
-            await self._async_restore_normal_plan()
-        session["phase"] = "done"
-        session["soc_at_end"] = self._essential_state(self.battery_soc_entity)
-        session.update(saving_session_result(
-            session, self._read_daily_meters(), session["soc_at_end"], self._capacity_kwh()
-        ))
-        self._clear_saving_session_timers()
-        self.coordinator.update_state(
-            saving_session=session, saving_session_manual_start=None, saving_session_manual_end=None
-        )
-        await self.data_logger.async_log_saving_session({"phase": "done", **session})
-        await self._async_report_event("saving_session", "done", session)
-        await self.async_notify(
-            "🔋 Sunsynk: saving session finished",
-            (
-                f"Session ended. SOC {_pct(session.get('soc_at_start'))} → {_pct(session.get('soc_at_end'))} "
-                f"(floor {session['floor_soc']}%). Exported {_kwh(session['actual_export_kwh'])} "
-                f"(expected {session['expected_export_kwh']} kWh), imported {_kwh(session['actual_import_kwh'])}; "
-                f"worth about {_gbp(session['total_gbp'])}. Normal plan restored."
-            ),
-        )
-        await self.async_check_octopus_saving_session()
-
-    async def async_cancel_saving_session(self) -> None:
-        """Cancel a scheduled or in-progress saving session (the dashboard button)."""
-        session = dict(self.coordinator.state.saving_session)
-        if session.get("phase") not in _SAVING_SESSION_PENDING:
-            return
-        held_slots = session.get("phase") in ("precharging", "exporting")
-        self._clear_saving_session_timers()
-        session["phase"] = "cancelled"
-        self.coordinator.update_state(
-            saving_session=session, saving_session_manual_start=None, saving_session_manual_end=None
-        )
-        if held_slots and self.operation_mode != "monitor":
-            await self._async_restore_normal_plan()
-        await self.data_logger.async_log_saving_session({"phase": "cancelled", **session})
-        await self._async_report_event("saving_session", "cancelled", session)
-        await self.async_notify("🔋 Sunsynk: saving session cancelled", "The saving session was cancelled.")
 
     # ------------------------------------------------------------------ #
     # Gentler charging (phase 23)                                          #
