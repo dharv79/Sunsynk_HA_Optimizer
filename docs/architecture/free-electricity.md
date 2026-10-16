@@ -54,7 +54,7 @@ The results go into the stored dict (and so the `done` log record) and into the 
   - Each check samples the SOC. `planning.soc_trend_kw` turns the last `FREE_EVENT_TREND_MINUTES` (30) of samples into the battery's real charge rate: solar going in, net of house load. It needs at least 5 minutes of samples. The samples are unpersisted, so they restart after an HA restart.
   - `planning.free_event_sell_decision` projects the SOC at the free start (a rising trend only, capped at 100%). It then works out the hours needed to export down to the floor at the export rate, and returns `sell_now` once those hours + `FREE_EVENT_SELL_MARGIN_HOURS` (15 min) reach the time left.
   - On `sell_now` it stores `sell_start` (now), `expected_export_kwh` and `sell_trigger` (the decision inputs), then runs the existing sell start: Flux 2 now→free start at the floor. It notifies and sends a `selling` debug line.
-- **Estimate at scheduling:** `plan_free_event` still gives the dashboard estimate (floor, export and refill kWh). The sell window is capped at 4 h instead of the free period's length, which re-opens the phase 10 "may be revisited" decision.
+- **Estimate at scheduling:** `plan_free_event` still gives the floor and refill kWh. The sell window is capped at 4 h instead of the free period's length, which re-opens the phase 10 "may be revisited" decision. Its sell start and export kWh are no longer stored (see "Sell status on the dashboard" below).
 - **Slots held from the sell start:** `_slots_held_by()` covers `selling`/`charging` only (the phase 10 decision: "holds both slots from sell start to free end"). While only `scheduled`, the 01:55 plan, Flux 2 checks and trims run normally. Scheduling still refuses a second event (`_free_event_active`).
 - **01:55 plan on the day:** `planning.free_event_target_cap` caps the target at the sell floor when a scheduled event starts that day before 16:00. Anything above the floor would only be sold back at a lower export price. The plan record has `free_event_capped`.
 
@@ -63,3 +63,15 @@ The results go into the stored dict (and so the `done` log record) and into the 
 - `test_free_event_sell_decision_18_oct` (the 18/10 cases);
 - `test_free_event_watch_from` and `test_free_event_target_cap`;
 - `test_free_event_sell_window_not_capped_at_free_period_length` and `test_free_event_sell_window_capped_at_max_sell_hours`.
+
+## Sell status on the dashboard (16/10/2026)
+
+**Root cause.** The event entered at 08:01 on 16/10 for 18/10 11:00 showed "Sell start 11:00, Sell skipped true, expected export 0 kWh". That was `plan_free_event` run on the 40% SOC at scheduling time. Since 1.0.12b18 the real sell start is decided live from the watch, so the estimate only misled.
+
+**Design (1.0.12b19).**
+- Scheduling stores `watch_from` and no longer stores `sell_start`, `sell_end`, `skip_sell` or `expected_export_kwh`. The watch sets `sell_start` and `expected_export_kwh` when it starts a sell. The scheduled notification and debug line say "Watching from Sun 07:00" instead of an estimate.
+- `planning.free_event_attributes` builds the `sensor.free_event` attributes: no `meters_*` keys, and no `FREE_EVENT_ESTIMATE_KEYS` until a sell has run (`free_event_sold`: `soc_at_sell_start` is present). Events stored by older versions are hidden the same way.
+- It adds `sell_status` (`planning.free_event_sell_status`): "Watching from Sun 07:00", "Selling since 08:40", "Sold from 08:40", "Not needed" or "Cancelled". The dashboard Status card shows it as **Sell**, replacing the "Sell start" and "Sell skipped" rows.
+- The "finished" notification reads `expected_export_kwh` with a 0 default, since an event that never sold has none.
+
+**Verification.** `tests/test_planning.py::test_free_event_sell_status_and_attributes` (the 16/10 event).

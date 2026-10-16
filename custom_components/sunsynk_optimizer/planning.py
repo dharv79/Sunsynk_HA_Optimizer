@@ -1103,6 +1103,43 @@ def free_event_watch_from(free_start: datetime) -> datetime:
     return free_start - timedelta(hours=FREE_EVENT_MAX_SELL_HOURS)
 
 
+# Scheduling-time sell estimates; only meaningful once the live watch has started a sell.
+FREE_EVENT_ESTIMATE_KEYS = ("sell_start", "sell_end", "skip_sell", "expected_export_kwh")
+
+
+def free_event_sold(event: dict) -> bool:
+    """True once the sell start has run (it always records ``soc_at_sell_start``)."""
+    return "soc_at_sell_start" in event
+
+
+def free_event_sell_status(event: dict) -> str | None:
+    """Dashboard text for the sell: watching, selling, sold or not needed."""
+    phase = event.get("phase")
+    if not phase or not event.get("free_start"):
+        return None
+    if phase == "scheduled":
+        watch_from = event.get("watch_from") or free_event_watch_from(
+            datetime.fromisoformat(event["free_start"])
+        ).isoformat()
+        return f"Watching from {datetime.fromisoformat(watch_from):%a %H:%M}"
+    if phase == "cancelled":
+        return "Cancelled"
+    if not free_event_sold(event) or not event.get("sell_start"):
+        return "Not needed"
+    sell_start = datetime.fromisoformat(event["sell_start"])
+    return f"Selling since {sell_start:%H:%M}" if phase == "selling" else f"Sold from {sell_start:%H:%M}"
+
+
+def free_event_attributes(event: dict) -> dict:
+    """Sensor attributes: no raw meters, no sell estimates until a sell has run, plus ``sell_status``."""
+    hidden = () if free_event_sold(event) else FREE_EVENT_ESTIMATE_KEYS
+    attrs = {k: v for k, v in event.items() if not k.startswith("meters_") and k not in hidden}
+    status = free_event_sell_status(event)
+    if status:
+        attrs["sell_status"] = status
+    return attrs
+
+
 def soc_trend_kw(samples: list[tuple[datetime, float]], capacity_kwh: float, now: datetime) -> float | None:
     """Battery charge rate (kW, negative = discharging) from SOC samples in the last
     FREE_EVENT_TREND_MINUTES; None until they span FREE_EVENT_TREND_MIN_MINUTES."""
