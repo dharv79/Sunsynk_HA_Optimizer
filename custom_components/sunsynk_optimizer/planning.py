@@ -795,6 +795,17 @@ def arbitrage_worth_it(
     return sell_pence > buy_pence / round_trip_eff + (wear_pence or 0.0)
 
 
+def peak_export_skip_reason(slots_held: bool, saving_session_later: bool, soc: float | None) -> str | None:
+    """Why the 16:00 peak export is skipped (logged as its decision), or None to plan it."""
+    if slots_held:
+        return "skipped_slots_held"
+    if saving_session_later:
+        return "skipped_saving_session"  # the session exports this energy at export rate + reward
+    if soc is None:
+        return "skipped_no_soc"
+    return None
+
+
 def peak_export_plan(
     soc: float,
     reserve_soc: int,
@@ -2105,6 +2116,18 @@ def logged_day_cost_gbp(day: dict[str, Any], include_gas: bool) -> float | None:
     if not include_gas:
         return round(imp - exp, 2)
     return net_cost_gbp(imp, exp, gas) if _is_number(gas) else None
+
+
+BILL_ATTRIBUTE_KEYS = (
+    "logged_gbp", "billed_gbp", "gap_gbp", "gap_pct", "days_logged", "days_in_month", "partial", "alert", "includes_gas",
+)
+
+
+def bill_attributes(state: dict[str, Any] | None) -> dict[str, Any]:
+    """Billed-amount entity attributes: every key always present (None until a bill is reconciled)."""
+    state = state or {}
+    result = state.get("result") or {}
+    return {"month": state.get("month"), **{k: result.get(k) for k in BILL_ATTRIBUTE_KEYS}}
 
 
 def reconcile_month(

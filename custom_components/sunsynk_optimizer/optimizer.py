@@ -204,6 +204,7 @@ from .planning import (
     next_joined_saving_session,
     peak_cover_plan,
     peak_export_plan,
+    peak_export_skip_reason,
     wear_cost_pence_per_kwh,
     peak_load_estimate_kwh,
     plan_free_event,
@@ -2044,16 +2045,21 @@ class SunsynkOptimizer:
         saving session holds the slots; never pushes in monitor mode; the export-disable (watt
         trigger) wins — if it already fired, or fires later, it holds 100%.
         """
-        if self._slots_held():
-            return
-        await self._async_peak_cover_end()
-        if saving_session_later_today(self.coordinator.state.saving_session, dt_util.now()):
-            return  # the session exports this energy at export rate + reward
+        now = dt_util.now()
+        slots_held = self._slots_held()
+        if not slots_held:
+            await self._async_peak_cover_end()
         soc = self._essential_state(self.battery_soc_entity)
-        if soc is None:
+        skip = peak_export_skip_reason(
+            slots_held, saving_session_later_today(self.coordinator.state.saving_session, now), soc
+        )
+        if skip:
+            # Logged so the 22:00 debug bundle always says why there was no export.
+            record = {"type": "peak_export", "date": now.date().isoformat(), "soc": soc, "decision": skip}
+            self.coordinator.update_state(touch=False, peak_export=record)
+            await self.data_logger.async_log_peak_export(**{k: v for k, v in record.items() if k != "type"})
             return
         cfg = self.cfg
-        now = dt_util.now()
         reserve = self._evening_reserve_soc()
         prices, sources = self._tariff_prices(now.date())
         plan = peak_export_plan(

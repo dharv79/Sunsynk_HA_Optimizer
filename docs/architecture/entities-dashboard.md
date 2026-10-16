@@ -62,4 +62,4 @@ The dashboard's "Bill check and battery health" card (Consumption column, after 
 
 ### Billed last month (phase 36, 14/10/2026)
 
-`number.billed_last_month` (£, box entry): enter last month's billed net £ from the Octopus statement to reconcile it against the logged cost. See weekly-reports.md.
+`number.billed_last_month` (£, box entry): enter last month's billed net £ from the Octopus statement to reconcile it against the logged cost. See weekly-reports.md. Its attributes (`month` plus `planning.BILL_ATTRIBUTE_KEYS`) are always present, as `None` until a bill is reconciled. Otherwise Spook flags the dashboard's `logged_gbp`, `gap_gbp` and `days_logged` rows as unknown attributes (16/10/2026, `test_bill_attributes_always_has_every_key`).

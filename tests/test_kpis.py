@@ -601,6 +601,24 @@ def test_record_for_date(planning):
     assert planning.record_for_date(None, "2026-10-14") == {}
 
 
+def test_peak_export_skip_reason(planning):
+    assert planning.peak_export_skip_reason(True, True, None) == "skipped_slots_held"
+    assert planning.peak_export_skip_reason(False, True, 100.0) == "skipped_saving_session"
+    assert planning.peak_export_skip_reason(False, False, None) == "skipped_no_soc"
+    assert planning.peak_export_skip_reason(False, False, 0.0) is None
+
+
+def test_bill_attributes_always_has_every_key(planning):
+    empty = planning.bill_attributes(None)
+    assert set(empty) == {"month", *planning.BILL_ATTRIBUTE_KEYS}
+    assert all(v is None for v in empty.values())
+    done = planning.bill_attributes(
+        {"month": "2026-09", "billed_gbp": 60.0, "result": {"logged_gbp": 58.1, "gap_gbp": 1.9, "days_logged": 30}}
+    )
+    assert (done["month"], done["logged_gbp"], done["gap_gbp"], done["days_logged"]) == ("2026-09", 58.1, 1.9, 30)
+    assert done["alert"] is None
+
+
 # ---- Phase 36: bill reconciliation ----
 
 
