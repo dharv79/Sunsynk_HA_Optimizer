@@ -225,11 +225,68 @@ def test_free_event_sell_window_length(planning):
     assert plan.skip_sell is False
 
 
-def test_free_event_sell_window_capped_at_free_period_length(planning):
-    # Floor 60, soc 100 -> needs 4kWh / 2kW = 2h, but free period is only 1h.
-    plan = _free(planning, free_end=datetime(2026, 9, 28, 14, 0), soc=100.0)
-    assert plan.sell_start == datetime(2026, 9, 28, 12, 0)  # capped to 1h, not 2h
-    assert plan.expected_export_kwh == pytest.approx(2.0)  # 1h @ 2kW, not the full 4kWh
+def test_free_event_sell_window_not_capped_at_free_period_length(planning):
+    # Floor 60, soc 100, 1kW export -> 4kWh needs 4h; the 2h free period no longer caps it.
+    plan = _free(planning, soc=100.0, export_rate_kw=1.0)
+    assert plan.sell_start == datetime(2026, 9, 28, 9, 0)
+    assert plan.expected_export_kwh == pytest.approx(4.0)
+    assert plan.expected_refill_kwh == pytest.approx(4.0)
+
+
+def test_free_event_sell_window_capped_at_max_sell_hours(planning):
+    # Floor 60, soc 100, 0.5kW export -> 4kWh needs 8h, capped at 4h (2kWh).
+    plan = _free(planning, soc=100.0, export_rate_kw=0.5)
+    assert planning.FREE_EVENT_MAX_SELL_HOURS == 4.0
+    assert plan.sell_start == datetime(2026, 9, 28, 9, 0)
+    assert plan.expected_export_kwh == pytest.approx(2.0)
+
+
+def test_free_event_sells_the_solar_expected_before_free_start(planning):
+    # 18/10 case: 10kWh, 3kW x 2h refill -> floor 40; SOC 90 + 2kWh net solar = 7kWh to sell
+    # at 1.5kW = 4h (cap) -> 6kWh sold, SOC ~50% at the free start, 5kWh refill room.
+    plan = _free(
+        planning, free_start=datetime(2026, 10, 18, 11, 0), free_end=datetime(2026, 10, 18, 13, 0),
+        charge_rate_kw=3.0, export_rate_kw=1.5, soc=90.0, solar_kwh=2.0,
+    )
+    assert plan.sell_floor_soc == 40
+    assert plan.sell_start == datetime(2026, 10, 18, 7, 0)
+    assert plan.expected_export_kwh == pytest.approx(6.0)
+    assert plan.expected_refill_kwh == pytest.approx(5.0)
+    # Without solar: 5kWh in 3h20m from 07:40, refilling the full 6kWh.
+    dry = _free(
+        planning, free_start=datetime(2026, 10, 18, 11, 0), free_end=datetime(2026, 10, 18, 13, 0),
+        charge_rate_kw=3.0, export_rate_kw=1.5, soc=90.0,
+    )
+    assert dry.sell_start == datetime(2026, 10, 18, 7, 40)
+    assert dry.expected_refill_kwh == pytest.approx(6.0)
+
+
+def test_free_event_solar_alone_triggers_a_sell(planning):
+    plan = _free(planning, soc=55.0, solar_kwh=1.5)  # below the 60% floor, but 1kWh net to sell
+    assert plan.skip_sell is False
+    assert plan.expected_export_kwh == pytest.approx(1.0)
+
+
+def test_free_event_replan_at_and_net_solar(planning):
+    assert planning.free_event_replan_at(datetime(2026, 10, 18, 11, 0)) == datetime(2026, 10, 18, 6, 30)
+    assert planning.free_event_net_solar_kwh(3.0, 0.5, 4.0) == 1.0
+    assert planning.free_event_net_solar_kwh(1.0, 0.5, 4.0) == 0.0
+    assert planning.free_event_net_solar_kwh(None, 0.5, 4.0) == 0.0
+    assert planning.free_event_net_solar_kwh(3.0, 0.5, 0.0) == 0.0
+
+
+def test_free_event_target_cap(planning):
+    from datetime import date
+
+    event = {"phase": "scheduled", "sell_floor_soc": 40}
+    start = datetime(2026, 10, 18, 11, 0)
+    day = date(2026, 10, 18)
+    assert planning.free_event_target_cap(60, event, start, day) == 40
+    assert planning.free_event_target_cap(30, event, start, day) == 30
+    assert planning.free_event_target_cap(60, event, start, date(2026, 10, 17)) == 60  # not the event day
+    assert planning.free_event_target_cap(60, event, datetime(2026, 10, 18, 16, 0), day) == 60  # peak or later
+    assert planning.free_event_target_cap(60, {**event, "phase": "selling"}, start, day) == 60
+    assert planning.free_event_target_cap(60, {}, None, day) == 60
 
 
 def test_free_event_skip_sell_when_already_at_or_below_floor(planning):
@@ -249,18 +306,11 @@ def test_free_event_expected_refill_capped_at_headroom(planning):
 
 
 def test_free_event_refill_capped_by_headroom_when_sell_was_capped(planning):
-    # Export rate (1kW) slower than charge rate (2kW): the sell can't fully reach
-    # the floor within the 1h free period, so SOC at free_start is higher than the
-    # floor -> less headroom to 100% than the raw charge_rate*free_hours refill.
-    plan = _free(
-        planning,
-        free_end=datetime(2026, 9, 28, 14, 0),  # 1h free period
-        soc=100.0,
-        charge_rate_kw=2.0,
-        export_rate_kw=1.0,
-    )
-    assert plan.expected_export_kwh == pytest.approx(1.0)  # capped to 1h @ 1kW, not 2kWh
-    assert plan.expected_refill_kwh == pytest.approx(1.0)  # capped by headroom, not the raw 2kWh
+    # Export (0.5kW) too slow to reach the floor within the 4h cap: SOC at the free
+    # start stays above the floor -> less headroom than the raw charge_rate*free_hours.
+    plan = _free(planning, soc=100.0, charge_rate_kw=2.0, export_rate_kw=0.5)
+    assert plan.expected_export_kwh == pytest.approx(2.0)  # 4h @ 0.5kW, not the 4kWh needed
+    assert plan.expected_refill_kwh == pytest.approx(2.0)  # headroom 2kWh, not the raw 4kWh
 
 
 def test_free_event_crosses_midnight(planning):

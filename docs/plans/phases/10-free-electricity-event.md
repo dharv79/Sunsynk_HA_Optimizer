@@ -19,7 +19,7 @@ When a free electricity period is known, sell battery energy just before it usin
 | Trigger | Auto-detect from the Octopus Energy integration's free-electricity session entity (options-flow entity field, blank = off) **plus** manual start/end date-time entities on the dashboard. |
 | Auto-detected sessions | Auto-scheduled with an "Event scheduled" notification; a dashboard **Cancel free event** button skips it. |
 | Sell floor | Refillable floor: `max(40, 100 − refill_kwh / capacity × 100)`, where `refill_kwh = charge_rate × free_hours`. Never below 40%. |
-| Sell window | Ends at free start; only as long as needed to reach the floor at the export rate, capped at the free-period length. (May be revisited: daytime charge/export rates differ from the overnight learned rate.) |
+| Sell window | Ends at free start; only as long as needed to reach the floor at the export rate. Revisited 16/10/2026: re-planned on the day from the live SOC + net solar, capped at 4 h instead of the free-period length (free-electricity.md). |
 | Rates | New options `free_event_charge_rate_kw` and `free_event_export_rate_kw` (default: configured charge rate). The overnight learned rate is not used by default. Actual rates are logged per event so they can be learned later. |
 | SOC already ≤ floor at sell start | Skip the sell; still import during the free period. |
 | Overlap with 16:00–19:00 or 02:00–05:00 | Event wins: it holds both slots from sell start to free end. |
