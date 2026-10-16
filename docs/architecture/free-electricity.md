@@ -45,18 +45,21 @@ Sell battery energy just before a known free-electricity period (Flux 2), then c
 
 The results go into the stored dict (and so the `done` log record) and into the "finished" notification. The sensor attributes hide the `meters_*` keys. Tests: `test_meter_delta`, `test_free_event_result_and_report`.
 
-## Sell window sized on the day (16/10/2026)
+## Sell start decided live on the day (16/10/2026)
 
-**Root cause.** An event entered on 16/10 for 18/10 11:00–13:00 planned a 10:28 sell start: 0.8 kWh, from the 48% SOC at scheduling time. On the day, the battery would be fuller after the overnight charge and morning solar, so it would start the free period well above the 40% floor and take only part of the 6 kWh it could import free. Holding the slots from `scheduled` also froze the 01:55 plans for the two nights in between.
+**Root cause.** An event entered on 16/10 for 18/10 11:00–13:00 planned a 10:28 sell start: 0.8 kWh, from the 48% SOC at scheduling time. On the day, the battery would be fuller after the overnight charge and morning solar, so it would start the free period well above the 40% floor and take only part of the 6 kWh it could import free. Holding the slots from `scheduled` also froze the 01:55 plans for the two nights in between. 1.0.12b17 re-planned once, 4.5 h ahead, from the solar forecast. 1.0.12b18 replaces that with live measurement, at the user's request: free power lasts at most 2 h, so it watches the battery for the 4 h before.
 
 **Design.**
-- **Re-plan on the day:** `_async_do_free_event_replan` runs at `planning.free_event_replan_at` (free start − `FREE_EVENT_REPLAN_LEAD_HOURS`, 4.5 h). If that is already past at scheduling or restart, it runs at once. It re-runs `plan_free_event` with the live SOC and `solar_kwh` = `free_event_net_solar_kwh(raw forecast to the free start − plan load × hours)` (same-day only, else 0). It then stores `replanned`, `replan_soc` and `replan_net_solar_kwh`, arms the sell start, notifies "free event sell window set", and sends a `replanned` line to the debug channel. With SOC unavailable it keeps the scheduling-time plan. `_arm_free_event_timers` arms the re-plan while `scheduled` and not `replanned`, and the sell start after it.
-- **Solar is sold too:** `plan_free_event` sells `(soc − floor) × capacity + solar_kwh`, so solar can trigger a sell even when SOC is at the floor. The sell window is capped at `FREE_EVENT_MAX_SELL_HOURS` (4 h) instead of the free period's length, which re-opens the phase 10 "may be revisited" decision.
+- **Watch:** from `planning.free_event_watch_from` (free start − `FREE_EVENT_MAX_SELL_HOURS`, 4 h), `_async_do_free_event_watch` runs every `FREE_EVENT_WATCH_MINUTES` (10) while the event is `scheduled`. If the watch time is already past at scheduling or restart, it starts at once.
+  - Each check samples the SOC. `planning.soc_trend_kw` turns the last `FREE_EVENT_TREND_MINUTES` (30) of samples into the battery's real charge rate: solar going in, net of house load. It needs at least 5 minutes of samples. The samples are unpersisted, so they restart after an HA restart.
+  - `planning.free_event_sell_decision` projects the SOC at the free start (a rising trend only, capped at 100%). It then works out the hours needed to export down to the floor at the export rate, and returns `sell_now` once those hours + `FREE_EVENT_SELL_MARGIN_HOURS` (15 min) reach the time left.
+  - On `sell_now` it stores `sell_start` (now), `expected_export_kwh` and `sell_trigger` (the decision inputs), then runs the existing sell start: Flux 2 now→free start at the floor. It notifies and sends a `selling` debug line.
+- **Estimate at scheduling:** `plan_free_event` still gives the dashboard estimate (floor, export and refill kWh). The sell window is capped at 4 h instead of the free period's length, which re-opens the phase 10 "may be revisited" decision.
 - **Slots held from the sell start:** `_slots_held_by()` covers `selling`/`charging` only (the phase 10 decision: "holds both slots from sell start to free end"). While only `scheduled`, the 01:55 plan, Flux 2 checks and trims run normally. Scheduling still refuses a second event (`_free_event_active`).
 - **01:55 plan on the day:** `planning.free_event_target_cap` caps the target at the sell floor when a scheduled event starts that day before 16:00. Anything above the floor would only be sold back at a lower export price. The plan record has `free_event_capped`.
 
 **Verification.** `tests/test_planning.py`:
-- `test_free_event_sells_the_solar_expected_before_free_start` (the 18/10 numbers);
-- `test_free_event_sell_window_not_capped_at_free_period_length` and `test_free_event_sell_window_capped_at_max_sell_hours`;
-- `test_free_event_solar_alone_triggers_a_sell` and `test_free_event_replan_at_and_net_solar`;
-- `test_free_event_target_cap`.
+- `test_soc_trend_kw`;
+- `test_free_event_sell_decision_18_oct` (the 18/10 cases);
+- `test_free_event_watch_from` and `test_free_event_target_cap`;
+- `test_free_event_sell_window_not_capped_at_free_period_length` and `test_free_event_sell_window_capped_at_max_sell_hours`.

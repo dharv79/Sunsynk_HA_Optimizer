@@ -241,38 +241,34 @@ def test_free_event_sell_window_capped_at_max_sell_hours(planning):
     assert plan.expected_export_kwh == pytest.approx(2.0)
 
 
-def test_free_event_sells_the_solar_expected_before_free_start(planning):
-    # 18/10 case: 10kWh, 3kW x 2h refill -> floor 40; SOC 90 + 2kWh net solar = 7kWh to sell
-    # at 1.5kW = 4h (cap) -> 6kWh sold, SOC ~50% at the free start, 5kWh refill room.
-    plan = _free(
-        planning, free_start=datetime(2026, 10, 18, 11, 0), free_end=datetime(2026, 10, 18, 13, 0),
-        charge_rate_kw=3.0, export_rate_kw=1.5, soc=90.0, solar_kwh=2.0,
-    )
-    assert plan.sell_floor_soc == 40
-    assert plan.sell_start == datetime(2026, 10, 18, 7, 0)
-    assert plan.expected_export_kwh == pytest.approx(6.0)
-    assert plan.expected_refill_kwh == pytest.approx(5.0)
-    # Without solar: 5kWh in 3h20m from 07:40, refilling the full 6kWh.
-    dry = _free(
-        planning, free_start=datetime(2026, 10, 18, 11, 0), free_end=datetime(2026, 10, 18, 13, 0),
-        charge_rate_kw=3.0, export_rate_kw=1.5, soc=90.0,
-    )
-    assert dry.sell_start == datetime(2026, 10, 18, 7, 40)
-    assert dry.expected_refill_kwh == pytest.approx(6.0)
+def test_free_event_watch_from(planning):
+    assert planning.free_event_watch_from(datetime(2026, 10, 18, 11, 0)) == datetime(2026, 10, 18, 7, 0)
 
 
-def test_free_event_solar_alone_triggers_a_sell(planning):
-    plan = _free(planning, soc=55.0, solar_kwh=1.5)  # below the 60% floor, but 1kWh net to sell
-    assert plan.skip_sell is False
-    assert plan.expected_export_kwh == pytest.approx(1.0)
+def test_soc_trend_kw(planning):
+    from datetime import timedelta
+
+    now = datetime(2026, 10, 18, 9, 0)
+    samples = [(now - timedelta(minutes=m), soc) for m, soc in ((40, 50.0), (20, 60.0), (10, 62.0), (0, 65.0))]
+    # Only the last 30 min count: 60% -> 65% over 20 min on 10kWh = 1.5 kW.
+    assert planning.soc_trend_kw(samples, 10.0, now) == 1.5
+    assert planning.soc_trend_kw([(now, 65.0)], 10.0, now) is None  # one sample
+    assert planning.soc_trend_kw([(now - timedelta(minutes=2), 64.0), (now, 65.0)], 10.0, now) is None  # too short
+    assert planning.soc_trend_kw([(now - timedelta(minutes=20), 70.0), (now, 65.0)], 10.0, now) == -1.5
 
 
-def test_free_event_replan_at_and_net_solar(planning):
-    assert planning.free_event_replan_at(datetime(2026, 10, 18, 11, 0)) == datetime(2026, 10, 18, 6, 30)
-    assert planning.free_event_net_solar_kwh(3.0, 0.5, 4.0) == 1.0
-    assert planning.free_event_net_solar_kwh(1.0, 0.5, 4.0) == 0.0
-    assert planning.free_event_net_solar_kwh(None, 0.5, 4.0) == 0.0
-    assert planning.free_event_net_solar_kwh(3.0, 0.5, 0.0) == 0.0
+def test_free_event_sell_decision_18_oct(planning):
+    # 10kWh, floor 40, export 1.5kW, free start 11:00.
+    decide = planning.free_event_sell_decision
+    # 07:00, SOC 60, no trend yet: 2kWh needs 1.33h + 0.25h < 4h left -> wait.
+    assert decide(60.0, 40, 10.0, None, 1.5, 4.0)["sell_now"] is False
+    # 08:00, SOC 70, solar charging at 1.5kW: projects 100% by 11:00 -> 6kWh needs 4h >= 3h left -> sell.
+    d = decide(70.0, 40, 10.0, 1.5, 1.5, 3.0)
+    assert d["sell_now"] is True and d["projected_soc"] == 100.0 and d["energy_kwh"] == 6.0 and d["needed_hours"] == 4.0
+    # 09:30, SOC 62 and falling (house load): 2.2kWh needs 1.47h + 0.25h >= 1.5h left -> sell.
+    assert decide(62.0, 40, 10.0, -0.4, 1.5, 1.5)["sell_now"] is True
+    # Already at the floor with nothing coming in: never sells.
+    assert decide(40.0, 40, 10.0, 0.0, 1.5, 0.5)["sell_now"] is False
 
 
 def test_free_event_target_cap(planning):

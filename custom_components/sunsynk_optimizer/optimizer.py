@@ -207,8 +207,10 @@ from .planning import (
     wear_cost_pence_per_kwh,
     peak_load_estimate_kwh,
     plan_free_event,
-    free_event_net_solar_kwh,
-    free_event_replan_at,
+    FREE_EVENT_WATCH_MINUTES,
+    free_event_sell_decision,
+    free_event_watch_from,
+    soc_trend_kw,
     free_event_target_cap,
     resolve_load_kw,
     resolve_used_charge_rate,
@@ -318,6 +320,8 @@ class SunsynkOptimizer:
         # persisted — restart resumption re-arms them from coordinator.state.free_event
         # via _arm_free_event_timers, same tradeoff as pending_full_trim_cancel above.
         self._free_event_unsubs: list[Any] = []
+        # SOC samples for the live sell-start watch (charge trend); unpersisted by design.
+        self._free_event_soc_samples: list[tuple[datetime, float]] = []
         # Gentler charging (phase 23) 05:00 restore handle; re-armed from
         # coordinator.state.gentle_charge on restart.
         self._gentle_restore_unsub = None
@@ -2780,17 +2784,12 @@ class SunsynkOptimizer:
         phase = event.get("phase")
         free_start = dt_util.as_local(dt_util.parse_datetime(event["free_start"]))
         free_end = dt_util.as_local(dt_util.parse_datetime(event["free_end"]))
-        sell_start = dt_util.as_local(dt_util.parse_datetime(event["sell_start"]))
 
-        if phase == "scheduled" and not event.get("replanned"):
-            # Sized on the day from the live SOC and solar forecast; that arms the sell start.
-            replan_at = free_event_replan_at(free_start)
+        if phase == "scheduled":
+            # The sell start is decided live from the SOC and its trend (_async_do_free_event_watch).
+            watch_from = free_event_watch_from(free_start)
             self._free_event_unsubs.append(
-                async_call_later(self.hass, max(0, (replan_at - now).total_seconds()), self._async_free_event_replan)
-            )
-        elif phase == "scheduled" and not event.get("skip_sell"):
-            self._free_event_unsubs.append(
-                async_call_later(self.hass, max(0, (sell_start - now).total_seconds()), self._async_free_event_sell_start)
+                async_call_later(self.hass, max(0, (watch_from - now).total_seconds()), self._async_free_event_watch_start)
             )
         if phase in ("scheduled", "selling"):
             self._free_event_unsubs.append(
@@ -2868,70 +2867,55 @@ class SunsynkOptimizer:
                 f"Free period {free_start.strftime('%Y-%m-%d %H:%M')} → {free_end.strftime('%H:%M')} ({source}). "
                 f"Sell floor {result.sell_floor_soc}%, expected export {result.expected_export_kwh} kWh, "
                 f"expected refill {result.expected_refill_kwh} kWh.{skip_note} "
-                f"The sell window is re-planned at {free_event_replan_at(free_start).strftime('%a %H:%M')} "
-                "from the live SOC and solar forecast."
+                f"From {free_event_watch_from(free_start).strftime('%a %H:%M')} the battery is watched and "
+                "selling starts when its level and charge rate need it."
             ),
         )
         await self.data_logger.async_log_free_event({"phase": "scheduled", **event})
         await self._async_report_event("scheduled", event)
         return True
 
-    async def _async_free_event_replan(self, _now) -> None:
-        await self._guarded(self._async_do_free_event_replan, "Free event re-plan")
+    async def _async_free_event_watch_start(self, _now) -> None:
+        """Start the live sell-start watch: check now, then every FREE_EVENT_WATCH_MINUTES."""
+        self._free_event_soc_samples = []
+        self._free_event_unsubs.append(
+            async_track_time_interval(
+                self.hass, self._async_free_event_watch, timedelta(minutes=FREE_EVENT_WATCH_MINUTES)
+            )
+        )
+        await self._async_free_event_watch(_now)
 
-    async def _async_do_free_event_replan(self) -> None:
-        """Re-size the sell window from the live SOC and the solar expected before the free start."""
+    async def _async_free_event_watch(self, _now) -> None:
+        await self._guarded(self._async_do_free_event_watch, "Free event sell watch")
+
+    async def _async_do_free_event_watch(self) -> None:
+        """Start selling once the projected SOC at the free start needs all the time left to export."""
         event = dict(self.coordinator.state.free_event)
-        if event.get("phase") != "scheduled" or event.get("replanned"):
+        if event.get("phase") != "scheduled":
+            return
+        soc = self._essential_state(self.battery_soc_entity)
+        if soc is None:
             return
         now = dt_util.now()
         free_start = dt_util.as_local(dt_util.parse_datetime(event["free_start"]))
-        free_end = dt_util.as_local(dt_util.parse_datetime(event["free_end"]))
-        soc = self._essential_state(self.battery_soc_entity)
-        event["replanned"] = True
-        if soc is not None:
-            cfg = self.cfg
-            hours = max(0.0, (free_start - now).total_seconds() / 3600)
-            solar_kwh = None
-            if free_start.date() == now.date():
-                solar_kwh = solar_until_kwh(
-                    self._hourly_or_synthetic_forecast(cfg, now),
-                    now.hour + now.minute / 60.0,
-                    free_start.hour + free_start.minute / 60.0,
-                )
-            net_solar = free_event_net_solar_kwh(solar_kwh, self._plan_load_kw(cfg), hours)
-            result = plan_free_event(
-                free_start, free_end, soc, self._capacity_kwh(cfg),
-                event["charge_rate_kw"], event["export_rate_kw"], solar_kwh=net_solar,
-            )
-            event.update(
-                sell_start=result.sell_start.isoformat(),
-                sell_end=result.sell_end.isoformat(),
-                sell_floor_soc=result.sell_floor_soc,
-                expected_export_kwh=result.expected_export_kwh,
-                expected_refill_kwh=result.expected_refill_kwh,
-                skip_sell=result.skip_sell,
-                replan_soc=soc,
-                replan_net_solar_kwh=net_solar,
-            )
+        capacity = self._capacity_kwh()
+        self._free_event_soc_samples = [
+            *[s for s in self._free_event_soc_samples if (now - s[0]).total_seconds() <= 3600], (now, soc)
+        ]
+        decision = free_event_sell_decision(
+            soc, event["sell_floor_soc"], capacity, soc_trend_kw(self._free_event_soc_samples, capacity, now),
+            event["export_rate_kw"], max(0.0, (free_start - now).total_seconds() / 3600),
+        )
+        if not decision["sell_now"]:
+            return
+        event.update(
+            sell_start=now.isoformat(),
+            expected_export_kwh=decision["energy_kwh"],
+            skip_sell=False,
+            sell_trigger={"soc": soc, **decision},
+        )
         self.coordinator.update_state(free_event=event)
-        self._arm_free_event_timers(event)
-        await self._async_report_event("replanned", event)
-        if soc is None:
-            body = "SOC unavailable, so the sell window planned at scheduling is kept."
-        elif event["skip_sell"]:
-            body = f"SOC {_pct(soc)}: nothing to sell before the free period at {free_start.strftime('%H:%M')}."
-        else:
-            body = (
-                f"SOC {_pct(soc)}, about {event['replan_net_solar_kwh']} kWh of solar expected into the battery. "
-                f"Selling about {event['expected_export_kwh']} kWh down to {event['sell_floor_soc']}% "
-                f"from {dt_util.as_local(dt_util.parse_datetime(event['sell_start'])).strftime('%H:%M')}, "
-                f"then refilling about {event['expected_refill_kwh']} kWh free."
-            )
-        await self.async_notify("🔋 Sunsynk: free event sell window set", body)
-
-    async def _async_free_event_sell_start(self, _now) -> None:
-        await self._guarded(self._async_do_free_event_sell_start, "Free event sell start")
+        await self._async_do_free_event_sell_start()
 
     async def _async_do_free_event_sell_start(self) -> None:
         event = dict(self.coordinator.state.free_event)
@@ -2952,8 +2936,11 @@ class SunsynkOptimizer:
         self.coordinator.update_state(free_event=event)
         title = "🔋 Sunsynk: free event sell started" if api_ok else "⚠️ Sunsynk: free event sell NOT applied"
         await self.async_notify(
-            title, f"Selling down to {event['sell_floor_soc']}% ahead of the free period.{_api_note(api_ok)}"
+            title,
+            f"Selling about {event['expected_export_kwh']} kWh down to {event['sell_floor_soc']}% "
+            f"before the free period at {free_start.strftime('%H:%M')}.{_api_note(api_ok)}",
         )
+        await self._async_report_event("selling", event)
 
     async def _async_free_event_free_start(self, _now) -> None:
         await self._guarded(self._async_do_free_event_free_start, "Free event free start")
