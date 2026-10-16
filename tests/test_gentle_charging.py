@@ -39,7 +39,7 @@ def test_gentle_fields_are_logged_on_the_import_plan(DataLogger):
     import sys
 
     fields = sys.modules["sunsynk_optimizer.data_logger"]._IMPORT_PLAN_FIELDS
-    assert {"gentle_current_a", "gentle_charge_applied", "saving_session_boost"} <= set(fields)
+    assert {"gentle_current_a", "gentle_charge_applied"} <= set(fields)
 
 
 def test_gentle_current_only_ever_lowers_the_users_setting(planning):

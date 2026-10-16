@@ -795,12 +795,10 @@ def arbitrage_worth_it(
     return sell_pence > buy_pence / round_trip_eff + (wear_pence or 0.0)
 
 
-def peak_export_skip_reason(slots_held: bool, saving_session_later: bool, soc: float | None) -> str | None:
+def peak_export_skip_reason(slots_held: bool, soc: float | None) -> str | None:
     """Why the 16:00 peak export is skipped (logged as its decision), or None to plan it."""
     if slots_held:
         return "skipped_slots_held"
-    if saving_session_later:
-        return "skipped_saving_session"  # the session exports this energy at export rate + reward
     if soc is None:
         return "skipped_no_soc"
     return None
@@ -1098,7 +1096,7 @@ def manual_free_event_error(
     past is always an error, but a start at/after a stale end is silently
     accepted (the end is about to be set); an end at/before start is an error.
     Returns the message to notify, or None when the pair is fine or incomplete.
-    Shared by the free event and the saving session (`label` names which).
+    `label` names the event in the message.
     """
     if changed == "start":
         if start <= now:
@@ -1107,102 +1105,6 @@ def manual_free_event_error(
     if end <= start:
         return f"{label} end must be after start."
     return None
-
-
-# Phase 21: Octopus Saving Sessions — fill the battery beforehand, then run the
-# house from it and export the rest during the session (Flux 2 to a floor).
-SAVING_SESSION_MIN_FLOOR_SOC = KPI_RESERVE_SOC
-OCTOPOINTS_PER_PENNY = 8  # 800 Octopoints = £1
-@dataclass
-class SavingSessionPlan:
-    """Outcome of plan_saving_session — see phases/21-octopus-saving-sessions.md."""
-
-    floor_soc: int
-    floor_reason: str  # "reward_beats_rebuy" | "evening_reserve"
-    value_pence: float | None  # reward + export earned per kWh sent out in the session
-    offpeak_boost: bool  # raise that night's 01:55 target to 100%
-    precharge: bool  # top up at the day rate before the session
-    precharge_start: datetime | None
-    precharge_end: datetime | None
-    expected_export_kwh: float
-
-
-def octopoints_to_pence(points: Any) -> float | None:
-    """Octopoints per kWh → pence per kWh; None when unknown (never 0p)."""
-    try:
-        value = float(points)
-    except (TypeError, ValueError):
-        return None
-    return round(value / OCTOPOINTS_PER_PENNY, 2) if value > 0 else None
-
-
-def saving_session_value_pence(reward_pence: float | None, export_pence: float | None) -> float | None:
-    """What a kWh sent out during the session earns: the known parts summed, None if neither is known."""
-    parts = [p for p in (reward_pence, export_pence) if p is not None]
-    return round(sum(parts), 3) if parts else None
-
-
-def _precharge_end(session_start: datetime, fill_hours: float) -> datetime:
-    """Day-rate top-up ends at the session start, or at 16:00 when filling up to the start would buy in the peak."""
-    peak_start = session_start.replace(hour=PEAK_START_MINUTES // 60, minute=0, second=0, microsecond=0)
-    peak_end = session_start.replace(hour=PEAK_END_MINUTES // 60, minute=0, second=0, microsecond=0)
-    if session_start > peak_start and session_start - timedelta(hours=fill_hours) < peak_end:
-        return peak_start
-    return session_start
-
-
-def plan_saving_session(
-    session_start: datetime,
-    session_end: datetime,
-    soc: float,
-    capacity_kwh: float,
-    charge_rate_kw: float,
-    export_rate_kw: float,
-    reserve_soc: int,
-    reward_pence: float | None,
-    export_pence: float | None,
-    offpeak_pence: float | None,
-    day_pence: float | None,
-    min_floor_soc: int = SAVING_SESSION_MIN_FLOOR_SOC,
-    wear_pence: float | None = None,
-) -> SavingSessionPlan:
-    """Plan a saving session: how low to export, and whether to fill up first.
-
-    Selling below the evening reserve means buying that energy back at the day
-    rate before 02:00, so the floor drops to the minimum only when the session
-    value beats the day rate after round-trip losses. Filling up first follows
-    the same test against the off-peak rate (the 01:55 plan targets 100%) and
-    the day rate (a top-up that ends before the session, or at 16:00 so it
-    never buys at the peak rate). A missing price never counts as worth it.
-    """
-    hours = max(0.0, (session_end - session_start).total_seconds() / 3600)
-    value = saving_session_value_pence(reward_pence, export_pence)
-    if arbitrage_worth_it(day_pence, value, wear_pence=wear_pence):
-        floor_soc, floor_reason = min_floor_soc, "reward_beats_rebuy"
-    else:
-        floor_soc, floor_reason = max(min_floor_soc, min(100, int(reserve_soc))), "evening_reserve"
-
-    offpeak_boost = bool(arbitrage_worth_it(offpeak_pence, value, wear_pence=wear_pence))
-    precharge = bool(arbitrage_worth_it(day_pence, value, wear_pence=wear_pence)) and soc < 100 and charge_rate_kw > 0
-    precharge_start = precharge_end = None
-    if precharge:
-        fill_hours = (100 - soc) / 100 * capacity_kwh / charge_rate_kw
-        precharge_end = _precharge_end(session_start, fill_hours)
-        precharge_start = precharge_end - timedelta(hours=fill_hours)
-
-    start_soc = 100 if (precharge or offpeak_boost) else soc
-    available_kwh = max(0.0, start_soc - floor_soc) / 100 * capacity_kwh
-    expected_export_kwh = round(min(export_rate_kw * hours, available_kwh), 2)
-    return SavingSessionPlan(
-        floor_soc=floor_soc,
-        floor_reason=floor_reason,
-        value_pence=value,
-        offpeak_boost=offpeak_boost,
-        precharge=precharge,
-        precharge_start=precharge_start,
-        precharge_end=precharge_end,
-        expected_export_kwh=expected_export_kwh,
-    )
 
 
 def _as_aware(value: Any, tz) -> datetime | None:
@@ -1216,29 +1118,6 @@ def _as_aware(value: Any, tz) -> datetime | None:
     else:
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=tz)
-
-
-def next_joined_saving_session(
-    attributes: dict[str, Any] | None, now: datetime
-) -> tuple[datetime, datetime, float | None] | None:
-    """Earliest joined session that hasn't started yet, from the Octopus Energy
-    saving-session (or Power Down) events entity: (start, end, reward p/kWh).
-
-    A session already under way is skipped — there is no time to prepare.
-    Malformed items are ignored; None when nothing usable is joined.
-    """
-    events = (attributes or {}).get("joined_events")
-    if not isinstance(events, list):
-        return None
-    upcoming = []
-    for item in events:
-        if not isinstance(item, dict):
-            continue
-        start, end = _as_aware(item.get("start"), now.tzinfo), _as_aware(item.get("end"), now.tzinfo)
-        if start is None or end is None or end <= start or start <= now:
-            continue
-        upcoming.append((start, end, octopoints_to_pence(item.get("octopoints_per_kwh"))))
-    return min(upcoming, key=lambda s: s[0]) if upcoming else None
 
 
 SPARE_SOLAR_FIRST_HOUR = 8
@@ -1705,18 +1584,6 @@ def restore_flux2_slot(export_paused: bool, minutes: int) -> dict[str, Any]:
     return dict(EXPORT_PAUSE_FLUX2_SLOT if paused else DEFAULT_FLUX2_SLOT)
 
 
-def saving_session_later_today(session: dict[str, Any], now: datetime) -> bool:
-    """A scheduled saving session starts later today, so the battery is kept for it.
-
-    Trims and the 16:00 peak export would otherwise sell at the plain export rate
-    what the session sells at export rate + reward.
-    """
-    if session.get("phase") != "scheduled":
-        return False
-    start = _as_aware(session.get("session_start"), now.tzinfo)
-    return start is not None and start > now and start.astimezone(now.tzinfo).date() == now.date()
-
-
 def meter_delta(start: dict[str, Any] | None, end: dict[str, Any] | None, key: str) -> float | None:
     """kWh between two daily-meter readings; None when either is missing or the meter reset (midnight)."""
     a, b = (start or {}).get(key), (end or {}).get(key)
@@ -1727,31 +1594,6 @@ def meter_delta(start: dict[str, Any] | None, end: dict[str, Any] | None, key: s
 
 def _gbp(kwh: float | None, pence: float | None) -> float | None:
     return round(kwh * pence / 100, 2) if _is_number(kwh) and _is_number(pence) else None
-
-
-def saving_session_result(session: dict[str, Any], meters_end: dict[str, Any] | None, soc_end: float | None,
-                          capacity_kwh: float) -> dict[str, Any]:
-    """Measured outcome of a finished saving session (phase 21 debug report).
-
-    Export and import come from the SolarSynk daily meters read at the session
-    start and end; £ uses the planned export and reward rates per exported kWh,
-    the same model the session was scheduled on. Missing inputs → None.
-    """
-    meters_start = session.get("meters_at_start")
-    export_kwh = meter_delta(meters_start, meters_end, "grid_export")
-    soc_start = session.get("soc_at_start")
-    soc_drop = round(soc_start - soc_end, 1) if _is_number(soc_start) and _is_number(soc_end) else None
-    export_gbp, reward_gbp = _gbp(export_kwh, session.get("export_pence")), _gbp(export_kwh, session.get("reward_pence"))
-    return {
-        "actual_export_kwh": export_kwh,
-        "actual_import_kwh": meter_delta(meters_start, meters_end, "grid_import"),
-        "actual_load_kwh": meter_delta(meters_start, meters_end, "load"),
-        "soc_drop_pct": soc_drop,
-        "battery_kwh": round(soc_drop / 100 * capacity_kwh, 2) if soc_drop is not None else None,
-        "export_gbp": export_gbp,
-        "reward_gbp": reward_gbp,
-        "total_gbp": round(export_gbp + reward_gbp, 2) if export_gbp is not None and reward_gbp is not None else None,
-    }
 
 
 def free_event_result(event: dict[str, Any], meters_end: dict[str, Any] | None, soc_end: float | None,
@@ -1772,7 +1614,7 @@ def free_event_result(event: dict[str, Any], meters_end: dict[str, Any] | None, 
 
 
 def event_report(record_type: str, phase: str, event: dict[str, Any]) -> dict[str, Any]:
-    """Debug-channel JSON line for a free event / saving session lifecycle point (raw meter readings dropped)."""
+    """Debug-channel JSON line for a free event lifecycle point (raw meter readings dropped)."""
     return {"type": record_type, "phase": phase, **{k: v for k, v in event.items() if not k.startswith("meters_")}}
 
 

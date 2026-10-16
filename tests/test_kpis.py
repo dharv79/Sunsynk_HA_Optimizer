@@ -602,10 +602,9 @@ def test_record_for_date(planning):
 
 
 def test_peak_export_skip_reason(planning):
-    assert planning.peak_export_skip_reason(True, True, None) == "skipped_slots_held"
-    assert planning.peak_export_skip_reason(False, True, 100.0) == "skipped_saving_session"
-    assert planning.peak_export_skip_reason(False, False, None) == "skipped_no_soc"
-    assert planning.peak_export_skip_reason(False, False, 0.0) is None
+    assert planning.peak_export_skip_reason(True, None) == "skipped_slots_held"
+    assert planning.peak_export_skip_reason(False, None) == "skipped_no_soc"
+    assert planning.peak_export_skip_reason(False, 0.0) is None
 
 
 def test_meter_delta(planning):
@@ -613,19 +612,6 @@ def test_meter_delta(planning):
     assert planning.meter_delta({"grid_export": 5.0}, {"grid_export": 0.3}, "grid_export") is None  # midnight reset
     assert planning.meter_delta(None, {"grid_export": 1.0}, "grid_export") is None
     assert planning.meter_delta({"grid_export": None}, {"grid_export": 1.0}, "grid_export") is None
-
-
-def test_saving_session_result(planning):
-    session = {
-        "soc_at_start": 100.0, "export_pence": 15.0, "reward_pence": 12.81,
-        "meters_at_start": {"grid_export": 4.0, "grid_import": 10.0, "load": 12.0},
-    }
-    r = planning.saving_session_result(session, {"grid_export": 6.0, "grid_import": 10.1, "load": 12.6}, 72.0, 10.0)
-    assert (r["actual_export_kwh"], r["actual_import_kwh"], r["actual_load_kwh"]) == (2.0, 0.1, 0.6)
-    assert (r["soc_drop_pct"], r["battery_kwh"]) == (28.0, 2.8)
-    assert (r["export_gbp"], r["reward_gbp"], r["total_gbp"]) == (0.3, 0.26, 0.56)
-    missing = planning.saving_session_result({"export_pence": 15.0}, None, None, 10.0)
-    assert all(v is None for v in missing.values())
 
 
 def test_free_event_result_and_report(planning):

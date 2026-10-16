@@ -56,7 +56,6 @@ _IMPORT_PLAN_FIELDS = (
     "import_feedback_adjustment",
     "import_feedback_reason",
     "import_feedback_live",
-    "saving_session_boost",
     "gentle_current_a",
     "gentle_charge_applied",
 )
@@ -323,9 +322,6 @@ class DataLogger:
         """
         await self._async_append(_record("free_event", **event))
 
-    async def async_log_saving_session(self, session: dict[str, Any]) -> None:
-        """Log a saving-session lifecycle point (scheduled / done / cancelled). Tag only."""
-        await self._async_append(_record("saving_session", **session))
 
     # ------------------------------------------------------------------ #
     # History analysis                                                     #

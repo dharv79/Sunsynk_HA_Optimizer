@@ -1,6 +1,6 @@
 # Phase 21 — Octopus Saving Sessions
 
-**Status:** Done, merged (e24e307, PR #44). **Size:** M, ~55k actual. **Origin:** improvement list 06/10/2026 (item 7).
+**Status:** Superseded by removal (16/10/2026, 1.0.12b16): exporting for the reward just emptied the battery to the grid; see free-electricity.md. Was: done, merged (e24e307, PR #44). **Size:** M, ~55k actual. **Origin:** improvement list 06/10/2026 (item 7).
 
 ## Goal
 

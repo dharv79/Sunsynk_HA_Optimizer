@@ -68,7 +68,7 @@ The free-event, monitor-mode and export-disable gates are early returns in the H
 
 **Persisted decision (15/10/2026).** The 16:00 record is stored in `OptimizerState.peak_export` (via `update_state`) instead of an instance attribute. Root cause: an HA restart between 16:00 and 22:00 (e.g. an update) dropped the day's `peak_export` line from the 22:00 debug bundle and released a live export's hold on Flux 2. `planning.record_for_date` returns it only for today. Test: `test_record_for_date`.
 
-**Skip reasons logged (16/10/2026).** Every early exit from the 16:00 run now writes a `peak_export` record whose `decision` is `skipped_slots_held`, `skipped_saving_session` or `skipped_no_soc` (`planning.peak_export_skip_reason`). Root cause: on 15/10 a manual saving session at 18:00 made the run skip by design, but it wrote nothing, so the 22:00 bundle had no line and looked like a failure. Pairing only reads `decision == "export"`, and the Flux 2 hold needs `api_ok`, so skip records change no behaviour. Test: `test_peak_export_skip_reason`.
+**Skip reasons logged (16/10/2026).** Every early exit from the 16:00 run now writes a `peak_export` record whose `decision` is `skipped_slots_held` or `skipped_no_soc` (`skipped_saving_session` existed until saving sessions were removed the same day) (`planning.peak_export_skip_reason`). Root cause: on 15/10 a manual saving session at 18:00 made the run skip by design, but it wrote nothing, so the 22:00 bundle had no line and looked like a failure. Pairing only reads `decision == "export"`, and the Flux 2 hold needs `api_ok`, so skip records change no behaviour. Test: `test_peak_export_skip_reason`.
 
 ## Tariff rates from the Octopus integration (09/10/2026, phase 18)
 
@@ -116,7 +116,7 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 - `top_up` when the shortfall is ≥3 points and the day price beats the peak price after charge losses (`peak_cover_worth_it`); a missing price → `no_price`, never a decision to charge.
 - The push waits until the charge would need to start (+45 min lead, `push_now`) so later solar can still help.
 
-**Live (`peak_cover_live`, default off).** A Flux 1 slot now→16:00 with `targetSoc` = the required SOC. The inverter imports only while below the target, so it holds the battery there at the day rate rather than charging in one go. One push a day; at 16:00 `_async_peak_cover_end` (in `async_run_peak_export`) restores the normal plan (`_async_restore_normal_plan`). Never in monitor mode; skipped while a free event or saving session holds the slots.
+**Live (`peak_cover_live`, default off).** A Flux 1 slot now→16:00 with `targetSoc` = the required SOC. The inverter imports only while below the target, so it holds the battery there at the day rate rather than charging in one go. One push a day; at 16:00 `_async_peak_cover_end` (in `async_run_peak_export`) restores the normal plan (`_async_restore_normal_plan`). Never in monitor mode; skipped while a free event holds the slots.
 
 **Shadow / logging.** One `peak_cover` record per day (dedup): the first actionable top-up, else the last check before 16:00, with the projection, required SOC, load/solar inputs, prices, `live` and `api_ok`; it rides the 22:00 debug bundle. Transient state `_peak_cover` is unpersisted by design: after a restart it re-evaluates.
 
@@ -125,9 +125,9 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 ## Battery wear cost (phase 24, 13/10/2026)
 
 - Options `battery_cost_gbp` and `battery_lifetime_kwh` (both blank by default). `planning.wear_cost_pence_per_kwh` = cost ÷ lifetime throughput × 100; blank or non-positive → `None` (no wear term, behaviour as before — never 0p).
-- `optimizer._wear_pence()` feeds `peak_export_plan` (16:00 peak export) and `plan_saving_session` (floor, boost and pre-charge tests). Wear is added to the replacement cost in `arbitrage_worth_it`.
+- `optimizer._wear_pence()` feeds `peak_export_plan` (16:00 peak export). Wear is added to the replacement cost in `arbitrage_worth_it`.
 - Logged as `wear_cost_p` on the `peak_export` and `day_kpis` records. Round-trip efficiency stays the 0.85 constant (no phase 14 KPI measures it yet).
-- Tests: `tests/test_kpis.py` (phase 24 block), `tests/test_saving_session.py`.
+- Tests: `tests/test_kpis.py` (phase 24 block).
 
 ## Trim time guard (14/10/2026)
 
@@ -147,20 +147,19 @@ Every push rebuilds both Flux slots: the slot a caller doesn't override reverts 
 
 | Writer | Slot | Guarded by |
 |---|---|---|
-| Free event / saving session (holding) | 1 and 2 | owns both; everything else checks `_slots_held()` |
+| Free event (holding) | 1 and 2 | owns both; everything else checks `_slots_held()` |
 | Export pause (watt/cost trigger, 16–19) | 2 → 100% | wins over peak export; restore keeps it (`restore_flux2_slot`) |
-| Live peak export (16:00) | 2 | skipped while slots held, export paused, or a saving session is due later today |
-| Trims (daytime, full-charge day) | 2 | 05:00–19:00 only; floor ≥ tonight's plan target before 16:00; skip during live peak export, export pause, held slots, or a session due later today |
+| Live peak export (16:00) | 2 | skipped while slots held or export paused |
+| Trims (daytime, full-charge day) | 2 | 05:00–19:00 only; floor ≥ tonight's plan target before 16:00; skip during live peak export, export pause or held slots |
 | Live peak cover (12–16) | 1 | skipped while slots held; restored at 16:00 |
 | 01:55 plan / watchdog retry | 1 and 2 | skipped while slots held; reload one-shot never 16:00–19:00 |
 
 **Fixed here.**
 - **Event end vs export pause:** a free event or saving session ending 16–19 restored the default Flux 2 slot (85%) while state still said paused, so the pause was lost until the trigger cleared and re-fired.
 - **Full-charge-day trim:** its 1-hour timer could fire into a free event or saving session (replacing its slots), or into an export pause (selling down, then the pause re-pushed: flip-flop).
-- **Saving session later today:** the 16:00 peak export and the trims sold at the plain export rate what the session sells at export rate + reward.
 - **Reload 16–19:** the one-shot plan undid a live peak export (it was only skipped while paused).
 
-**Verification.** `tests/test_planning.py` (`restore_flux2_slot`, `saving_session_later_today`).
+**Verification.** `tests/test_planning.py` (`restore_flux2_slot`).
 
 ## Inverter drift check (14/10/2026)
 

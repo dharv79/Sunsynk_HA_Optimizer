@@ -95,12 +95,6 @@ class OptimizerState:
     # value. Cleared once the event finishes or is cancelled.
     free_event_manual_start: str | None = None
     free_event_manual_end: str | None = None
-    # Octopus Saving Session (phase 21): source, times, floor, plan and phase
-    # (scheduled / precharging / exporting / done / cancelled). Persisted for
-    # restart resume, like free_event — see SunsynkOptimizer._arm_saving_session_timers.
-    saving_session: dict[str, Any] = field(default_factory=dict)
-    saving_session_manual_start: str | None = None
-    saving_session_manual_end: str | None = None
     # Gentler charging (phase 23) live write: phase applied / restored,
     # current_a, restore_current_a, restore_at. Persisted so a restart before
     # 05:00 still restores the inverter's normal grid-charge current.

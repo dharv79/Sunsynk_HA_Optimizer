@@ -30,9 +30,8 @@
           "default_full_charge_day": "Default full charge day",
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "charge_rate_kw": "Charge rate (kW)",
-          "free_event_charge_rate_kw": "Free event / saving session: charge rate (kW)",
-          "free_event_export_rate_kw": "Free event / saving session: export rate (kW)",
-          "saving_session_reward_pence": "Saving session reward for manual sessions (optional, p/kWh)",
+          "free_event_charge_rate_kw": "Free event: charge rate (kW)",
+          "free_event_export_rate_kw": "Free event: export rate (kW)",
           "avg_consumption_kw": "Average home consumption (kW)",
           "battery_voltage": "Battery nominal voltage (V, for charge current maths)",
           "weekend_avg_consumption_kw": "Weekend average consumption (kW)",
@@ -54,7 +53,6 @@
           "octopus_import_consumption_sensor": "Octopus import 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
           "octopus_export_consumption_sensor": "Octopus export 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
           "tariff_rate_overrides": "Tariff comparison overrides (optional JSON; unit rates p/kWh ex-VAT, standing p/day, e.g. {\"go\": {\"cheap\": 8.5, \"standing\": 54.62}, \"vat_percent\": 0, \"agile_region\": \"C\"})",
-          "octopus_saving_session_entity": "Octopus saving session events entity (optional; saving session or Power Down events, enables auto-detect)",
           "data_report_target": "Daily data report notify target (optional, developer)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
         }
@@ -100,9 +98,8 @@
           "default_full_charge_day": "Default full charge day",
           "battery_capacity_kwh": "Battery capacity (kWh)",
           "charge_rate_kw": "Charge rate (kW)",
-          "free_event_charge_rate_kw": "Free event / saving session: charge rate (kW)",
-          "free_event_export_rate_kw": "Free event / saving session: export rate (kW)",
-          "saving_session_reward_pence": "Saving session reward for manual sessions (optional, p/kWh)",
+          "free_event_charge_rate_kw": "Free event: charge rate (kW)",
+          "free_event_export_rate_kw": "Free event: export rate (kW)",
           "avg_consumption_kw": "Average home consumption (kW)",
           "battery_voltage": "Battery nominal voltage (V, for charge current maths)",
           "weekend_avg_consumption_kw": "Weekend average consumption (kW)",
@@ -124,7 +121,6 @@
           "octopus_import_consumption_sensor": "Octopus import 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
           "octopus_export_consumption_sensor": "Octopus export 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
           "tariff_rate_overrides": "Tariff comparison overrides (optional JSON; unit rates p/kWh ex-VAT, standing p/day, e.g. {\"go\": {\"cheap\": 8.5, \"standing\": 54.62}, \"vat_percent\": 0, \"agile_region\": \"C\"})",
-          "octopus_saving_session_entity": "Octopus saving session events entity (optional; saving session or Power Down events, enables auto-detect)",
           "data_report_target": "Daily data report notify target (optional, developer)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
         }

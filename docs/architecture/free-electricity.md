@@ -30,39 +30,17 @@ Sell battery energy just before a known free-electricity period (Flux 2), then c
 - **Manual entry warnings:** the start/end entities are set one at a time, so validating the pair on every set warned against a stale counterpart (four warnings in a row in `#homenotifications`). `planning.manual_free_event_error(changed, ...)` now judges only the field just set: a past start warns; a start at/after a stale end waits silently; an end at/before start warns.
 - **Startup "plan skipped" warning:** the 60 s post-setup one-shot (`_async_initial_refresh`) ran before SolarSynkV3 had polled, so the SOC entity was unavailable and `_async_skip_plan` notified. It now defers (up to 5 x 60 s, `_INITIAL_REFRESH_MAX_RETRIES`) while SOC is unavailable, then falls through to the normal skip/notify.
 
-## Octopus Saving Sessions (09/10/2026, phase 21)
+## Octopus Saving Sessions (09/10/2026, phase 21) — removed
 
-The mirror image of the free event: fill the battery beforehand, then run the house from it and export the rest during the session (Flux 2 to a floor), earning the session reward plus the export price.
-
-**Planner:** `planning.plan_saving_session` (HA-free, `tests/test_saving_session.py`). The session is worth `value = reward + export` p/kWh (known parts summed; `None` if neither is known). Each choice uses `arbitrage_worth_it` (round-trip losses; a missing price is never worth it):
-- **Floor:** `SAVING_SESSION_MIN_FLOOR_SOC` (20%) when the value beats buying the energy back at the day rate before 02:00 (`reward_beats_rebuy`), else the phase 16 evening reserve (`evening_reserve`).
-- **Off-peak boost:** the session-day 01:55 plan targets 100% (`saving_session_boost` on the plan record) when the value beats the off-peak rate.
-- **Day-rate top-up:** Flux 1 to 100% before the session when the value beats the day rate. It ends at the session start, or at 16:00 if the session starts inside the peak, so it never buys at the peak rate; it starts early enough to fill from the SOC at scheduling time at the free-event charge rate.
-
-Prices come from `_tariff_prices` (Octopus rate entities, then `charges`, phase 18); the export price is the peak export band inside 16:00–19:00, else the `charges` export row for the session window.
-
-**Triggers:** manual — `datetime.saving_session_start` / `_end` (same one-field-at-a-time validation as the free event, `manual_free_event_error(..., label="Saving session")`), reward from `saving_session_reward_pence`. Auto — `octopus_saving_session_entity` (the Octopus integration's saving-session or Power Down events entity): `planning.next_joined_saving_session` takes the earliest **joined** event that hasn't started, with `octopoints_per_kwh / 8` as the reward (800 points = £1). Checked on entity changes, every 30 minutes and after each session; a session already seen (same start, any phase) is never re-added, so a cancel sticks, and one that clashes with a pending event waits.
-
-**State and execution:** `OptimizerState.saving_session` (persisted; `scheduled` → `precharging` (optional) → `exporting` → `done`/`cancelled`), timers re-armed on startup by `_arm_saving_session_timers`. Top-up: Flux 1 now→top-up end, 100%. Start: Flux 2 now→session end, `targetSoc` = floor. End (and cancel while holding): `_async_restore_normal_plan`. A free event and a saving session can't overlap (each refuses while the other is pending).
-
-**Holding (do-not-break 7):** `_slots_held_by()` covers both events. A saving session holds the slots only while `precharging`/`exporting` — the 01:55 plan, 30-minute Flux 2 check, 16:00 peak export, SOC listener, charge watchdog and reload one-shot all keep running in the hours/days before it.
-
-**Monitor mode:** sessions are planned, tracked and logged, but `_async_saving_session_push` makes no API writes (notifications say "monitor mode — inverter not changed").
-
-**Dry run:** the test plan button includes the pending session dict in its JSON and shows the boost on the target.
-
-**Logging:** `saving_session` records at `scheduled` / `done` / `cancelled` (tag only, with `soc_at_start` / `soc_at_end` on completion).
-
-**Prerequisite caveat:** the phase file asked for the phase 10 manual free-event live test first. That test is still outstanding; the saving-session path shares its timer/restore machinery, so the first live session should be watched.
+**Removed (16/10/2026).** Saving sessions are no longer handled. The design exported the battery down to a floor for "reward + export" per kWh. But the reward is for importing less than usual, not for exporting, so that just emptied the battery to the grid. The battery's normal behaviour (running the house) already avoids import, so the feature was removed rather than redesigned. Removed: the planner, timers and state fields, the `datetime.saving_session_*`, `button.cancel_saving_session` and `sensor.saving_session` entities, the dashboard card, the `saving_session_reward_pence` / `octopus_saving_session_entity` options, the 01:55 boost, and the peak-export/trim skips. Old registry entries are removed at setup (`__init__._remove_stale_entities`, `const.REMOVED_ENTITY_KEYS`). A stored `saving_session` state key is ignored on restore. Logged `saving_session` records stay in the JSONL history and are not read back.
 
 ## Debug-channel reports and results (16/10/2026)
 
-**Design.** Each lifecycle point of a free event or saving session (`scheduled`, `done`, `cancelled`) now sends one JSON line to `CONF_DATA_REPORT_TARGET` (Slack `#sunsynkdebug`) via `_async_report_event`. A blank target means nothing is sent. The line is `planning.event_report`: the stored dict plus `type` and `phase`, without the raw `meters_*` readings.
+**Design.** Each free event lifecycle point (`scheduled`, `done`, `cancelled`) sends one JSON line to `CONF_DATA_REPORT_TARGET` (Slack `#sunsynkdebug`) via `_async_report_event`. A blank target means nothing is sent. The line is `planning.event_report`: the stored dict plus `type` and `phase`, without the raw `meters_*` readings.
 
-**Results.** The SolarSynk daily meters (`_read_daily_meters`) are stored in the event dict at each transition and differenced at the end with `planning.meter_delta`. A missing reading, or a midnight reset that makes the difference negative, gives `None`.
-- **Saving session (`saving_session_result`):** `actual_export_kwh`, `actual_import_kwh` and `actual_load_kwh` cover session start to end. `soc_drop_pct` and `battery_kwh` come from the SOC change. `export_gbp` and `reward_gbp` are exported kWh × the planned export and reward rates (the model the session was scheduled on); `total_gbp` is their sum.
-- **Free event (`free_event_result`):** `sold_kwh` is grid export from the sell start to the free start. `free_import_kwh` is grid import during the free period, and `free_import_value_gbp` values it at the normal `charges` import price for that window. `soc_at_end` is the SOC when the event ends.
+**Results.** The SolarSynk daily meters (`_read_daily_meters`) are stored in the event dict at the sell start and the free start, then differenced at the end with `planning.meter_delta`. A missing reading, or a midnight reset that makes the difference negative, gives `None`. `free_event_result` gives:
+- `sold_kwh`: grid export from the sell start to the free start.
+- `free_import_kwh`: grid import during the free period, valued in `free_import_value_gbp` at the normal `charges` import price for that window.
+- `soc_at_end`: the SOC when the event ends.
 
-The results go into the stored dict (and so the `done` log record) and into the "finished" notification. The sensor attributes hide the `meters_*` keys. Tests: `test_meter_delta`, `test_saving_session_result`, `test_free_event_result_and_report`.
-
-**Root cause.** On 15/10 a manual saving session ran, but `#sunsynkdebug` had no trace of it, and its outcome was only an SOC pair in the human notification.
+The results go into the stored dict (and so the `done` log record) and into the "finished" notification. The sensor attributes hide the `meters_*` keys. Tests: `test_meter_delta`, `test_free_event_result_and_report`.
