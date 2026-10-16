@@ -245,6 +245,33 @@ def test_free_event_watch_from(planning):
     assert planning.free_event_watch_from(datetime(2026, 10, 18, 11, 0)) == datetime(2026, 10, 18, 7, 0)
 
 
+def test_free_event_sell_status_and_attributes(planning):
+    # The 16/10 event: entered at 40% SOC, so the scheduling estimate said "sell 0 kWh at 11:00".
+    event = {
+        "phase": "scheduled",
+        "free_start": "2026-10-18T11:00:00+01:00",
+        "sell_start": "2026-10-18T11:00:00+01:00",
+        "sell_end": "2026-10-18T11:00:00+01:00",
+        "skip_sell": True,
+        "expected_export_kwh": 0.0,
+        "sell_floor_soc": 40,
+        "meters_at_free_start": {"grid_import": 1.0},
+    }
+    attrs = planning.free_event_attributes(event)
+    assert attrs["sell_status"] == "Watching from Sun 07:00"
+    assert not set(planning.FREE_EVENT_ESTIMATE_KEYS) & attrs.keys()
+    assert "meters_at_free_start" not in attrs and attrs["sell_floor_soc"] == 40
+
+    sold = {**event, "phase": "selling", "sell_start": "2026-10-18T08:40:00+01:00", "skip_sell": False,
+            "expected_export_kwh": 3.5, "soc_at_sell_start": 75.0}
+    assert planning.free_event_sell_status(sold) == "Selling since 08:40"
+    assert planning.free_event_attributes(sold)["expected_export_kwh"] == 3.5
+    assert planning.free_event_sell_status({**sold, "phase": "done"}) == "Sold from 08:40"
+    assert planning.free_event_sell_status({**event, "phase": "charging"}) == "Not needed"
+    assert planning.free_event_sell_status({**event, "phase": "cancelled"}) == "Cancelled"
+    assert planning.free_event_sell_status({}) is None
+
+
 def test_soc_trend_kw(planning):
     from datetime import timedelta
 

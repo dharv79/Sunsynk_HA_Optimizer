@@ -2842,17 +2842,16 @@ class SunsynkOptimizer:
         charge_rate_kw, export_rate_kw = self._event_rates_kw(cfg)
 
         result = plan_free_event(free_start, free_end, soc, battery_capacity_kwh, charge_rate_kw, export_rate_kw)
+        watch_from = free_event_watch_from(free_start)
 
+        # The sell start and kWh are decided live from watch_from, so no estimate is stored.
         event = {
             "source": source,
             "free_start": free_start.isoformat(),
             "free_end": free_end.isoformat(),
-            "sell_start": result.sell_start.isoformat(),
-            "sell_end": result.sell_end.isoformat(),
+            "watch_from": watch_from.isoformat(),
             "sell_floor_soc": result.sell_floor_soc,
-            "expected_export_kwh": result.expected_export_kwh,
             "expected_refill_kwh": result.expected_refill_kwh,
-            "skip_sell": result.skip_sell,
             "charge_rate_kw": charge_rate_kw,
             "export_rate_kw": export_rate_kw,
             "phase": "scheduled",
@@ -2860,15 +2859,13 @@ class SunsynkOptimizer:
         self.coordinator.update_state(free_event=event)
         self._arm_free_event_timers(event)
 
-        skip_note = " SOC is already at/below the floor, so the sell is skipped." if result.skip_sell else ""
         await self.async_notify(
             "🔋 Sunsynk: free event scheduled",
             (
                 f"Free period {free_start.strftime('%Y-%m-%d %H:%M')} → {free_end.strftime('%H:%M')} ({source}). "
-                f"Sell floor {result.sell_floor_soc}%, expected export {result.expected_export_kwh} kWh, "
-                f"expected refill {result.expected_refill_kwh} kWh.{skip_note} "
-                f"From {free_event_watch_from(free_start).strftime('%a %H:%M')} the battery is watched and "
-                "selling starts when its level and charge rate need it."
+                f"Sell floor {result.sell_floor_soc}%, refill up to {result.expected_refill_kwh} kWh. "
+                f"Watching from {watch_from.strftime('%a %H:%M')}: selling starts when the battery's "
+                "level and charge rate need it."
             ),
         )
         await self.data_logger.async_log_free_event({"phase": "scheduled", **event})
@@ -2991,7 +2988,7 @@ class SunsynkOptimizer:
         await self.async_notify(
             "🔋 Sunsynk: free event finished",
             (
-                f"Free period ended. Sold {_kwh(event['sold_kwh'])} (expected {event['expected_export_kwh']} kWh), "
+                f"Free period ended. Sold {_kwh(event['sold_kwh'])} (expected {_kwh(event.get('expected_export_kwh', 0.0))}), "
                 f"imported {_kwh(event['free_import_kwh'])} free (expected refill {event['expected_refill_kwh']} kWh), "
                 f"SOC now {_pct(event['soc_at_end'])}. Normal plan restored."
             ),
