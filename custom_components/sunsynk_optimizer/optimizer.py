@@ -205,6 +205,9 @@ from .planning import (
     peak_cover_plan,
     peak_export_plan,
     peak_export_skip_reason,
+    event_report,
+    free_event_result,
+    saving_session_result,
     wear_cost_pence_per_kwh,
     peak_load_estimate_kwh,
     plan_free_event,
@@ -284,6 +287,14 @@ def _watchdog_rate_kw(plan: dict[str, Any]) -> float | None:
 
 def _pct(value: float | None) -> str:
     return "?" if value is None else f"{round(value)}%"
+
+
+def _kwh(value: float | None) -> str:
+    return "? kWh" if value is None else f"{value} kWh"
+
+
+def _gbp(value: float | None) -> str:
+    return "£?" if value is None else f"£{value:.2f}"
 
 
 _SAVING_SESSION_PENDING = ("scheduled", "precharging", "exporting")
@@ -2780,6 +2791,13 @@ class SunsynkOptimizer:
     # Free electricity event (phase 10 — manual entry)                     #
     # ------------------------------------------------------------------ #
 
+    async def _async_report_event(self, record_type: str, phase: str, event: dict[str, Any]) -> None:
+        """Send a free event / saving session lifecycle line to the debug channel (blank target = off)."""
+        target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if target:
+            title = "Sunsynk Free Event" if record_type == "free_event" else "Sunsynk Saving Session"
+            await self.async_notify(title, json.dumps(event_report(record_type, phase, event)), target=target)
+
     def _free_event_active(self) -> bool:
         """True while a free event holds the Flux slots (scheduled/selling/charging)."""
         return self.coordinator.state.free_event.get("phase") in ("scheduled", "selling", "charging")
@@ -2886,6 +2904,7 @@ class SunsynkOptimizer:
             ),
         )
         await self.data_logger.async_log_free_event({"phase": "scheduled", **event})
+        await self._async_report_event("free_event", "scheduled", event)
         return True
 
     async def _async_free_event_sell_start(self, _now) -> None:
@@ -2905,6 +2924,8 @@ class SunsynkOptimizer:
         }
         api_ok = await self.async_push_flux_override(payload)
         event["phase"] = "selling"
+        event["soc_at_sell_start"] = self._essential_state(self.battery_soc_entity)
+        event["meters_at_sell_start"] = self._read_daily_meters()
         self.coordinator.update_state(free_event=event)
         title = "🔋 Sunsynk: free event sell started" if api_ok else "⚠️ Sunsynk: free event sell NOT applied"
         await self.async_notify(
@@ -2928,6 +2949,8 @@ class SunsynkOptimizer:
         }
         api_ok = await self.async_push_flux_override(payload)
         event["phase"] = "charging"
+        event["soc_at_free_start"] = self._essential_state(self.battery_soc_entity)
+        event["meters_at_free_start"] = self._read_daily_meters()
         self.coordinator.update_state(free_event=event)
         title = "🔋 Sunsynk: free event started" if api_ok else "⚠️ Sunsynk: free event NOT applied"
         await self.async_notify(title, f"Free period active — charging to 100%.{_api_note(api_ok)}")
@@ -2940,18 +2963,27 @@ class SunsynkOptimizer:
         if event.get("phase") not in ("scheduled", "selling", "charging"):
             return
         await self._async_restore_normal_plan()
+        free_start = dt_util.as_local(dt_util.parse_datetime(event["free_start"]))
+        free_end = dt_util.as_local(dt_util.parse_datetime(event["free_end"]))
+        normal_pence = band_price_pence_per_kwh(
+            self.cfg.get(CONF_CHARGES, []), free_start.strftime("%H:%M"), free_end.strftime("%H:%M"), "import"
+        )
+        event.update(free_event_result(
+            event, self._read_daily_meters(), self._essential_state(self.battery_soc_entity), normal_pence
+        ))
         event["phase"] = "done"
         self._clear_free_event_timers()
         self.coordinator.update_state(
             free_event=event, free_event_manual_start=None, free_event_manual_end=None
         )
         await self.data_logger.async_log_free_event({"phase": "done", **event})
+        await self._async_report_event("free_event", "done", event)
         await self.async_notify(
             "🔋 Sunsynk: free event finished",
             (
-                f"Free period ended. Sell floor {event['sell_floor_soc']}%, "
-                f"expected export {event['expected_export_kwh']} kWh, "
-                f"expected refill {event['expected_refill_kwh']} kWh. Normal plan restored."
+                f"Free period ended. Sold {_kwh(event['sold_kwh'])} (expected {event['expected_export_kwh']} kWh), "
+                f"imported {_kwh(event['free_import_kwh'])} free (expected refill {event['expected_refill_kwh']} kWh), "
+                f"SOC now {_pct(event['soc_at_end'])}. Normal plan restored."
             ),
         )
 
@@ -2982,6 +3014,7 @@ class SunsynkOptimizer:
         if was_holding_slots:
             await self._async_restore_normal_plan()
         await self.data_logger.async_log_free_event({"phase": "cancelled", **event})
+        await self._async_report_event("free_event", "cancelled", event)
         await self.async_notify("🔋 Sunsynk: free event cancelled", "The free electricity event was cancelled.")
 
     # ------------------------------------------------------------------ #
@@ -3169,6 +3202,7 @@ class SunsynkOptimizer:
             ).strip(),
         )
         await self.data_logger.async_log_saving_session({"phase": "scheduled", **session})
+        await self._async_report_event("saving_session", "scheduled", session)
         return True
 
     async def _async_saving_session_precharge(self, _now) -> None:
@@ -3209,6 +3243,7 @@ class SunsynkOptimizer:
         )
         session["phase"] = "exporting"
         session["soc_at_start"] = self._essential_state(self.battery_soc_entity)
+        session["meters_at_start"] = self._read_daily_meters()
         self.coordinator.update_state(saving_session=session)
         title = "⚠️ Sunsynk: saving session NOT applied" if api_ok is False else "🔋 Sunsynk: saving session started"
         await self.async_notify(
@@ -3229,17 +3264,22 @@ class SunsynkOptimizer:
             await self._async_restore_normal_plan()
         session["phase"] = "done"
         session["soc_at_end"] = self._essential_state(self.battery_soc_entity)
+        session.update(saving_session_result(
+            session, self._read_daily_meters(), session["soc_at_end"], self._capacity_kwh()
+        ))
         self._clear_saving_session_timers()
         self.coordinator.update_state(
             saving_session=session, saving_session_manual_start=None, saving_session_manual_end=None
         )
         await self.data_logger.async_log_saving_session({"phase": "done", **session})
+        await self._async_report_event("saving_session", "done", session)
         await self.async_notify(
             "🔋 Sunsynk: saving session finished",
             (
                 f"Session ended. SOC {_pct(session.get('soc_at_start'))} → {_pct(session.get('soc_at_end'))} "
-                f"(floor {session['floor_soc']}%, expected export {session['expected_export_kwh']} kWh). "
-                "Normal plan restored."
+                f"(floor {session['floor_soc']}%). Exported {_kwh(session['actual_export_kwh'])} "
+                f"(expected {session['expected_export_kwh']} kWh), imported {_kwh(session['actual_import_kwh'])}; "
+                f"worth about {_gbp(session['total_gbp'])}. Normal plan restored."
             ),
         )
         await self.async_check_octopus_saving_session()
@@ -3258,6 +3298,7 @@ class SunsynkOptimizer:
         if held_slots and self.operation_mode != "monitor":
             await self._async_restore_normal_plan()
         await self.data_logger.async_log_saving_session({"phase": "cancelled", **session})
+        await self._async_report_event("saving_session", "cancelled", session)
         await self.async_notify("🔋 Sunsynk: saving session cancelled", "The saving session was cancelled.")
 
     # ------------------------------------------------------------------ #
