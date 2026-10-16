@@ -54,3 +54,15 @@ Prices come from `_tariff_prices` (Octopus rate entities, then `charges`, phase 
 **Logging:** `saving_session` records at `scheduled` / `done` / `cancelled` (tag only, with `soc_at_start` / `soc_at_end` on completion).
 
 **Prerequisite caveat:** the phase file asked for the phase 10 manual free-event live test first. That test is still outstanding; the saving-session path shares its timer/restore machinery, so the first live session should be watched.
+
+## Debug-channel reports and results (16/10/2026)
+
+**Design.** Each lifecycle point of a free event or saving session (`scheduled`, `done`, `cancelled`) now sends one JSON line to `CONF_DATA_REPORT_TARGET` (Slack `#sunsynkdebug`) via `_async_report_event`. A blank target means nothing is sent. The line is `planning.event_report`: the stored dict plus `type` and `phase`, without the raw `meters_*` readings.
+
+**Results.** The SolarSynk daily meters (`_read_daily_meters`) are stored in the event dict at each transition and differenced at the end with `planning.meter_delta`. A missing reading, or a midnight reset that makes the difference negative, gives `None`.
+- **Saving session (`saving_session_result`):** `actual_export_kwh`, `actual_import_kwh` and `actual_load_kwh` cover session start to end. `soc_drop_pct` and `battery_kwh` come from the SOC change. `export_gbp` and `reward_gbp` are exported kWh × the planned export and reward rates (the model the session was scheduled on); `total_gbp` is their sum.
+- **Free event (`free_event_result`):** `sold_kwh` is grid export from the sell start to the free start. `free_import_kwh` is grid import during the free period, and `free_import_value_gbp` values it at the normal `charges` import price for that window. `soc_at_end` is the SOC when the event ends.
+
+The results go into the stored dict (and so the `done` log record) and into the "finished" notification. The sensor attributes hide the `meters_*` keys. Tests: `test_meter_delta`, `test_saving_session_result`, `test_free_event_result_and_report`.
+
+**Root cause.** On 15/10 a manual saving session ran, but `#sunsynkdebug` had no trace of it, and its outcome was only an SOC pair in the human notification.

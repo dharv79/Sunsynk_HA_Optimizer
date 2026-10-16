@@ -220,10 +220,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
                 return {"raw": action}
         if self._sensor_key == "selected_full_charge_day":
             return {"scores": state.last_full_charge_scores}
-        if self._sensor_key == "free_event":
-            return _as_dict(state.free_event)
-        if self._sensor_key == "saving_session":
-            return _as_dict(state.saving_session)
+        if self._sensor_key in ("free_event", "saving_session"):
+            # Raw meter readings (results bookkeeping) stay out of the attributes.
+            return {k: v for k, v in _as_dict(getattr(state, self._sensor_key)).items() if not k.startswith("meters_")}
         if self._sensor_key == "spare_solar":
             spare = _as_dict(state.spare_solar)
             window = _as_dict(spare.get("window"))

@@ -1717,6 +1717,65 @@ def saving_session_later_today(session: dict[str, Any], now: datetime) -> bool:
     return start is not None and start > now and start.astimezone(now.tzinfo).date() == now.date()
 
 
+def meter_delta(start: dict[str, Any] | None, end: dict[str, Any] | None, key: str) -> float | None:
+    """kWh between two daily-meter readings; None when either is missing or the meter reset (midnight)."""
+    a, b = (start or {}).get(key), (end or {}).get(key)
+    if not _is_number(a) or not _is_number(b) or b < a:
+        return None
+    return round(b - a, 2)
+
+
+def _gbp(kwh: float | None, pence: float | None) -> float | None:
+    return round(kwh * pence / 100, 2) if _is_number(kwh) and _is_number(pence) else None
+
+
+def saving_session_result(session: dict[str, Any], meters_end: dict[str, Any] | None, soc_end: float | None,
+                          capacity_kwh: float) -> dict[str, Any]:
+    """Measured outcome of a finished saving session (phase 21 debug report).
+
+    Export and import come from the SolarSynk daily meters read at the session
+    start and end; £ uses the planned export and reward rates per exported kWh,
+    the same model the session was scheduled on. Missing inputs → None.
+    """
+    meters_start = session.get("meters_at_start")
+    export_kwh = meter_delta(meters_start, meters_end, "grid_export")
+    soc_start = session.get("soc_at_start")
+    soc_drop = round(soc_start - soc_end, 1) if _is_number(soc_start) and _is_number(soc_end) else None
+    export_gbp, reward_gbp = _gbp(export_kwh, session.get("export_pence")), _gbp(export_kwh, session.get("reward_pence"))
+    return {
+        "actual_export_kwh": export_kwh,
+        "actual_import_kwh": meter_delta(meters_start, meters_end, "grid_import"),
+        "actual_load_kwh": meter_delta(meters_start, meters_end, "load"),
+        "soc_drop_pct": soc_drop,
+        "battery_kwh": round(soc_drop / 100 * capacity_kwh, 2) if soc_drop is not None else None,
+        "export_gbp": export_gbp,
+        "reward_gbp": reward_gbp,
+        "total_gbp": round(export_gbp + reward_gbp, 2) if export_gbp is not None and reward_gbp is not None else None,
+    }
+
+
+def free_event_result(event: dict[str, Any], meters_end: dict[str, Any] | None, soc_end: float | None,
+                      import_pence: float | None) -> dict[str, Any]:
+    """Measured outcome of a finished free-electricity event (debug report).
+
+    `sold_kwh` is grid export from the sell start to the free start; `free_import_kwh`
+    is grid import during the free period, valued at what it would normally have
+    cost (`import_pence`). Missing inputs → None.
+    """
+    free_import = meter_delta(event.get("meters_at_free_start"), meters_end, "grid_import")
+    return {
+        "sold_kwh": meter_delta(event.get("meters_at_sell_start"), event.get("meters_at_free_start"), "grid_export"),
+        "free_import_kwh": free_import,
+        "free_import_value_gbp": _gbp(free_import, import_pence),
+        "soc_at_end": soc_end,
+    }
+
+
+def event_report(record_type: str, phase: str, event: dict[str, Any]) -> dict[str, Any]:
+    """Debug-channel JSON line for a free event / saving session lifecycle point (raw meter readings dropped)."""
+    return {"type": record_type, "phase": phase, **{k: v for k, v in event.items() if not k.startswith("meters_")}}
+
+
 # --------------------------------------------------------------------------- #
 # Inverter drift check (phase 31)                                              #
 # --------------------------------------------------------------------------- #
