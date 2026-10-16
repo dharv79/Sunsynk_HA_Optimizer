@@ -1025,6 +1025,12 @@ def latest_complete_cost_day(days: list[dict[str, Any]], since: str) -> dict[str
 # Never sell the battery below this SOC ahead of a free electricity event,
 # even if the refillable-floor maths would allow it.
 FREE_EVENT_MIN_FLOOR_SOC = 40
+# Longest sell window before a free period (16/10/2026: was the free period's
+# own length, which left a full battery unable to take the free import).
+FREE_EVENT_MAX_SELL_HOURS = 4.0
+# The sell window is re-planned on the day from the live SOC and solar
+# forecast, this long before the free start (longest sell window + margin).
+FREE_EVENT_REPLAN_LEAD_HOURS = FREE_EVENT_MAX_SELL_HOURS + 0.5
 
 
 @dataclass
@@ -1046,31 +1052,37 @@ def plan_free_event(
     capacity_kwh: float,
     charge_rate_kw: float,
     export_rate_kw: float,
+    solar_kwh: float = 0.0,
+    max_sell_hours: float = FREE_EVENT_MAX_SELL_HOURS,
 ) -> FreeEventPlan:
     """Plan the sell-before / refill-during shape of a free electricity event.
 
     Sells down to a "refillable floor" — the SOC that free-period charging at
     charge_rate_kw can top back up to 100% — never below FREE_EVENT_MIN_FLOOR_SOC.
-    The sell window ends at free_start and is only as long as needed to reach the
-    floor at export_rate_kw, capped at the free period's own length. If SOC is
-    already at or below the floor, the sell is skipped (skip_sell=True) but the
-    free-period import side still happens elsewhere.
+    ``solar_kwh`` is the net solar expected into the battery before the free
+    start (forecast minus house load); it is sold too, or it would refill the
+    room the free import needs. The sell window ends at free_start and is only
+    as long as needed at export_rate_kw, capped at ``max_sell_hours``. Nothing
+    to sell → skip_sell=True (the free-period import still happens).
     """
     free_hours = (free_end - free_start).total_seconds() / 3600
     refill_kwh = charge_rate_kw * free_hours
     raw_floor = 100 - (refill_kwh / capacity_kwh * 100 if capacity_kwh > 0 else 0)
     sell_floor_soc = int(max(FREE_EVENT_MIN_FLOOR_SOC, min(100, round(raw_floor))))
 
-    skip_sell = soc <= sell_floor_soc
+    solar_kwh = max(0.0, solar_kwh)
+    energy_to_sell_kwh = (soc - sell_floor_soc) / 100 * capacity_kwh + solar_kwh
+    skip_sell = energy_to_sell_kwh <= 0.05
     sell_hours = 0.0
     expected_export_kwh = 0.0
-    if not skip_sell:
-        energy_to_sell_kwh = (soc - sell_floor_soc) / 100 * capacity_kwh
-        if export_rate_kw > 0:
-            sell_hours = min(energy_to_sell_kwh / export_rate_kw, free_hours)
-            expected_export_kwh = round(sell_hours * export_rate_kw, 2)
+    if not skip_sell and export_rate_kw > 0:
+        sell_hours = min(energy_to_sell_kwh / export_rate_kw, max_sell_hours)
+        expected_export_kwh = round(sell_hours * export_rate_kw, 2)
 
-    soc_at_free_start = soc - (expected_export_kwh / capacity_kwh * 100 if capacity_kwh > 0 else 0)
+    if capacity_kwh > 0:
+        soc_at_free_start = min(100.0, max(0.0, soc + (solar_kwh - expected_export_kwh) / capacity_kwh * 100))
+    else:
+        soc_at_free_start = soc
     headroom_kwh = max(0.0, capacity_kwh - soc_at_free_start / 100 * capacity_kwh)
     expected_refill_kwh = round(min(refill_kwh, headroom_kwh), 2)
 
@@ -1084,6 +1096,37 @@ def plan_free_event(
         expected_refill_kwh=expected_refill_kwh,
         skip_sell=skip_sell,
     )
+
+
+def free_event_replan_at(free_start: datetime) -> datetime:
+    """When the sell window is re-planned from the live SOC and solar forecast."""
+    return free_start - timedelta(hours=FREE_EVENT_REPLAN_LEAD_HOURS)
+
+
+def free_event_net_solar_kwh(solar_kwh: float | None, load_kw: float, hours: float) -> float:
+    """Solar expected into the battery before the free start: forecast minus house load, ≥ 0; 0 without a forecast."""
+    if solar_kwh is None or hours <= 0:
+        return 0.0
+    return round(max(0.0, solar_kwh - load_kw * hours), 2)
+
+
+def free_event_target_cap(
+    target_soc: int, event: dict[str, Any] | None, free_start: datetime | None, plan_date: date
+) -> int:
+    """01:55 target on a free-event day: no higher than the sell floor.
+
+    Charging above the floor overnight would only be sold back before the free
+    period at a lower export price. Applies when the event (still scheduled)
+    starts on the plan date before the 16:00 peak; otherwise unchanged.
+    """
+    event = event or {}
+    floor = event.get("sell_floor_soc")
+    if (
+        event.get("phase") != "scheduled" or not _is_number(floor) or free_start is None
+        or free_start.date() != plan_date or free_start.hour * 60 + free_start.minute >= PEAK_START_MINUTES
+    ):
+        return target_soc
+    return min(target_soc, int(floor))
 
 
 def manual_free_event_error(

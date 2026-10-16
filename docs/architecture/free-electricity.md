@@ -17,7 +17,7 @@ Sell battery energy just before a known free-electricity period (Flux 2), then c
 - free start: Flux 1 = now→free_end, `targetSoc` = 100.
 - free end: `_async_restore_normal_plan` re-pushes the latest logged Flux 1 (`last_import_plan.payload.flux_1`) plus the standard 16:00–16:15 Flux 2 slot, then clears the manual entities.
 
-**Guard:** `_free_event_active()` (`phase` in scheduled/selling/charging) pauses the 30-minute Flux 2 check, the SOC-change listener, and the 60 s post-setup reload one-shot — do-not-break rule 7. The 01:55 plan still computes and logs (`held_by_free_event` field on the plan record) so it's ready to push the moment the event ends, but the push itself is skipped while held.
+**Guard** (holding narrowed on 16/10/2026, see below): `_free_event_active()` (`phase` in scheduled/selling/charging) pauses the 30-minute Flux 2 check, the SOC-change listener, and the 60 s post-setup reload one-shot — do-not-break rule 7. The 01:55 plan still computes and logs (`held_by_free_event` field on the plan record) so it's ready to push the moment the event ends, but the push itself is skipped while held.
 
 **Cancel:** the `button.cancel_free_event` entity → `async_cancel_free_event`. Restores the normal plan only if the event had already taken a slot (`selling`/`charging`); a still-`scheduled` cancel has nothing to restore.
 
@@ -44,3 +44,19 @@ Sell battery energy just before a known free-electricity period (Flux 2), then c
 - `soc_at_end`: the SOC when the event ends.
 
 The results go into the stored dict (and so the `done` log record) and into the "finished" notification. The sensor attributes hide the `meters_*` keys. Tests: `test_meter_delta`, `test_free_event_result_and_report`.
+
+## Sell window sized on the day (16/10/2026)
+
+**Root cause.** An event entered on 16/10 for 18/10 11:00–13:00 planned a 10:28 sell start: 0.8 kWh, from the 48% SOC at scheduling time. On the day, the battery would be fuller after the overnight charge and morning solar, so it would start the free period well above the 40% floor and take only part of the 6 kWh it could import free. Holding the slots from `scheduled` also froze the 01:55 plans for the two nights in between.
+
+**Design.**
+- **Re-plan on the day:** `_async_do_free_event_replan` runs at `planning.free_event_replan_at` (free start − `FREE_EVENT_REPLAN_LEAD_HOURS`, 4.5 h). If that is already past at scheduling or restart, it runs at once. It re-runs `plan_free_event` with the live SOC and `solar_kwh` = `free_event_net_solar_kwh(raw forecast to the free start − plan load × hours)` (same-day only, else 0). It then stores `replanned`, `replan_soc` and `replan_net_solar_kwh`, arms the sell start, notifies "free event sell window set", and sends a `replanned` line to the debug channel. With SOC unavailable it keeps the scheduling-time plan. `_arm_free_event_timers` arms the re-plan while `scheduled` and not `replanned`, and the sell start after it.
+- **Solar is sold too:** `plan_free_event` sells `(soc − floor) × capacity + solar_kwh`, so solar can trigger a sell even when SOC is at the floor. The sell window is capped at `FREE_EVENT_MAX_SELL_HOURS` (4 h) instead of the free period's length, which re-opens the phase 10 "may be revisited" decision.
+- **Slots held from the sell start:** `_slots_held_by()` covers `selling`/`charging` only (the phase 10 decision: "holds both slots from sell start to free end"). While only `scheduled`, the 01:55 plan, Flux 2 checks and trims run normally. Scheduling still refuses a second event (`_free_event_active`).
+- **01:55 plan on the day:** `planning.free_event_target_cap` caps the target at the sell floor when a scheduled event starts that day before 16:00. Anything above the floor would only be sold back at a lower export price. The plan record has `free_event_capped`.
+
+**Verification.** `tests/test_planning.py`:
+- `test_free_event_sells_the_solar_expected_before_free_start` (the 18/10 numbers);
+- `test_free_event_sell_window_not_capped_at_free_period_length` and `test_free_event_sell_window_capped_at_max_sell_hours`;
+- `test_free_event_solar_alone_triggers_a_sell` and `test_free_event_replan_at_and_net_solar`;
+- `test_free_event_target_cap`.
