@@ -17,6 +17,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .planning import bill_attributes
 
 
 async def async_setup_entry(
@@ -56,8 +57,8 @@ class BilledAmountEntity(CoordinatorEntity, NumberEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        state = self.coordinator.state.bill_reconciliation or {}
-        return {"month": state.get("month"), **(state.get("result") or {})}
+        # Fixed key set so the dashboard's attribute rows exist before the first bill (Spook).
+        return bill_attributes(self.coordinator.state.bill_reconciliation)
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.optimizer.async_set_billed_amount(round(float(value), 2))

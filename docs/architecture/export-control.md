@@ -68,6 +68,8 @@ The free-event, monitor-mode and export-disable gates are early returns in the H
 
 **Persisted decision (15/10/2026).** The 16:00 record is stored in `OptimizerState.peak_export` (via `update_state`) instead of an instance attribute. Root cause: an HA restart between 16:00 and 22:00 (e.g. an update) dropped the day's `peak_export` line from the 22:00 debug bundle and released a live export's hold on Flux 2. `planning.record_for_date` returns it only for today. Test: `test_record_for_date`.
 
+**Skip reasons logged (16/10/2026).** Every early exit from the 16:00 run now writes a `peak_export` record whose `decision` is `skipped_slots_held`, `skipped_saving_session` or `skipped_no_soc` (`planning.peak_export_skip_reason`). Root cause: on 15/10 a manual saving session at 18:00 made the run skip by design, but it wrote nothing, so the 22:00 bundle had no line and looked like a failure. Pairing only reads `decision == "export"`, and the Flux 2 hold needs `api_ok`, so skip records change no behaviour. Test: `test_peak_export_skip_reason`.
+
 ## Tariff rates from the Octopus integration (09/10/2026, phase 18)
 
 **Design.** Two optional config fields, `octopus_import_rates_entity` and `octopus_export_rates_entity`, take either of these Octopus Energy integration entities:
