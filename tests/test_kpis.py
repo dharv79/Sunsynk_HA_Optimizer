@@ -616,6 +616,8 @@ def test_meter_delta(planning):
 
 def test_free_event_result_and_report(planning):
     event = {
+        "soc_at_sell_start": 80.0,
+        "sell_start": "2026-10-20T09:30:00+01:00",
         "meters_at_sell_start": {"grid_export": 1.0, "grid_import": 3.0},
         "meters_at_free_start": {"grid_export": 3.5, "grid_import": 3.2},
         "free_start": "2026-10-20T12:00:00+01:00",
@@ -624,7 +626,22 @@ def test_free_event_result_and_report(planning):
     assert r == {"sold_kwh": 2.5, "free_import_kwh": 5.0, "free_import_value_gbp": 1.39, "soc_at_end": 100.0}
     line = planning.event_report("free_event", "done", {**event, **r})
     assert line["type"] == "free_event" and line["phase"] == "done" and line["sold_kwh"] == 2.5
+    assert line["sell_start"] == event["sell_start"]
     assert not any(k.startswith("meters_") for k in line)
+
+
+def test_free_event_result_no_sell(planning):
+    # 18/10: SOC stayed below the 40% floor, so no sell ran; it reported sold_kwh null
+    # and the stale scheduling estimate (sell_start 11:00, skip_sell true).
+    event = {
+        "sell_start": "2026-10-18T11:00:00+01:00", "skip_sell": True, "expected_export_kwh": 0.0,
+        "meters_at_free_start": {"grid_export": 0.2, "grid_import": 4.0},
+        "free_start": "2026-10-18T11:00:00+01:00",
+    }
+    r = planning.free_event_result(event, {"grid_import": 12.1}, 100.0, 27.77)
+    assert r["sold_kwh"] == 0.0 and r["free_import_kwh"] == 8.1 and r["free_import_value_gbp"] == 2.25
+    line = planning.event_report("free_event", "done", {**event, **r})
+    assert not set(planning.FREE_EVENT_ESTIMATE_KEYS) & line.keys()
 
 
 def test_bill_attributes_always_has_every_key(planning):

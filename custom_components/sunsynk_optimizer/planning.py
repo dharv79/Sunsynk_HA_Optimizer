@@ -1735,11 +1735,15 @@ def free_event_result(event: dict[str, Any], meters_end: dict[str, Any] | None, 
 
     `sold_kwh` is grid export from the sell start to the free start; `free_import_kwh`
     is grid import during the free period, valued at what it would normally have
-    cost (`import_pence`). Missing inputs → None.
+    cost (`import_pence`). No sell ran → `sold_kwh` 0.0. Missing inputs → None.
     """
     free_import = meter_delta(event.get("meters_at_free_start"), meters_end, "grid_import")
+    sold = (
+        meter_delta(event.get("meters_at_sell_start"), event.get("meters_at_free_start"), "grid_export")
+        if free_event_sold(event) else 0.0
+    )
     return {
-        "sold_kwh": meter_delta(event.get("meters_at_sell_start"), event.get("meters_at_free_start"), "grid_export"),
+        "sold_kwh": sold,
         "free_import_kwh": free_import,
         "free_import_value_gbp": _gbp(free_import, import_pence),
         "soc_at_end": soc_end,
@@ -1747,8 +1751,13 @@ def free_event_result(event: dict[str, Any], meters_end: dict[str, Any] | None, 
 
 
 def event_report(record_type: str, phase: str, event: dict[str, Any]) -> dict[str, Any]:
-    """Debug-channel JSON line for a free event lifecycle point (raw meter readings dropped)."""
-    return {"type": record_type, "phase": phase, **{k: v for k, v in event.items() if not k.startswith("meters_")}}
+    """Debug-channel JSON line for a free event lifecycle point (raw meter readings dropped,
+    and the scheduling-time sell estimates unless a sell ran)."""
+    hidden = () if free_event_sold(event) else FREE_EVENT_ESTIMATE_KEYS
+    return {
+        "type": record_type, "phase": phase,
+        **{k: v for k, v in event.items() if not k.startswith("meters_") and k not in hidden},
+    }
 
 
 # --------------------------------------------------------------------------- #
