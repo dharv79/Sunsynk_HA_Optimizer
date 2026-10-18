@@ -83,3 +83,9 @@ The results go into the stored dict (and so the `done` log record) and into the 
 **Design (1.0.12b20).** `free_event_target_cap(..., load_kw, capacity_kwh)` caps at the floor plus the house load from `CHEAP_WINDOW_END` (05:00) to the free start: `floor + ceil(load_kw × hours / capacity × 100)`, at most 100 and never above the normal target. The 01:55 plan passes `avg_consumption_kw` (the regime/learned load) and the battery capacity. Morning solar gets no credit: an overshoot is sold by the live watch at the export price, while a shortfall costs the day rate. Without a load figure the cap stays the bare floor. For 18/10: 40 + 0.45 kW × 6 h / 10 kWh = 67%.
 
 **Verification.** `tests/test_planning.py::test_free_event_target_cap_covers_load_until_free_start` (the 18/10 case).
+
+## First live event results (18/10/2026)
+
+**Result.** Free 11:00–13:00, floor 40%. The battery reached the free start at 39% (no sell needed) and was at 100% by 13:00. Free import was 8.1 kWh (about 6.1 kWh into the battery, the rest house load), worth £2.25 at the day rate.
+
+**Fix (1.0.12b21).** The `done` line reported `sold_kwh: null` when no sell ran, and kept the stale scheduling estimate (`sell_start` 11:00, `skip_sell` true) of an event stored before 1.0.12b19. `free_event_result` now gives `sold_kwh` 0.0 when no sell ran (`free_event_sold`); null stays for a missing meter reading. `event_report` hides `FREE_EVENT_ESTIMATE_KEYS` unless a sell ran, as the sensor already did. Test: `tests/test_kpis.py::test_free_event_result_no_sell`.
