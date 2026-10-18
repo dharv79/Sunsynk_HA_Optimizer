@@ -312,6 +312,22 @@ def test_free_event_target_cap(planning):
     assert planning.free_event_target_cap(60, {}, None, day) == 60
 
 
+def test_free_event_target_cap_covers_load_until_free_start(planning):
+    # 18/10: capped at the bare 40% floor, the battery drained to its 25% minimum by
+    # 06:50 and the house imported at the day rate until the 11:00 free start.
+    from datetime import date
+
+    event = {"phase": "scheduled", "sell_floor_soc": 40}
+    start = datetime(2026, 10, 18, 11, 0)
+    day = date(2026, 10, 18)
+    # 05:00 -> 11:00 = 6h at 0.45kW = 2.7kWh of a 10kWh battery -> +27%.
+    assert planning.free_event_target_cap(100, event, start, day, 0.45, 10.0) == 67
+    assert planning.free_event_target_cap(60, event, start, day, 0.45, 10.0) == 60  # normal plan already lower
+    assert planning.free_event_target_cap(100, event, datetime(2026, 10, 18, 4, 0), day, 0.45, 10.0) == 40
+    assert planning.free_event_target_cap(100, event, datetime(2026, 10, 18, 15, 0), day, 1.0, 10.0) == 100
+    assert planning.free_event_target_cap(100, event, start, day, None, 10.0) == 40  # no load: floor only
+
+
 def test_free_event_skip_sell_when_already_at_or_below_floor(planning):
     plan = _free(planning, soc=55.0)  # below the 60% floor
     assert plan.skip_sell is True

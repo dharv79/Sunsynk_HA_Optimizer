@@ -56,7 +56,7 @@ The results go into the stored dict (and so the `done` log record) and into the 
   - On `sell_now` it stores `sell_start` (now), `expected_export_kwh` and `sell_trigger` (the decision inputs), then runs the existing sell start: Flux 2 now→free start at the floor. It notifies and sends a `selling` debug line.
 - **Estimate at scheduling:** `plan_free_event` still gives the floor and refill kWh. The sell window is capped at 4 h instead of the free period's length, which re-opens the phase 10 "may be revisited" decision. Its sell start and export kWh are no longer stored (see "Sell status on the dashboard" below).
 - **Slots held from the sell start:** `_slots_held_by()` covers `selling`/`charging` only (the phase 10 decision: "holds both slots from sell start to free end"). While only `scheduled`, the 01:55 plan, Flux 2 checks and trims run normally. Scheduling still refuses a second event (`_free_event_active`).
-- **01:55 plan on the day:** `planning.free_event_target_cap` caps the target at the sell floor when a scheduled event starts that day before 16:00. Anything above the floor would only be sold back at a lower export price. The plan record has `free_event_capped`.
+- **01:55 plan on the day:** `planning.free_event_target_cap` caps the target when a scheduled event starts that day before 16:00. Anything above the cap would only be sold back at a lower export price. The plan record has `free_event_capped`. The cap was the bare sell floor until 1.0.12b20 (see "Overnight cap covers the morning load" below).
 
 **Verification.** `tests/test_planning.py`:
 - `test_soc_trend_kw`;
@@ -75,3 +75,11 @@ The results go into the stored dict (and so the `done` log record) and into the 
 - The "finished" notification reads `expected_export_kwh` with a 0 default, since an event that never sold has none.
 
 **Verification.** `tests/test_planning.py::test_free_event_sell_status_and_attributes` (the 16/10 event).
+
+## Overnight cap covers the morning load (18/10/2026)
+
+**Root cause.** On 18/10 (free 11:00–13:00, floor 40%) the 01:55 plan was capped at the bare 40% floor. The battery charged 25→40% by about 02:40, ran the house at about 0.4 kW, and hit its 25% minimum at about 06:50. The house then imported at the day rate until the free start. The floor is the level wanted *at the free start*, not at the end of the cheap window.
+
+**Design (1.0.12b20).** `free_event_target_cap(..., load_kw, capacity_kwh)` caps at the floor plus the house load from `CHEAP_WINDOW_END` (05:00) to the free start: `floor + ceil(load_kw × hours / capacity × 100)`, at most 100 and never above the normal target. The 01:55 plan passes `avg_consumption_kw` (the regime/learned load) and the battery capacity. Morning solar gets no credit: an overshoot is sold by the live watch at the export price, while a shortfall costs the day rate. Without a load figure the cap stays the bare floor. For 18/10: 40 + 0.45 kW × 6 h / 10 kWh = 67%.
+
+**Verification.** `tests/test_planning.py::test_free_event_target_cap_covers_load_until_free_start` (the 18/10 case).
