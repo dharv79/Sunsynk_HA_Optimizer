@@ -211,6 +211,7 @@ from .planning import (
     free_event_sell_decision,
     free_event_watch_from,
     soc_trend_kw,
+    free_event_kpi_credit,
     free_event_target_cap,
     resolve_load_kw,
     resolve_used_charge_rate,
@@ -1992,11 +1993,15 @@ class SunsynkOptimizer:
         if late_load_kw is None:
             late_load_kw = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
         prices, sources = self._tariff_prices(dt_util.parse_date(date))
+        free_credit = free_event_kpi_credit(
+            self.coordinator.state.free_event, dt_util.parse_date(date), self._capacity_kwh(cfg)
+        )
         kpis = day_kpis(
             snapshots,
             prices,
             self._capacity_kwh(cfg),
             late_load_kw,
+            free_credit,
         )
         record = {
             "date": date,
@@ -2008,7 +2013,7 @@ class SunsynkOptimizer:
             # Phase 37: what the day cost with vs without the battery.
             **no_battery_baseline(
                 snapshots, prices, flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"),
-                self._capacity_kwh(cfg), self._wear_pence(),
+                self._capacity_kwh(cfg), self._wear_pence(), free_credit,
             ),
         }
         await self.data_logger.async_log_day_kpis(**record)

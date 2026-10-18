@@ -602,11 +602,20 @@ def _mul(*values: float | None) -> float | None:
     return math.prod(values)
 
 
+def _credit(free_credit: dict[str, tuple[float, float]] | None, segment: str, index: int = 0) -> float:
+    return (free_credit or {}).get(segment, (0.0, 0.0))[index]
+
+
+def _less(value: float | None, credit: float) -> float | None:
+    return None if value is None else max(0.0, value - credit)
+
+
 def day_kpis(
     snapshots: dict[str, dict[str, Any]],
     prices_pence: dict[str, float | None],
     battery_capacity_kwh: float,
     late_load_kw: float | None,
+    free_credit: dict[str, tuple[float, float]] | None = None,
 ) -> dict[str, float | None]:
     """Efficiency KPIs for 00:00-22:00 from the day's meter snapshots.
 
@@ -622,13 +631,15 @@ def day_kpis(
     - Unused charge = overnight SOC added that was still spare at 16:00 above
       the evening need (reserve + 16:00-22:00 load in hindsight + 22:00-02:00
       at `late_load_kw`), capped at what the night added.
+    - `free_credit` (free_event_kpi_credit): free-event import per segment,
+      left out of the import bands and avoidable £ (it cost nothing).
     """
     imp = "grid_import_kwh"
-    offpeak = _snap_delta(snapshots, "02:00", "05:00", imp)
-    peak = _snap_delta(snapshots, "16:00", "19:00", imp)
-    morning = _snap_delta(snapshots, "05:00", "16:00", imp)
-    evening = _snap_delta(snapshots, "19:00", "22:00", imp)
-    parts = (_snap(snapshots, "02:00", imp), morning, evening)
+    offpeak = _less(_snap_delta(snapshots, "02:00", "05:00", imp), _credit(free_credit, "02:00"))
+    peak = _less(_snap_delta(snapshots, "16:00", "19:00", imp), _credit(free_credit, "16:00"))
+    morning = _less(_snap_delta(snapshots, "05:00", "16:00", imp), _credit(free_credit, "05:00"))
+    evening = _less(_snap_delta(snapshots, "19:00", "22:00", imp), _credit(free_credit, "19:00"))
+    parts = (_less(_snap(snapshots, "02:00", imp), _credit(free_credit, "00:00")), morning, evening)
     day = None if any(p is None for p in parts) else sum(parts)
 
     load22, imp22 = _snap(snapshots, "22:00", "load_kwh"), _snap(snapshots, "22:00", imp)
@@ -665,6 +676,7 @@ def day_kpis(
         "export_peak_kwh": round_or_none(export_peak),
         "export_peak_gbp": round_or_none(None if export_peak_pence is None else export_peak_pence / 100),
         "unused_charge_kwh": round_or_none(unused),
+        "free_import_excluded_kwh": round(sum(c[0] for c in (free_credit or {}).values()), 2),
     }
 
 
@@ -2026,8 +2038,12 @@ def no_battery_baseline(
     export_bands: list[tuple[int, int, float]],
     battery_capacity_kwh: float,
     wear_pence: float | None = None,
+    free_credit: dict[str, tuple[float, float]] | None = None,
 ) -> dict[str, float | None]:
     """What 00:00-22:00 cost with the battery vs without it, from the meter snapshots.
+
+    A free event (`free_credit`) costs nothing: its import is left out of the
+    actual cost, and its house load out of the no-battery cost.
 
     Per Flux segment: solar = load − import + export + battery gain (night
     segments have none). Without a battery the house uses that solar
@@ -2061,8 +2077,8 @@ def no_battery_baseline(
         imp_price = prices_pence.get(band)
         exp_price = price_at(export_bands, hhmm_to_minutes(start))
         parts = (
-            _pence(load - direct, imp_price), _pence(solar - direct, exp_price),
-            _pence(imp, imp_price), _pence(exp, exp_price),
+            _pence(load - direct - _credit(free_credit, start, 1), imp_price), _pence(solar - direct, exp_price),
+            _pence(imp - _credit(free_credit, start), imp_price), _pence(exp, exp_price),
         )
         if any(p is None for p in parts):
             return empty
@@ -2075,6 +2091,37 @@ def no_battery_baseline(
         "battery_saving_gbp": round((baseline - actual - wear) / 100, 2),
         "battery_cycled_kwh": round(cycled, 2),
     }
+
+
+def free_event_kpi_credit(
+    event: dict[str, Any] | None, day: date, capacity_kwh: float
+) -> dict[str, tuple[float, float]] | None:
+    """A finished free event's import and house load on `day`, per KPI segment start.
+
+    Split by time overlap with the 00:00-22:00 segments. House load = import −
+    battery gain over the free period (0 when the SOCs are missing). None when
+    there's no finished event with a measured import that day.
+    """
+    event = event or {}
+    free_import = event.get("free_import_kwh")
+    if event.get("phase") != "done" or not _is_number(free_import) or free_import <= 0:
+        return None
+    start = datetime.fromisoformat(event["free_start"])
+    end = datetime.fromisoformat(event["free_end"])
+    if start.date() != day or end <= start:
+        return None
+    soc_a, soc_b = event.get("soc_at_free_start"), event.get("soc_at_end")
+    gain = (soc_b - soc_a) / 100 * capacity_kwh if _is_number(soc_a) and _is_number(soc_b) else free_import
+    load = max(0.0, free_import - gain)
+    start_min = start.hour * 60 + start.minute
+    end_min = start_min + (end - start).total_seconds() / 60
+    credit = {}
+    for seg_start, seg_end, _band, _sunny in _BASELINE_SEGMENTS:
+        overlap = min(end_min, hhmm_to_minutes(seg_end)) - max(start_min, hhmm_to_minutes(seg_start))
+        if overlap > 0:
+            share = overlap / (end_min - start_min)
+            credit[seg_start] = (free_import * share, load * share)
+    return credit or None
 
 
 def battery_value_summary(days: list[dict[str, Any]]) -> dict[str, Any]:
