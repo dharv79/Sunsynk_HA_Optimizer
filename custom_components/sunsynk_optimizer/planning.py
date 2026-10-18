@@ -1187,13 +1187,21 @@ def free_event_sell_decision(
 
 
 def free_event_target_cap(
-    target_soc: int, event: dict[str, Any] | None, free_start: datetime | None, plan_date: date
+    target_soc: int,
+    event: dict[str, Any] | None,
+    free_start: datetime | None,
+    plan_date: date,
+    load_kw: float | None = None,
+    capacity_kwh: float | None = None,
 ) -> int:
-    """01:55 target on a free-event day: no higher than the sell floor.
+    """01:55 target on a free-event day: the sell floor plus the house load until the free start.
 
-    Charging above the floor overnight would only be sold back before the free
-    period at a lower export price. Applies when the event (still scheduled)
-    starts on the plan date before the 16:00 peak; otherwise unchanged.
+    The floor is where the battery should be at the free start, not at 05:00:
+    the house runs on it from the end of the cheap window until then, so that
+    load is added (no solar credit; any surplus is sold by the live watch).
+    Charging further would only be sold back at a lower export price. Applies
+    when the event (still scheduled) starts on the plan date before the 16:00
+    peak; otherwise unchanged.
     """
     event = event or {}
     floor = event.get("sell_floor_soc")
@@ -1202,7 +1210,13 @@ def free_event_target_cap(
         or free_start.date() != plan_date or free_start.hour * 60 + free_start.minute >= PEAK_START_MINUTES
     ):
         return target_soc
-    return min(target_soc, int(floor))
+    cap = int(floor)
+    if _is_number(load_kw) and _is_number(capacity_kwh) and capacity_kwh > 0:
+        hh, mm = CHEAP_WINDOW_END.split(":")
+        cheap_end = int(hh) * 60 + int(mm)
+        bridge_hours = max(0, free_start.hour * 60 + free_start.minute - cheap_end) / 60
+        cap += math.ceil(max(0.0, load_kw) * bridge_hours / capacity_kwh * 100)
+    return min(target_soc, min(100, cap))
 
 
 def manual_free_event_error(

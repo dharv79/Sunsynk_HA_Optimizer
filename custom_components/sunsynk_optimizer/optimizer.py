@@ -999,12 +999,13 @@ class SunsynkOptimizer:
             )
             nudge = feedback_adj if feedback_live else soc_adjustment
             target_soc = apply_soc_adjustments(target_soc, overnight_drain_adjustment, nudge)
-        # A free event later today sells down to its floor first: don't buy above it overnight.
+        # A free event later today should start at its floor: buy only that plus the load until then.
         uncapped_target_soc = target_soc
         free_event = self.coordinator.state.free_event
         free_start_dt = dt_util.parse_datetime(free_event.get("free_start") or "")
         target_soc = free_event_target_cap(
-            target_soc, free_event, dt_util.as_local(free_start_dt) if free_start_dt else None, now.date()
+            target_soc, free_event, dt_util.as_local(free_start_dt) if free_start_dt else None, now.date(),
+            avg_consumption_kw, battery_capacity_kwh,
         )
 
         computed_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
