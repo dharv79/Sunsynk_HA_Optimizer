@@ -689,3 +689,47 @@ def test_logged_day_cost(planning):
     assert planning.logged_day_cost_gbp(day, include_gas=False) == 1.5
     assert planning.logged_day_cost_gbp({**day, "actual_gas_cost_gbp": None}, include_gas=True) is None
     assert planning.logged_day_cost_gbp({"actual_import_cost_gbp": 2.0}, include_gas=False) is None
+
+
+# ---- Free event import left out of the day KPIs (18/10/2026) ----
+
+_FREE_EVENT_18_OCT = {
+    "phase": "done", "free_start": "2026-10-18T11:00:00+01:00", "free_end": "2026-10-18T13:00:00+01:00",
+    "free_import_kwh": 8.1, "soc_at_free_start": 39.0, "soc_at_end": 100.0,
+}
+
+
+def test_free_event_kpi_credit(planning):
+    from datetime import date
+
+    # 8.1 kWh free: 6.1 into the battery (39→100% of 10 kWh), 2.0 house load, all in 05:00-16:00.
+    credit = planning.free_event_kpi_credit(_FREE_EVENT_18_OCT, date(2026, 10, 18), 10.0)
+    assert list(credit) == ["05:00"]
+    assert credit["05:00"] == pytest.approx((8.1, 2.0))
+    # Spanning the 16:00 edge: split by time.
+    span = {**_FREE_EVENT_18_OCT, "free_start": "2026-10-18T15:00:00+01:00", "free_end": "2026-10-18T17:00:00+01:00"}
+    split = planning.free_event_kpi_credit(span, date(2026, 10, 18), 10.0)
+    assert split["05:00"] == pytest.approx((4.05, 1.0)) and split["16:00"] == pytest.approx((4.05, 1.0))
+    assert planning.free_event_kpi_credit(_FREE_EVENT_18_OCT, date(2026, 10, 19), 10.0) is None
+    assert planning.free_event_kpi_credit({**_FREE_EVENT_18_OCT, "phase": "charging"}, date(2026, 10, 18), 10.0) is None
+    assert planning.free_event_kpi_credit(None, date(2026, 10, 18), 10.0) is None
+
+
+def test_day_kpis_leave_out_free_import():
+    k = planning.day_kpis(_snaps(), PRICES, 10.0, 0.5, {"05:00": (0.8, 0.2)})
+    assert k["grid_import_morning_kwh"] == 0.2
+    assert k["grid_import_day_kwh"] == 1.0  # 0.5 + 0.2 + 0.3
+    assert k["avoidable_import_gbp"] == round((1.0 * 27.77 + 0.2 * 38.88) / 100, 2)
+    assert k["free_import_excluded_kwh"] == 0.8
+    assert planning.day_kpis(_snaps(), PRICES, 10.0, 0.5, {"05:00": (5.0, 0.0)})["grid_import_morning_kwh"] == 0.0
+    assert planning.day_kpis(_snaps(), PRICES, 10.0, 0.5)["free_import_excluded_kwh"] == 0.0
+
+
+def test_no_battery_baseline_free_import_costs_nothing(planning):
+    # 4 kWh free import in 05:00-16:00, 1 kWh of it house load.
+    snaps = _base_snaps(**{t: {"grid_import_kwh": 10.0} for t in ("16h00", "19h00", "22h00")})
+    plain = planning.no_battery_baseline(snaps, _BASE_PRICES, _BASE_EXPORT, 10.0)
+    free = planning.no_battery_baseline(snaps, _BASE_PRICES, _BASE_EXPORT, 10.0, free_credit={"05:00": (4.0, 1.0)})
+    assert free["with_battery_gbp"] == pytest.approx(plain["with_battery_gbp"] - 1.20)  # 4 kWh × 30p
+    assert free["no_battery_gbp"] == pytest.approx(plain["no_battery_gbp"] - 0.30)  # 1 kWh × 30p
+    assert free["battery_saving_gbp"] > plain["battery_saving_gbp"]

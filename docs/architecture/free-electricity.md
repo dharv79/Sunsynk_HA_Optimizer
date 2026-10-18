@@ -89,3 +89,15 @@ The results go into the stored dict (and so the `done` log record) and into the 
 **Result.** Free 11:00–13:00, floor 40%. The battery reached the free start at 39% (no sell needed) and was at 100% by 13:00. Free import was 8.1 kWh (about 6.1 kWh into the battery, the rest house load), worth £2.25 at the day rate.
 
 **Fix (1.0.12b21).** The `done` line reported `sold_kwh: null` when no sell ran, and kept the stale scheduling estimate (`sell_start` 11:00, `skip_sell` true) of an event stored before 1.0.12b19. `free_event_result` now gives `sold_kwh` 0.0 when no sell ran (`free_event_sold`); null stays for a missing meter reading. `event_report` hides `FREE_EVENT_ESTIMATE_KEYS` unless a sell ran, as the sensor already did. Test: `tests/test_kpis.py::test_free_event_result_no_sell`.
+
+## Free import left out of the day KPIs (18/10/2026)
+
+**Root cause.** The 18/10 `day_kpis` priced the 8.1 kWh free import at the day rate: morning import 10.7 kWh, avoidable £3.18, battery saving −£0.59. That import cost nothing. The morning figure also feeds the import-feedback nudge (phase 15), where it would read as an overnight shortfall.
+
+**Design (1.0.12b22).** `planning.free_event_kpi_credit(event, day, capacity)` takes a finished (`done`) event on the KPI day and splits its `free_import_kwh` across the KPI segments by time overlap. It also splits the house load: import minus the battery gain from `soc_at_free_start` to `soc_at_end`. The 22:00 capture passes this to:
+- `day_kpis`, which takes the import out of its band (and so out of the day, morning and avoidable £ figures) and logs `free_import_excluded_kwh`;
+- `no_battery_baseline`, which leaves the import out of the actual cost and the free house load out of the no-battery cost.
+
+Records already logged (18/10) stay as written, because they dedup at write. The real bill comes from the Octopus `daily_cost` and was never affected.
+
+**Verification.** `tests/test_kpis.py`: `test_free_event_kpi_credit`, `test_day_kpis_leave_out_free_import`, `test_no_battery_baseline_free_import_costs_nothing`.
