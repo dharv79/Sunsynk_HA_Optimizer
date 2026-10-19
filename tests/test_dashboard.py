@@ -109,3 +109,22 @@ def test_dashboard_surfaces_bill_check_and_capacity(dashboard):
     blob = json.dumps(dashboard)
     for entity in ("number.billed_last_month", "sensor.battery_capacity_estimate", "sensor.cost_of_1_kwh_now"):
         assert entity in blob, f"{entity} missing from dashboard"
+
+
+def test_free_event_card_reads_only_always_present_attributes(dashboard):
+    # Spook flags a dashboard attribute the entity doesn't have (19/10: expected_export_kwh).
+    planning = conftest._planning
+    used = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("entity") == "sensor.free_event" and node.get("attribute"):
+                used.add(node["attribute"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(dashboard)
+    assert used and used <= set(planning.FREE_EVENT_ATTRIBUTE_KEYS)

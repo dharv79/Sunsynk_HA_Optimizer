@@ -259,8 +259,11 @@ def test_free_event_sell_status_and_attributes(planning):
     }
     attrs = planning.free_event_attributes(event)
     assert attrs["sell_status"] == "Watching from Sun 07:00"
-    assert not set(planning.FREE_EVENT_ESTIMATE_KEYS) & attrs.keys()
+    assert not {"sell_start", "sell_end", "skip_sell"} & attrs.keys()
+    assert attrs["expected_export_kwh"] is None  # kept as a key for the dashboard (Spook)
     assert "meters_at_free_start" not in attrs and attrs["sell_floor_soc"] == 40
+    # No event at all: every dashboard attribute is still present.
+    assert set(planning.FREE_EVENT_ATTRIBUTE_KEYS) <= planning.free_event_attributes({}).keys()
 
     sold = {**event, "phase": "selling", "sell_start": "2026-10-18T08:40:00+01:00", "skip_sell": False,
             "expected_export_kwh": 3.5, "soc_at_sell_start": 75.0}
