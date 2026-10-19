@@ -101,3 +101,11 @@ The results go into the stored dict (and so the `done` log record) and into the 
 Records already logged (18/10) stay as written, because they dedup at write. The real bill comes from the Octopus `daily_cost` and was never affected.
 
 **Verification.** `tests/test_kpis.py`: `test_free_event_kpi_credit`, `test_day_kpis_leave_out_free_import`, `test_no_battery_baseline_free_import_costs_nothing`.
+
+## Dashboard attributes always present (19/10/2026)
+
+**Root cause.** From 1.0.12b19 `expected_export_kwh` was hidden until a sell ran. Once the recorder no longer held it, Spook flagged it as an unknown attribute used by the dashboard (the same class as the 1.0.12b14 bill-attribute fix).
+
+**Design (1.0.12b23).** `planning.FREE_EVENT_ATTRIBUTE_KEYS` lists the attributes the dashboard reads. `free_event_attributes` always includes them, as None when unknown (and with no event at all). The other estimate keys (`sell_start`, `sell_end`, `skip_sell`) stay hidden until a sell runs.
+
+**Verification.** `tests/test_dashboard.py::test_free_event_card_reads_only_always_present_attributes` checks that every `sensor.free_event` attribute on the dashboard is in the always-present list; `test_free_event_sell_status_and_attributes` covers the None defaults.

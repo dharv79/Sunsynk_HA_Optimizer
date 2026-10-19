@@ -1142,10 +1142,18 @@ def free_event_sell_status(event: dict) -> str | None:
     return f"Selling since {sell_start:%H:%M}" if phase == "selling" else f"Sold from {sell_start:%H:%M}"
 
 
+# Attributes the dashboard reads: always present (None when unknown) so Spook
+# never flags them as unknown.
+FREE_EVENT_ATTRIBUTE_KEYS = (
+    "free_start", "free_end", "sell_status", "sell_floor_soc", "expected_export_kwh", "expected_refill_kwh",
+)
+
+
 def free_event_attributes(event: dict) -> dict:
     """Sensor attributes: no raw meters, no sell estimates until a sell has run, plus ``sell_status``."""
     hidden = () if free_event_sold(event) else FREE_EVENT_ESTIMATE_KEYS
-    attrs = {k: v for k, v in event.items() if not k.startswith("meters_") and k not in hidden}
+    attrs = dict.fromkeys(FREE_EVENT_ATTRIBUTE_KEYS)
+    attrs.update({k: v for k, v in event.items() if not k.startswith("meters_") and k not in hidden})
     status = free_event_sell_status(event)
     if status:
         attrs["sell_status"] = status
