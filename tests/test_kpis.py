@@ -300,6 +300,16 @@ def test_peak_export_target_capped_at_100():
     assert planning.peak_export_plan(100, 98, 10.0, 27.81, 16.66)["target_soc"] == 100
 
 
+def test_peak_export_keeps_the_peak_load():
+    # 20/10/2026 shadow: 62% at 16:00, reserve 49% -> sold 0.8 kWh the 3.4 kWh peak then needed.
+    need = planning.peak_need_soc(3.3, 9.8)  # 40.3 points
+    assert planning.peak_export_plan(62, 49, 9.8, 27.81, 16.66, peak_need_soc=need)["decision"] == "no_surplus"
+    need = planning.peak_need_soc(3.3, 10.0)  # 39.5 points
+    plan = planning.peak_export_plan(100, 49, 10.0, 27.81, 16.66, peak_need_soc=need)
+    assert plan["target_soc"] == 94  # ceil(49 + 39.5 + 5)
+    assert plan["decision"] == "export" and plan["export_kwh"] == 0.6
+
+
 def test_peak_export_dedups_and_pairs_export_days_only(tmp_path):
     dl = object.__new__(_data_logger.DataLogger)
     dl._data_dir = str(tmp_path)

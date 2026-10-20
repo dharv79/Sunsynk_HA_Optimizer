@@ -24,10 +24,17 @@ def test_shortfall_tops_up_to_the_required_soc(planning):
     # 40% - (0.8 kW x 3 h - 0.5 kWh)/10 = 21%: it would run flat, so it sits at the 25% floor.
     plan = _plan(planning)
     assert plan["projected_soc_16"] == 25.0
-    assert plan["required_soc"] == 58  # 25 + 3.0 kWh x 1.1 margin / 10 kWh
-    assert plan["decision"] == "top_up" and plan["target_soc"] == 58
-    assert plan["topup_kwh"] == 3.3  # (58 - 25)% of 10 kWh
+    assert plan["required_soc"] == 61  # 25 + 3.0 kWh x 1.1 margin / 0.92 discharge / 10 kWh = 60.9
+    assert plan["decision"] == "top_up" and plan["target_soc"] == 61
+    assert plan["topup_kwh"] == 3.6  # (61 - 25)% of 10 kWh
     assert plan["gain_gbp"] > 0
+
+
+def test_peak_need_allows_for_discharge_losses(planning):
+    # 20/10/2026: 3.3 kWh x 1.1 = 3.63 kWh stored was just short of the 3.4 kWh used, after ~8% discharge loss.
+    need = planning.peak_need_soc(3.3, 9.8)
+    assert round(need, 1) == 40.3  # 3.63 / 0.92 / 9.8
+    assert need * 9.8 / 100 * planning.DISCHARGE_EFFICIENCY >= 3.4
 
 
 def test_topup_waits_until_the_charge_needs_to_start(planning):

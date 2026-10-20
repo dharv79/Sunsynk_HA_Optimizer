@@ -875,15 +875,19 @@ def peak_export_plan(
     offpeak_pence: float | None,
     margin_soc: int = PEAK_EXPORT_MARGIN_SOC,
     wear_pence: float | None = None,
+    peak_need_soc: float = 0.0,
 ) -> dict[str, Any]:
-    """16:00 decision: export the SOC above reserve + margin at the peak rate.
+    """16:00 decision: export the SOC above reserve + peak need + margin at the peak rate.
 
-    The kWh sold would otherwise reduce tomorrow's off-peak charge, so it is
-    worth it only if the peak export price beats the off-peak replacement cost
-    after round-trip losses. `decision` is export / no_surplus / not_worth_it /
-    no_price; gain is export income minus replacement cost.
+    `peak_need_soc` is the SOC the house will use 16:00-19:00 (`peak_need_soc()`),
+    so the battery still reaches 19:00 at the evening reserve instead of the
+    peak load being bought at the peak rate. The kWh sold would otherwise
+    reduce tomorrow's off-peak charge, so it is worth it only if the peak
+    export price beats the off-peak replacement cost after round-trip losses.
+    `decision` is export / no_surplus / not_worth_it / no_price; gain is export
+    income minus replacement cost.
     """
-    target = min(100, reserve_soc + margin_soc)
+    target = min(100, math.ceil(reserve_soc + peak_need_soc + margin_soc))
     surplus_kwh = max(0.0, soc - target) / 100 * battery_capacity_kwh
     worth = arbitrage_worth_it(offpeak_pence, export_pence, wear_pence=wear_pence)
     if worth is None:
@@ -921,6 +925,15 @@ PEAK_COVER_LAST_LOG_MINUTES = 15 * 60 + 30
 PEAK_COVER_MIN_LOAD_HOURS = 2.0  # hours of 05:00-now data before the observed load is trusted
 PEAK_COVER_LOAD_PERCENTILE = 75
 PEAK_COVER_MIN_PEAK_DAYS = 3
+DISCHARGE_EFFICIENCY = 0.92  # battery -> house; ~ CHARGE_EFFICIENCY, so round trip ~ ROUND_TRIP_EFFICIENCY
+
+
+def peak_need_soc(
+    peak_load_kwh: float, capacity_kwh: float,
+    margin: float = PEAK_COVER_MARGIN, efficiency: float = DISCHARGE_EFFICIENCY,
+) -> float:
+    """SOC points the 16:00-19:00 house load takes out of the battery, with margin and discharge losses."""
+    return peak_load_kwh * margin / efficiency / capacity_kwh * 100.0
 
 
 def solar_until_kwh(hourly: dict[int, float] | None, now_hour: float, end_hour: float = 16.0) -> float | None:
@@ -993,7 +1006,7 @@ def peak_cover_plan(
     hours = max(0.0, minutes_to_peak / 60.0)
     projected = soc + (solar_kwh - load_kw * hours) / capacity_kwh * 100.0
     projected_soc = round(min(100.0, max(float(floor_soc), projected)), 1)
-    required_soc = min(100, math.ceil(floor_soc + peak_load_kwh * margin / capacity_kwh * 100.0))
+    required_soc = min(100, math.ceil(floor_soc + peak_need_soc(peak_load_kwh, capacity_kwh, margin)))
     shortfall_soc = max(0.0, required_soc - projected_soc)
     worth = peak_cover_worth_it(day_pence, peak_pence)
     if worth is None:
