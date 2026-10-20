@@ -212,6 +212,7 @@ from .planning import (
     free_event_watch_from,
     soc_trend_kw,
     free_event_kpi_credit,
+    over_limit_import_step,
     free_event_target_cap,
     resolve_load_kw,
     resolve_used_charge_rate,
@@ -308,6 +309,7 @@ class SunsynkOptimizer:
         self._peak_window_start: dict[str, Any] | None = None
         # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
         self._clipped: dict[str, Any] = {}
+        self._over_limit: dict[str, Any] = {}
         # Phase 40: today's daytime grid_pac samples and whether it alerted; unpersisted.
         self._daytime_import: dict[str, Any] = {}
         # Cost-aware export-disable shadow-mode tally (v1.0.11 Part 3). Counts
@@ -1785,6 +1787,7 @@ class SunsynkOptimizer:
         await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
         await self._guarded(self.async_run_peak_cover, "Peak cover")
         await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
+        await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         await self._guarded(self._async_daytime_import_check, "Daytime import check")
         await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
 
@@ -1809,6 +1812,29 @@ class SunsynkOptimizer:
         self._clipped["periods"] += 1
         if lost is not None:
             self._clipped["kwh"] = (self._clipped["kwh"] or 0.0) + lost
+
+    async def _async_track_over_limit_import(self) -> None:
+        """Tally import the battery could not cover (load above the inverter's output); no writes.
+
+        Sampled on every SOC change, the 30-min tick and each meter snapshot.
+        Transient like `_clipped`: a restart loses the day's tally so far, which
+        only leaves that import counted as avoidable. Skipped while an event
+        holds the slots (its import is credited separately).
+        """
+        now = dt_util.now()
+        today = now.date().isoformat()
+        if self._over_limit.get("date") != today:
+            self._over_limit = {"date": today, "prev": None, "kwh": {}}
+        sample = {
+            "minute": now.hour * 60 + now.minute + now.second / 60.0,
+            "soc": self._essential_state(self.battery_soc_entity),
+            "grid_import_kwh": self._essential_state(self.day_grid_import_entity),
+        }
+        if not self._slots_held():
+            segment, kwh = over_limit_import_step(self._over_limit["prev"], sample)
+            if segment:
+                self._over_limit["kwh"][segment] = self._over_limit["kwh"].get(segment, 0.0) + kwh
+        self._over_limit["prev"] = sample
 
     async def _async_daytime_import_check(self) -> None:
         """05:00-16:00: alert once a day on sustained grid import while the battery should cover the house (phase 40).
@@ -1964,6 +1990,8 @@ class SunsynkOptimizer:
         Read-only, so it also runs in monitor mode. Unavailable meters log
         None, so the KPIs that need them come out None, never 0.
         """
+        # Close the over-limit interval at the band edge so it lands in the right segment.
+        await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         await self.data_logger.async_log_meter_snapshot(
             date=dt_util.now().date().isoformat(),
             time=time,
@@ -2002,6 +2030,7 @@ class SunsynkOptimizer:
             self._capacity_kwh(cfg),
             late_load_kw,
             free_credit,
+            self._over_limit.get("kwh") if self._over_limit.get("date") == date else None,
         )
         record = {
             "date": date,
@@ -2208,6 +2237,7 @@ class SunsynkOptimizer:
         if new_state is None:
             return
         await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
+        await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         if self._slots_held():
             return
 

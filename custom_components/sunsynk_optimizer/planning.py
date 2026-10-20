@@ -610,12 +610,55 @@ def _less(value: float | None, credit: float) -> float | None:
     return None if value is None else max(0.0, value - credit)
 
 
+# Import while the battery still had charge and was discharging is load above
+# the inverter's output (or a short spike), not a planning shortfall.
+OVER_LIMIT_MARGIN_SOC = 5  # above KPI_RESERVE_SOC, so a battery near its floor still counts
+OVER_LIMIT_MAX_GAP_MIN = 35  # samples further apart (restart) prove nothing
+
+
+def kpi_segment(minute: int) -> str | None:
+    """The `_BASELINE_SEGMENTS` start ("HH:MM") a minute of the day falls in; None from 22:00."""
+    for start, end, _band, _ in _BASELINE_SEGMENTS:
+        sh, sm = (int(x) for x in start.split(":"))
+        eh, em = (int(x) for x in end.split(":"))
+        if sh * 60 + sm <= minute < eh * 60 + em:
+            return start
+    return None
+
+
+def over_limit_import_step(prev: dict[str, Any] | None, sample: dict[str, Any]) -> tuple[str | None, float]:
+    """Over-limit import between two samples {minute, soc, grid_import_kwh}: (segment, kWh).
+
+    Samples are taken on every SOC change, so if both ends sit above the
+    reserve + margin the battery never reached its floor in between. Import
+    while the SOC fell (the battery was already discharging into the house)
+    is load it could not cover. A flat SOC proves nothing — a slot target can
+    hold the battery while the house runs on the grid — and a rising one is a
+    grid charge. Anything unknown, a long gap or a meter reset → 0.
+    """
+    if prev is None:
+        return None, 0.0
+    values = (prev.get("minute"), prev.get("soc"), prev.get("grid_import_kwh"),
+              sample.get("minute"), sample.get("soc"), sample.get("grid_import_kwh"))
+    if any(v is None for v in values):
+        return None, 0.0
+    m0, soc0, imp0, m1, soc1, imp1 = values
+    floor = KPI_RESERVE_SOC + OVER_LIMIT_MARGIN_SOC
+    if not 0 < m1 - m0 <= OVER_LIMIT_MAX_GAP_MIN or imp1 < imp0:
+        return None, 0.0
+    if min(soc0, soc1) <= floor or soc1 >= soc0:
+        return None, 0.0
+    segment = kpi_segment(m0)
+    return segment, (imp1 - imp0) if segment else 0.0
+
+
 def day_kpis(
     snapshots: dict[str, dict[str, Any]],
     prices_pence: dict[str, float | None],
     battery_capacity_kwh: float,
     late_load_kw: float | None,
     free_credit: dict[str, tuple[float, float]] | None = None,
+    over_limit: dict[str, float] | None = None,
 ) -> dict[str, float | None]:
     """Efficiency KPIs for 00:00-22:00 from the day's meter snapshots.
 
@@ -633,6 +676,9 @@ def day_kpis(
       at `late_load_kw`), capped at what the night added.
     - `free_credit` (free_event_kpi_credit): free-event import per segment,
       left out of the import bands and avoidable £ (it cost nothing).
+    - `over_limit` (segment → kWh, over_limit_import_step): import while the
+      battery still had charge; stays in the bands (it was paid for) but is
+      left out of avoidable £ (no plan could have shifted it).
     """
     imp = "grid_import_kwh"
     offpeak = _less(_snap_delta(snapshots, "02:00", "05:00", imp), _credit(free_credit, "02:00"))
@@ -647,10 +693,14 @@ def day_kpis(
     if load22 is not None and imp22 is not None and load22 > 0:
         self_sufficiency = max(0.0, min(100.0, 100.0 * (1 - imp22 / load22)))
 
-    avoidable_pence = None
+    avoidable_pence = over_limit_kwh = None
+    over = over_limit or {}
     if day is not None and peak is not None:
-        avoidable_pence = _mul(day, prices_pence.get("day"))
-        peak_pence = _mul(peak, prices_pence.get("peak"))
+        avoid_day = sum(_less(p, over.get(seg, 0.0)) for p, seg in zip(parts, ("00:00", "05:00", "19:00")))
+        avoid_peak = _less(peak, over.get("16:00", 0.0))
+        over_limit_kwh = day + peak - avoid_day - avoid_peak
+        avoidable_pence = _mul(avoid_day, prices_pence.get("day"))
+        peak_pence = _mul(avoid_peak, prices_pence.get("peak"))
         avoidable_pence = None if avoidable_pence is None or peak_pence is None else avoidable_pence + peak_pence
 
     export_peak = _snap_delta(snapshots, "16:00", "19:00", "grid_export_kwh")
@@ -677,6 +727,7 @@ def day_kpis(
         "export_peak_gbp": round_or_none(None if export_peak_pence is None else export_peak_pence / 100),
         "unused_charge_kwh": round_or_none(unused),
         "free_import_excluded_kwh": round(sum(c[0] for c in (free_credit or {}).values()), 2),
+        "over_limit_import_kwh": round_or_none(over_limit_kwh),
     }
 
 

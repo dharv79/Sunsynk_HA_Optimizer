@@ -30,7 +30,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 
 - `grid_import_offpeak_kwh` covers 02:00–05:00, `grid_import_peak_kwh` covers 16:00–19:00, and `grid_import_day_kwh` covers the rest. `grid_import_morning_kwh` (05:00–16:00, part of the day band) was added in phase 15, and `grid_import_evening_kwh` (19:00–22:00) plus `evening_reserve_soc` on the record in phase 16.
 - `self_sufficiency_pct` is `1 − import / load` at 22:00.
-- `avoidable_import_gbp` is day plus peak import at their prices.
+- `avoidable_import_gbp` is day plus peak import at their prices, less over-limit import (see below).
 - `export_peak_kwh` and `export_peak_gbp` cover 16:00–19:00.
 - `unused_charge_kwh` is the overnight SOC added that was still spare at 16:00. The need is 20% reserve plus 16:00–22:00 load in hindsight plus 4 h at tonight's plan load rate, and the result is capped at what the night added.
 - Prices come from the configured `charges` via `flux_helpers.kpi_prices_pence` (`band_price_pence_per_kwh`, generalised from the peak-price helper).
@@ -51,3 +51,24 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 ## Clipped solar (13/10/2026, phase 29)
 
 Option `export_limit_w` (0 = off). The 30-min tick (`optimizer._async_track_clipped_solar`) counts a period as clipped when SOC ≥ 99 and export ≥ 95% of the limit (`planning.is_clipping`; `grid_pac < 0` is export) and adds `estimate_clipped_kwh` (hourly forecast − PV from the two MPPT sensors, floored at 0; `None` if either is missing, never 0). The tally is unpersisted. `day_actuals` gains `clipped_solar_kwh` and `overnight_target_too_high` (clipped and first seen full before 11:00), both passed through `_pair_records`; the weekly digest carries `week_clipped_solar_kwh`. No inverter writes; phases 15/20 may consume the flag later.
+
+## Over-limit import left out of avoidable £ (20/10/2026)
+
+**Root cause.** On 19/10 the house drew up to about 10 kW in bursts between 08:20 and 09:00 with the battery at about 85%. The grid covered what the inverter could not supply. All 2.0 kWh of morning import counted as avoidable (£0.84 in total), although no plan could have shifted it.
+
+**Design.**
+- `optimizer._async_track_over_limit_import` samples SOC and the daily import meter on every SOC change, the 30-min tick and each meter snapshot. The snapshot sample closes the interval at the band edge.
+- For each pair of samples, `planning.over_limit_import_step` counts the import as over-limit when:
+  - both SOCs are above `KPI_RESERVE_SOC` + 5;
+  - the SOC fell, so the battery was already discharging into the house;
+  - the samples are at most 35 minutes apart.
+- It doesn't count when:
+  - the SOC is flat, because a slot target may be holding the battery;
+  - the SOC is rising, because that's a grid charge;
+  - a value is unknown;
+  - the import meter has reset.
+- The kWh goes to the segment (`kpi_segment`) where the interval starts.
+- The tally is unpersisted, like `_clipped`. After a restart, import already tallied that day is counted as avoidable again (the conservative way). It's skipped while a free event holds the slots, because that import is credited separately.
+- `day_kpis(..., over_limit=)` takes each segment's over-limit kWh (capped at that segment's import) out of the day and peak parts of `avoidable_import_gbp`. The import bands still include it, because it was paid for. A new field, `over_limit_import_kwh`, is logged.
+
+**Verification.** `tests/test_kpis.py::test_over_limit_import_step` and `test_day_kpis_leave_over_limit_import_out_of_avoidable`. In HA, `day_kpis` gains `over_limit_import_kwh` from the first full day after install. Records already logged stay as written.
