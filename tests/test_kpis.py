@@ -733,3 +733,35 @@ def test_no_battery_baseline_free_import_costs_nothing(planning):
     assert free["with_battery_gbp"] == pytest.approx(plain["with_battery_gbp"] - 1.20)  # 4 kWh × 30p
     assert free["no_battery_gbp"] == pytest.approx(plain["no_battery_gbp"] - 0.30)  # 1 kWh × 30p
     assert free["battery_saving_gbp"] > plain["battery_saving_gbp"]
+
+
+def test_over_limit_import_step(planning):
+    step = planning.over_limit_import_step
+    prev = {"minute": 8 * 60 + 30, "soc": 85, "grid_import_kwh": 3.0}
+    # Battery discharging well above its floor while the grid tops up → over limit, morning segment.
+    seg, kwh = step(prev, {"minute": 8 * 60 + 34, "soc": 84, "grid_import_kwh": 3.4})
+    assert seg == "05:00" and round(kwh, 2) == 0.4
+    # Flat SOC (slot target holding the battery) or rising SOC (grid charge) → not counted.
+    assert step(prev, {"minute": 8 * 60 + 34, "soc": 85, "grid_import_kwh": 3.4}) == (None, 0.0)
+    assert step(prev, {"minute": 8 * 60 + 34, "soc": 86, "grid_import_kwh": 3.4}) == (None, 0.0)
+    # Near the floor the battery may have run out → counted as avoidable.
+    low = {"minute": 8 * 60 + 30, "soc": 26, "grid_import_kwh": 3.0}
+    assert step(low, {"minute": 8 * 60 + 34, "soc": 25, "grid_import_kwh": 3.4}) == (None, 0.0)
+    # No previous sample, unknown values, long gap or meter reset → nothing.
+    assert step(None, prev) == (None, 0.0)
+    assert step(prev, {"minute": 8 * 60 + 34, "soc": None, "grid_import_kwh": 3.4}) == (None, 0.0)
+    assert step(prev, {"minute": 9 * 60 + 30, "soc": 84, "grid_import_kwh": 3.4}) == (None, 0.0)
+    assert step(prev, {"minute": 8 * 60 + 34, "soc": 84, "grid_import_kwh": 0.1}) == (None, 0.0)
+    # Segment follows the interval start; 22:00 onwards is outside the KPI day.
+    assert step({**prev, "minute": 16 * 60 + 10}, {"minute": 16 * 60 + 12, "soc": 84, "grid_import_kwh": 3.2})[0] == "16:00"
+    assert step({**prev, "minute": 22 * 60 + 5}, {"minute": 22 * 60 + 8, "soc": 84, "grid_import_kwh": 3.2}) == (None, 0.0)
+    assert planning.kpi_segment(0) == "00:00" and planning.kpi_segment(4 * 60 + 59) == "02:00"
+
+
+def test_day_kpis_leave_over_limit_import_out_of_avoidable(planning):
+    # Morning import 1.0 (all over limit), peak 0.2 (0.5 claimed, capped at 0.2).
+    k = planning.day_kpis(_snaps(), PRICES, 10.0, 0.5, over_limit={"05:00": 1.0, "16:00": 0.5})
+    assert k["grid_import_morning_kwh"] == 1.0  # still in the bands: it was paid for
+    assert k["avoidable_import_gbp"] == round((0.5 + 0.3) * 27.77 / 100, 2)
+    assert k["over_limit_import_kwh"] == 1.2
+    assert planning.day_kpis(_snaps(), PRICES, 10.0, 0.5)["over_limit_import_kwh"] == 0.0
