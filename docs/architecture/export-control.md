@@ -33,7 +33,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 
 **Design.** A 16:00 listener (`_async_peak_export`, run through `_guarded`) calls `planning.peak_export_plan(soc, reserve, capacity, export_p, offpeak_p)`.
 
-- The target is the evening reserve (phase 16) plus a 5% margin, capped at 100.
+- The target is the evening reserve (phase 16) plus a 5% margin, capped at 100. Since b25 it also adds the expected 16:00–19:00 use (`peak_need_soc`, see below).
 - The surplus is the SOC above the target, in kWh.
 - `planning.arbitrage_worth_it` says to sell only if the peak export price beats the off-peak price ÷ 0.85 round-trip efficiency, plus battery wear. The wear term comes from the phase 24 options (`None` when blank).
 - The decision is one of:
@@ -112,7 +112,7 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 
 **Logic (`planning.peak_cover_plan`).** Every 30 minutes 12:00–16:00 (`async_run_peak_cover`, from the periodic tick):
 - Projected SOC at 16:00 = SOC + (forecast solar to 16:00 − load × hours) / capacity. Solar is the raw (uncorrected) forecast — the pessimistic choice, like the low-solar decisions (do-not-break 8) — from the hourly sensor or the synthetic profile; no forecast means no solar assumed. Load is the observed average since 05:00 from the meter snapshots once 2 h exist, else tonight's plan load. A battery that would run flat is held at the 25% floor (`PEAK_COVER_FLOOR_SOC`, the user's Low Batt setting).
-- Required SOC = floor + 75th-percentile recent `peak_load_kwh` (≥3 days, else 3 h × load) × 1.1 margin.
+- Required SOC = floor + 75th-percentile recent `peak_load_kwh` (≥3 days, else 3 h × load) × 1.1 margin ÷ 0.92 discharge efficiency (b25, `peak_need_soc`).
 - `top_up` when the shortfall is ≥3 points and the day price beats the peak price after charge losses (`peak_cover_worth_it`); a missing price → `no_price`, never a decision to charge.
 - The push waits until the charge would need to start (+45 min lead, `push_now`) so later solar can still help.
 
@@ -121,6 +121,19 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 **Shadow / logging.** One `peak_cover` record per day (dedup): the first actionable top-up, else the last check before 16:00, with the projection, required SOC, load/solar inputs, prices, `live` and `api_ok`; it rides the 22:00 debug bundle. Transient state `_peak_cover` is unpersisted by design: after a restart it re-evaluates.
 
 **Known limits.** The load estimate before 07:00 falls back to the plan load, which is overnight-only and low. A Flux 1 slot replaces the stored import slot until the next push: the 16:00 restore re-pushes the last plan, and the 01:55 plan re-pushes every night.
+
+## Peak cover discharge losses and peak export keeps the peak load (20/10/2026, b25)
+
+**Root cause.** On 20/10 (0.6 kWh of solar) the first live peak cover topped up to 62% at 14:02 and hit it at 16:00. But 0.5 kWh was still bought at the peak rate: the target held 3.3 kWh × 1.1 = 3.63 kWh above the floor, and after ~8% discharge losses that delivers ~3.35 kWh, against 3.4 kWh used. The same day the shadow peak export would have sold 0.8 kWh down to 54% (reserve 49 + 5). That reserve covers only 19:00–02:00, so the 16:00–19:00 load would have been bought back at the peak rate.
+
+**Fix.**
+- `planning.peak_need_soc(peak_load_kwh, capacity)` gives the SOC points the peak takes out of the battery: load × 1.1 margin ÷ `DISCHARGE_EFFICIENCY` (0.92) ÷ capacity. `peak_cover_plan`'s required SOC is the floor + this; 20/10 would have been 66% rather than 62%.
+- `peak_export_plan(..., peak_need_soc=)` puts the target at reserve + peak need + 5%, rounded up and capped at 100. `async_run_peak_export` sizes the peak need like peak cover does: the 75th-percentile recent `peak_load_kwh`, falling back to 3 h × plan load. The `peak_export` record adds `peak_load_kwh`, `peak_load_source` and `peak_need_soc`.
+- Effect: at current loads (a reserve of about 49% plus about 40 points of peak need), peak export only sells above about 94%, so the shadow gain falls to near zero. That is the honest number, because the old figure sold energy the peak then bought back.
+
+**Open before peak export goes live.** The live export holds Flux 2 at the target from 16:00 to 19:00. If the inverter then holds the battery at the target, rather than letting it serve the house once the target is reached, the peak load is still imported. Check the inverter's behaviour on the first live day.
+
+**Verification.** `tests/test_peak_cover.py::test_peak_need_allows_for_discharge_losses` and the updated required-SOC test; `tests/test_kpis.py::test_peak_export_keeps_the_peak_load`. In HA, the 22:00 `peak_export` line shows `peak_need_soc`, and its `target_soc` is about 90+.
 
 ## Battery wear cost (phase 24, 13/10/2026)
 

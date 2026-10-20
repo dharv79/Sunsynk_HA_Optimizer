@@ -206,6 +206,7 @@ from .planning import (
     free_event_result,
     wear_cost_pence_per_kwh,
     peak_load_estimate_kwh,
+    peak_need_soc,
     plan_free_event,
     FREE_EVENT_WATCH_MINUTES,
     free_event_sell_decision,
@@ -2074,14 +2075,21 @@ class SunsynkOptimizer:
             return
         cfg = self.cfg
         reserve = self._evening_reserve_soc()
+        capacity = self._capacity_kwh(cfg)
+        # Keep the 16:00-19:00 house load too, sized like peak cover, so the peak isn't bought back.
+        peak_load_kwh, peak_load_source = peak_load_estimate_kwh(
+            await self.data_logger.async_recent_peak_loads(), 3.0 * self._plan_load_kw(cfg)
+        )
+        need = peak_need_soc(peak_load_kwh, capacity)
         prices, sources = self._tariff_prices(now.date())
         plan = peak_export_plan(
             soc,
             reserve,
-            self._capacity_kwh(cfg),
+            capacity,
             prices["export_peak"],
             prices["offpeak"],
             wear_pence=self._wear_pence(),
+            peak_need_soc=need,
         )
         if plan["decision"] == "export" and self.coordinator.state.evening_export_disabled:
             plan["decision"] = "export_disabled"
@@ -2098,13 +2106,16 @@ class SunsynkOptimizer:
             await self.async_notify(
                 title,
                 f"SOC {round(soc, 1)}%: exporting about {plan['export_kwh']} kWh down to "
-                f"{plan['target_soc']}% (evening reserve {reserve}%) until 19:00.{_api_note(api_ok)}",
+                f"{plan['target_soc']}% (evening reserve {reserve}% + peak use) until 19:00.{_api_note(api_ok)}",
             )
         record = {
             "type": "peak_export",
             "date": now.date().isoformat(),
             "soc": soc,
             "evening_reserve_soc": reserve,
+            "peak_load_kwh": peak_load_kwh,
+            "peak_load_source": peak_load_source,
+            "peak_need_soc": round(need, 1),
             **plan,
             "price_source": price_source(sources, "export_peak", "offpeak"),
             "live": live,
