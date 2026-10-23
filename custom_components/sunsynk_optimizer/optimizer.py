@@ -1524,6 +1524,11 @@ class SunsynkOptimizer:
         await self._guarded(
             lambda: self.async_run_import_plan(source=STARTUP_PLAN_SOURCE), "Initial refresh"
         )
+        # The startup plan resets Flux 1 to the overnight window, wiping a
+        # peak cover top-up (and its unpersisted state) pushed before the
+        # restart; re-check now rather than wait for the 30-minute tick,
+        # which may not come before 16:00. No-op outside 12:00-16:00.
+        await self._guarded(self.async_run_peak_cover, "Peak cover")
 
     async def _async_choose_best_full_charge_day(self, _now) -> None:
         """Time-change callback at 18:00 daily: Sunday weekly pick, then the daily re-check."""

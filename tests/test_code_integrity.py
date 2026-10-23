@@ -32,3 +32,24 @@ def test_self_attributes_are_defined():
             else:
                 used.add(node.attr)
     assert used - defined == set()
+
+
+def _awaited_calls(fn: ast.AsyncFunctionDef) -> list[str]:
+    """self.<method> names referenced in order (direct calls, lambdas and passed callables)."""
+    nodes = [
+        n
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "self"
+    ]
+    return [n.attr for n in sorted(nodes, key=lambda n: (n.lineno, n.col_offset))]
+
+
+def test_startup_plan_is_followed_by_peak_cover():
+    # The startup plan resets Flux 1 to the overnight window, so a restart
+    # between 12:00 and 16:00 would wipe a peak cover top-up unless peak
+    # cover re-checks straight after it.
+    cls = _class(ast.parse(OPTIMIZER.read_text()), "SunsynkOptimizer")
+    fn = next(n for n in cls.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_async_initial_refresh")
+    calls = _awaited_calls(fn)
+    assert "async_run_import_plan" in calls and "async_run_peak_cover" in calls
+    assert calls.index("async_run_peak_cover") > calls.index("async_run_import_plan")

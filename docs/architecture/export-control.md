@@ -135,6 +135,16 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 
 **Verification.** `tests/test_peak_cover.py::test_peak_need_allows_for_discharge_losses` and the updated required-SOC test; `tests/test_kpis.py::test_peak_export_keeps_the_peak_load`. In HA, the 22:00 `peak_export` line shows `peak_need_soc`, and its `target_soc` is about 90+.
 
+## Peak cover re-checks after a restart (23/10/2026, b26)
+
+**Symptom:** on 23/10 HA restarted during the afternoon; the battery sat at the 25% floor from about 14:00 and the 16:00-19:00 peak ran from the grid with no top-up.
+
+**Root cause:** the 60 s startup one-shot (`_async_initial_refresh`) re-pushes the import plan, whose Flux 1 slot is the overnight 02:00-05:00 window, so a restart after a top-up silently cancels it; `_peak_cover` is unpersisted, so the integration also forgets the push. The next peak cover check then waits for the 30-minute interval, which restarts from the reload: a restart after about 15:30 gets no check before 16:00, and an earlier one loses up to 30 minutes of the charge lead.
+
+**Fix:** `_async_initial_refresh` runs `async_run_peak_cover` straight after the startup plan. It is a no-op outside 12:00-16:00 and while an event holds the slots, and re-pushes the top-up (if one is due) over the startup plan's Flux 1.
+
+**Verification:** `tests/test_code_integrity.py::test_startup_plan_is_followed_by_peak_cover` (AST: the peak cover call follows the startup plan in `_async_initial_refresh`); fails without the fix.
+
 ## Battery wear cost (phase 24, 13/10/2026)
 
 - Options `battery_cost_gbp` and `battery_lifetime_kwh` (both blank by default). `planning.wear_cost_pence_per_kwh` = cost ÷ lifetime throughput × 100; blank or non-positive → `None` (no wear term, behaviour as before — never 0p).
