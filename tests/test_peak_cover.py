@@ -83,3 +83,18 @@ def test_peak_load_estimate_covers_most_days(planning):
     assert planning.peak_load_estimate_kwh([2.0, 2.6, 3.1, 5.6, 2.1], 3.0) == (3.1, "history")
     assert planning.peak_load_estimate_kwh([2.0, 5.0], 3.0) == (3.0, "default")
     assert planning.peak_load_estimate_kwh([], 3.0) == (3.0, "default")
+
+
+def test_latest_peak_cover_record_from_the_log():
+    # The 22:00 report falls back to the log when a restart lost the in-memory decision.
+    from conftest import _data_logger
+
+    records = [
+        {"type": "peak_cover", "recorded_at": "x", "date": "2026-10-22", "decision": "ok"},
+        {"type": "peak_export", "date": "2026-10-23", "decision": "no_surplus"},
+        {"type": "peak_cover", "recorded_at": "y", "date": "2026-10-23", "decision": "top_up"},
+    ]
+    assert _data_logger.latest_record(records, "peak_cover", "2026-10-23") == {
+        "type": "peak_cover", "date": "2026-10-23", "decision": "top_up",
+    }
+    assert _data_logger.latest_record(records, "peak_cover", "2026-10-24") == {}
