@@ -145,6 +145,16 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 
 **Verification:** `tests/test_code_integrity.py::test_startup_plan_is_followed_by_peak_cover` (AST: the peak cover call follows the startup plan in `_async_initial_refresh`); fails without the fix.
 
+## Peak cover decision survives a restart in the nightly report (23/10/2026, b27)
+
+**Symptom:** the 23/10 22:00 debug batch had no `peak_cover` record although the integration ran all afternoon (no `startup` plan that day), so why no top-up happened could not be read from Slack.
+
+**Root cause:** the 22:00 report took the decision from `_peak_cover["record"]`, which is unpersisted; HA restarted during 16:00-19:00 and the record was lost (it is still in the monthly JSONL via `async_log_peak_cover`).
+
+**Fix:** when the in-memory record is missing or for another date, the report reads the day's last `peak_cover` record from the log (`DataLogger.async_load_peak_cover` → `data_logger.latest_record`, `recorded_at` dropped so the line matches the in-memory shape).
+
+**Verification:** `tests/test_peak_cover.py::test_latest_peak_cover_record_from_the_log`.
+
 ## Battery wear cost (phase 24, 13/10/2026)
 
 - Options `battery_cost_gbp` and `battery_lifetime_kwh` (both blank by default). `planning.wear_cost_pence_per_kwh` = cost ÷ lifetime throughput × 100; blank or non-positive → `None` (no wear term, behaviour as before — never 0p).

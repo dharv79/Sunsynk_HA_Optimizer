@@ -262,6 +262,11 @@ class DataLogger:
         """Log the midday peak-cover decision (phase 30): one per day."""
         await self._async_append(_record("peak_cover", **fields))
 
+    async def async_load_peak_cover(self, date: str) -> dict[str, Any]:
+        """The logged peak_cover decision for ``date`` ({} if none), for a report after a restart."""
+        records = await self.hass.async_add_executor_job(self._read_recent, 2)
+        return latest_record(records, "peak_cover", date)
+
     async def async_log_overnight_load(self, **fields: Any) -> None:
         """Log the 00:00-05:00 house load (phase 26): one per day."""
         await self._async_append(_record("overnight_load", **fields))
@@ -797,6 +802,12 @@ def snapshots_for_date(records: list[dict[str, Any]], date: str) -> dict[str, di
         if rec.get("type") == "meter_snapshot" and rec.get("date") == date and rec.get("time"):
             out.setdefault(rec["time"], rec)
     return out
+
+
+def latest_record(records: list[dict[str, Any]], record_type: str, date: str) -> dict[str, Any]:
+    """The last ``record_type`` record for ``date`` without its recorded_at, or {}."""
+    found = [r for r in records if r.get("type") == record_type and r.get("date") == date]
+    return {k: v for k, v in found[-1].items() if k != "recorded_at"} if found else {}
 
 
 def _peak_export_fields(rec: dict[str, Any]) -> dict[str, Any]:

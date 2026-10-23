@@ -46,7 +46,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_clipped_solar.py` | Phase 29 `is_clipping`, `estimate_clipped_kwh` (missing → None), `overnight_target_too_high` |
 | `tests/test_tariff_comparison.py` | Phase 28 band boundaries, `cost_under_tariff` (missing slot → None), `parse_half_hourly_charges`, `compare_tariffs`, rate overrides; phase 35 standing charge × days, VAT, Intelligent window, Agile slot pricing and unavailability, `agile_prices_by_date`, `newest_agile_product`, region/VAT overrides |
 | `tests/test_gentle_charging.py` | Phase 23 `gentle_charge_current_a` (margin, clamps, zero need), `max_charge_current_a`, `gentle_current_lowers` (never above the user's Grid Amps), gentle fields on the logged import plan |
-| `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh` |
+| `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |
 | `tests/test_code_integrity.py` | AST guard: every `self.<name>` read in `SunsynkOptimizer` is defined on the class (catches a dropped `def` line); the startup plan is followed by a peak cover re-check. CI also runs `pyflakes` |

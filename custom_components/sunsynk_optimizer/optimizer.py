@@ -2776,7 +2776,11 @@ class SunsynkOptimizer:
                 peak_rec = {}
             peak_export_rec = record_for_date(self.coordinator.state.peak_export, date)
             cover = (self._peak_cover or {}).get("record") or {}
-            peak_cover_rec = {"type": "peak_cover", **cover} if cover.get("date") == date else {}
+            if cover.get("date") == date:
+                peak_cover_rec = {"type": "peak_cover", **cover}
+            else:
+                # Unpersisted: a restart after 16:00 loses it, so fall back to the log.
+                peak_cover_rec = await self.data_logger.async_load_peak_cover(date)
             # daily_cost is captured this morning tagged with YESTERDAY's date
             # (Octopus settlement lag — see _async_capture_daily_cost), so it's
             # inherently a day behind `date` here, not equal to it. Include it
