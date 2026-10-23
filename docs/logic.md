@@ -27,7 +27,7 @@ Complete description of all decision logic as implemented in the current codebas
 | **22:00** daily | `async_track_time_change` | Capture evening SOC + actual solar kWh |
 | **Every 30 min** | `async_track_time_interval` | Run Flux 2 check |
 | **SOC state change** | `async_track_state_change_event` | Trigger trim or Flux 2 check |
-| **60 s after startup** | `async_call_later` (one-shot) | Run initial import plan on every reload |
+| **60 s after startup** | `async_call_later` (one-shot) | Run initial import plan on every reload, then the peak cover check (12:00-16:00 only) |
 
 The 60-second startup delay exists so that HA notify services are registered before the first plan runs.
 
