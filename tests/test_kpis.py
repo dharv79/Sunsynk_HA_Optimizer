@@ -775,3 +775,46 @@ def test_day_kpis_leave_over_limit_import_out_of_avoidable(planning):
     assert k["avoidable_import_gbp"] == round((0.5 + 0.3) * 27.77 / 100, 2)
     assert k["over_limit_import_kwh"] == 1.2
     assert planning.day_kpis(_snaps(), PRICES, 10.0, 0.5)["over_limit_import_kwh"] == 0.0
+
+
+def _soc_cap_snaps(soc05=98, soc16=81, soc19=60, soc22=35):
+    return {t: {"soc": s} for t, s in (("05:00", soc05), ("16:00", soc16), ("19:00", soc19), ("22:00", soc22))}
+
+
+_SOC_CAP_PLAN = {"target_soc": 100, "target_soc_reason": "low_solar_override_winter_like"}
+_SOC_CAP_PRICES = {"day": 27.77, "offpeak": 17.77}
+
+
+def test_soc_cap_shadow_only_for_low_solar_overrides():
+    snaps = _soc_cap_snaps()
+    assert planning.soc_cap_shadow({"target_soc": 100, "target_soc_reason": "weekly_full_charge_day"},
+                                   snaps, 10.0, 0.4, _SOC_CAP_PRICES) is None
+    assert planning.soc_cap_shadow({"target_soc": 59, "target_soc_reason": "solar_bridge"},
+                                   snaps, 10.0, 0.4, _SOC_CAP_PRICES) is None
+    assert planning.soc_cap_shadow({}, snaps, 10.0, 0.4, _SOC_CAP_PRICES) is None
+
+
+def test_soc_cap_shadow_top_needed_when_battery_runs_low():
+    # 22:00 35% − 4 h × 0.4 kW on 10 kWh = 19% → floor 25, no headroom: the whole cut (98 − 85) was needed.
+    rec = planning.soc_cap_shadow(_SOC_CAP_PLAN, _soc_cap_snaps(), 10.0, 0.4, _SOC_CAP_PRICES)
+    assert rec["cut_kwh"] == 1.3
+    assert rec["lowest_soc"] == 19.0
+    assert rec["shortfall_kwh"] == 1.3
+    assert rec["extra_cost_gbp"] == 0.13
+
+
+def test_soc_cap_shadow_free_when_spare_charge_left():
+    # Ends at 50 − 16 = 34%: 9% headroom over the 25% floor covers 9 of the 13% cut.
+    rec = planning.soc_cap_shadow(_SOC_CAP_PLAN, _soc_cap_snaps(soc22=50), 10.0, 0.4, _SOC_CAP_PRICES)
+    assert rec["shortfall_kwh"] == 0.4
+    rec = planning.soc_cap_shadow(_SOC_CAP_PLAN, _soc_cap_snaps(soc19=70, soc22=60), 10.0, 0.4, _SOC_CAP_PRICES)
+    assert rec["shortfall_kwh"] == 0.0
+    assert rec["extra_cost_gbp"] == 0.0
+
+
+def test_soc_cap_shadow_missing_inputs_are_none():
+    rec = planning.soc_cap_shadow(_SOC_CAP_PLAN, {}, 10.0, None, {"day": None, "offpeak": 17.0})
+    assert rec["cut_kwh"] == 1.5  # no 05:00 SOC → assume the target was reached
+    assert rec["lowest_soc"] is None and rec["shortfall_kwh"] is None and rec["extra_cost_gbp"] is None
+    rec = planning.soc_cap_shadow(_SOC_CAP_PLAN, _soc_cap_snaps(), 10.0, 0.4, {"day": None, "offpeak": 17.0})
+    assert rec["shortfall_kwh"] == 1.3 and rec["extra_cost_gbp"] is None

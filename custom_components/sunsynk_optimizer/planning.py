@@ -731,6 +731,54 @@ def day_kpis(
     }
 
 
+SOC_CAP_SHADOW_SOC = 85
+
+
+def soc_cap_shadow(
+    plan: dict[str, Any],
+    snapshots: dict[str, dict[str, Any]],
+    battery_capacity_kwh: float,
+    late_load_kw: float | None,
+    prices_pence: dict[str, float | None],
+    cap_soc: int = SOC_CAP_SHADOW_SOC,
+) -> dict[str, Any] | None:
+    """Shadow only: what capping tonight's low-solar target at `cap_soc` would have cost.
+
+    None unless the 01:55 plan was a low-solar override above the cap (the
+    weekly full-charge day is left out). The top `cut_soc` (charge reached
+    above the cap) was needed only if the day's lowest SOC — snapshots from
+    05:00 plus 22:00 projected to the 02:00 charge at `late_load_kw` — came
+    within `cut_soc` of the discharge floor; that shortfall would have been
+    bought at the day rate instead of off-peak. Missing inputs → None fields.
+    """
+    target = plan.get("target_soc")
+    if not str(plan.get("target_soc_reason") or "").startswith("low_solar_override"):
+        return None
+    if not isinstance(target, (int, float)) or target <= cap_soc:
+        return None
+    soc05, soc22 = _snap(snapshots, "05:00", "soc"), _snap(snapshots, "22:00", "soc")
+    reached = min(target, soc05) if soc05 is not None else target
+    cut_soc = max(0.0, reached - cap_soc)
+    lowest = shortfall_kwh = extra_gbp = None
+    if soc22 is not None and late_load_kw is not None and battery_capacity_kwh > 0:
+        end_soc = soc22 - late_load_kw * KPI_LATE_LOAD_HOURS / battery_capacity_kwh * 100
+        socs = [s for s in (_snap(snapshots, t, "soc") for t in ("05:00", "16:00", "19:00")) if s is not None]
+        lowest = min([*socs, end_soc])
+        headroom = max(0.0, lowest - BATTERY_LOW_SOC)
+        shortfall_kwh = max(0.0, cut_soc - headroom) / 100 * battery_capacity_kwh
+        day, offpeak = prices_pence.get("day"), prices_pence.get("offpeak")
+        if day is not None and offpeak is not None:
+            extra_gbp = shortfall_kwh * (day - offpeak) / 100
+    return {
+        "target_soc": target,
+        "cap_soc": cap_soc,
+        "cut_kwh": round(cut_soc / 100 * battery_capacity_kwh, 2),
+        "lowest_soc": round_or_none(lowest, 1),
+        "shortfall_kwh": round_or_none(shortfall_kwh),
+        "extra_cost_gbp": round_or_none(extra_gbp),
+    }
+
+
 def week_kpis(days: list[dict[str, Any]]) -> dict[str, float | None]:
     """Weekly roll-up: kWh/£ fields summed, self-sufficiency averaged over days that have it."""
     out = {f"week_{key}": sum_field(days, key) for key in DAY_KPI_FIELDS if key != "self_sufficiency_pct"}
