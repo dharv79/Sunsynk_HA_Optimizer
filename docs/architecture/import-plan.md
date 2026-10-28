@@ -195,3 +195,18 @@ While no estimate exists yet (`planning.capacity_estimate_pending`: no record, o
 
 Exposed as the diagnostic sensor `sensor.battery_capacity_estimate` (kWh; attributes: samples, configured_kwh, pct_of_configured). Shadow: it never changes `battery_capacity`; that is an option for later. Tests: `test_capacity_*` in `tests/test_kpis.py`.
 
+
+## 85% cap shadow on low-solar nights (28/10/2026)
+
+**Question.** Low-solar nights (forecast < 7 kWh) charge to 95–100%, so in autumn most nights end at 100%, not only the weekly full-charge day. The user kept that behaviour but prefers battery health, so this logs whether a cap would have cost anything before any live change.
+
+**Design.** Shadow only; nothing is pushed. `planning.soc_cap_shadow(plan, snapshots, capacity, late_load_kw, prices)` runs at 22:00 in `_async_capture_day_kpis` on the day's 01:55 plan. It applies only when `target_soc_reason` starts with `low_solar_override` and the target is above `SOC_CAP_SHADOW_SOC` (85); the weekly full-charge day and free-event days are left out.
+- `cut_kwh`: charge above the cap (05:00 SOC, capped at the target, minus 85).
+- `lowest_soc`: the lowest of the 05:00/16:00/19:00 snapshots and the 22:00 SOC projected to 02:00 at `late_load_kw` × 4 h.
+- `shortfall_kwh`: the part of the cut the day actually needed, `max(0, cut − (lowest − BATTERY_LOW_SOC))`.
+- `extra_cost_gbp`: shortfall × (day − off-peak price).
+Missing inputs → `None` fields (rule 11).
+
+**Logged.** Nested as `soc_cap_shadow` in the `day_kpis` record (null on non-qualifying days), so it reaches the 22:00 debug bundle. Review after a few weeks of dull days; a live cap is a separate decision.
+
+**Verification.** `tests/test_kpis.py` (`test_soc_cap_shadow_*`): only low-solar overrides qualify, fully-used top, partly-spare top, missing inputs. Live: the next low-solar day's 22:00 `day_kpis` carries the field.

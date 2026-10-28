@@ -184,6 +184,7 @@ from .planning import (
     charge_progress_ok,
     daily_report_plans,
     day_kpis,
+    soc_cap_shadow,
     daytime_load_kw,
     evening_reserve_soc,
     days_in_period,
@@ -2049,6 +2050,10 @@ class SunsynkOptimizer:
             **no_battery_baseline(
                 snapshots, prices, flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"),
                 self._capacity_kwh(cfg), self._wear_pence(), free_credit,
+            ),
+            # Shadow: would an 85% cap on a low-solar night have cost anything? Free-event days skew SOC.
+            "soc_cap_shadow": None if kpis["free_import_excluded_kwh"] else soc_cap_shadow(
+                plan if plan.get("date") == date else {}, snapshots, self._capacity_kwh(cfg), late_load_kw, prices,
             ),
         }
         await self.data_logger.async_log_day_kpis(**record)
