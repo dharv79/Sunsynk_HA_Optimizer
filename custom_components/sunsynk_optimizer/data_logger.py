@@ -18,6 +18,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from .const import INTEGRATION_VERSION
 from .planning import DAY_KPI_FIELDS, net_cost_gbp, round_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,8 +63,13 @@ _IMPORT_PLAN_FIELDS = (
 
 
 def _record(record_type: str, **fields: Any) -> dict[str, Any]:
-    """Build a log record with its type and a UTC recorded_at timestamp."""
-    return {"type": record_type, "recorded_at": datetime.now(timezone.utc).isoformat(), **fields}
+    """Build a log record with its type, a UTC recorded_at timestamp and the integration version."""
+    return {
+        "type": record_type,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "version": INTEGRATION_VERSION,
+        **fields,
+    }
 
 
 DAILY_COST_FIELDS = ("actual_import_cost_gbp", "actual_export_income_gbp", "actual_gas_cost_gbp")

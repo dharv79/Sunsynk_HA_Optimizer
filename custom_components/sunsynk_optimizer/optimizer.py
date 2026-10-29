@@ -32,6 +32,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    INTEGRATION_VERSION,
     CONF_AVG_CONSUMPTION_KW,
     CONF_WEEKEND_AVG_CONSUMPTION_KW,
     CONF_AUTO_AWAY_CALENDAR,
@@ -1074,6 +1075,7 @@ class SunsynkOptimizer:
 
         plan_state = {
             "date": now.date().isoformat(),
+            "version": INTEGRATION_VERSION,
             "today": today,
             "selected_full_charge_day": full_day,
             "is_full_day": is_full_day,
@@ -2041,6 +2043,7 @@ class SunsynkOptimizer:
         )
         record = {
             "date": date,
+            "version": INTEGRATION_VERSION,
             "snapshot_times": sorted(snapshots),
             **kpis,
             "price_source": price_source(sources, *TARIFF_BANDS),
