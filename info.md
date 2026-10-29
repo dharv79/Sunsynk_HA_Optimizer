@@ -1,37 +1,31 @@
 ## Sunsynk HA Optimizer
 
-Smart Home Assistant integration to optimise a Sunsynk inverter's charging and export behaviour using solar forecast, battery SOC, and time-of-use tariff windows (Octopus Flux, Go, Economy 7).
+Optimises a Sunsynk inverter's overnight charging and evening export for the Octopus Flux tariff, using the solar forecast, battery state of charge (SOC), learned household load and the tariff's price bands.
 
 ### What it does
 
-- **01:55 daily** — Calculates tonight's import window (Flux 1): target SOC, window start/end, charge rate
-- **Every 30 minutes** — Controls the export window (Flux 2): disables export when grid draw is high, trims SOC when battery is too full
-- **Sunday 18:00** — Scores and selects the best full-charge day for the week ahead
+- **01:55**: plans the 02:00–05:00 cheap charge. It buys just enough to reach the morning solar, or fills to 95–100% on dull days.
+- **Through the day**: keeps an evening reserve until 02:00, tops up before the 16:00 peak if needed (optional), pauses evening export under heavy load, and trims an over-full battery without selling energy bought cheaply overnight.
+- **Free electricity events**: sells down before the window and refills during it.
+- **Weekly**: picks a full-charge day from the forecast and sends a cost digest.
+- **Learns** forecast bias, overnight drain, charge rate and household load from your own history, with a separate away profile.
+- **Reports** real Octopus costs, daily KPIs, battery savings, a tariff comparison and a bill check. It also sends alerts for price changes, unusual load and failed inverter writes.
 
-### Adaptive learning
-
-The integration self-corrects over time using historical data:
-
-- **Forecast correction** — scales the raw solar forecast by the actual/forecast ratio over the last 30 days
-- **Overnight drain compensation** — adds a safety buffer to the SOC target to cover battery drain between charge end and sunrise (uses the 75th percentile so appliance-heavy nights are covered)
-- **Evening SOC nudge** — shifts the target ±5% if the battery consistently ends the day too full or too empty
-- **Effective charge rate** — calibrated from historical charging sessions to size the import window precisely
+New decision logic ships in observe-only mode first. Monitor mode runs everything without writing to the inverter.
 
 ### Requirements
 
-- **SolarSynkV3** — for inverter sensor entities
-- **Forecast.Solar** — for daily solar forecast
-- **Weather entity** — for full-charge day scoring
-- **Sunsynk Power Flow Card** — for the auto-generated dashboard
-
-### Dashboard
-
-Press **Update dashboard** after installing to auto-generate a Lovelace dashboard with power flow, adaptive learning status, 48-hour graphs, and tuning assist sections.
+- **SolarSynkV3**: inverter sensor entities
+- **Forecast.Solar**: daily solar forecast
+- **Weather entity**: full-charge day scoring
+- **Sunsynk Power Flow Card**: for the generated dashboard
+- Optional: **Home Assistant Octopus Energy** for real costs and tariff rates
 
 ### Manual controls
 
-- **Test plan (dry run)** — recomputes the import plan and sends the full JSON to your app notification, with no inverter push. Safe to press any time of day.
-- **Reset baseline** — pushes the baseline Flux windows from config back to the inverter, undoing any optimizer overrides.
-- **Update dashboard** — regenerates the Lovelace YAML file.
+- **Test plan**: a dry run of tonight's plan that sends the JSON to your notification, with no inverter write. Safe at any time.
+- **Reset to baseline**: pushes the configured baseline Flux windows back to the inverter.
+- **Update dashboard**: regenerates the Lovelace YAML.
+- **Free event start / end** and **Cancel free event**: enter or cancel a free-electricity window.
 
-See the [README](https://github.com/dharv79/Sunsynk_HA_Optimizer/blob/main/README.md) for full installation and configuration instructions.
+See the [README](https://github.com/dharv79/Sunsynk_HA_Optimizer/blob/main/README.md) for installation and configuration.

@@ -1,374 +1,189 @@
 # Sunsynk HA Optimizer
 
-Smart Home Assistant integration to optimise Sunsynk inverter charging and export behaviour using solar forecast, battery SOC, time-of-use windows, and automated Flux control.
+Home Assistant integration that optimises a Sunsynk inverter's overnight charging and evening export for the Octopus Flux tariff. It uses the solar forecast, battery state of charge (SOC), learned household load and the tariff's price bands.
 
-Current release: **v1.0.10**
+Latest version: see [Releases](https://github.com/dharv79/Sunsynk_HA_Optimizer/releases). Versions with `b` in them (for example `1.0.12b29`) are betas. Turn on **Show beta versions** in HACS to get them.
 
 ## Features
 
-- Smart overnight import planning driven by solar forecast and battery SOC
-- Adaptive learning — self-corrects forecast bias, overnight battery drain, and evening SOC outcomes over time
-- Home/away calibration — an Away switch keeps a separate holiday profile (lower drain buffer and consumption) so a trip doesn't skew the everyday learning
-- Battery temperature deration — reduces charge rate automatically in cold weather
-- Weekend consumption mode — uses a higher consumption figure on Saturdays and Sundays
-- Dynamic Flux 2 export control with evening export disable when grid draw is high
-- SOC-based trim logic — trims to 82% when battery exceeds 85%, and trims after a 1-hour hold on full-charge days
-- Weekly best full-charge day selection scored from weather forecast
-- Monitor mode — observe decisions without writing to the Sunsynk API
-- Auto-generated Lovelace dashboard with adaptive learning, history graphs, a Consumption section (overnight/daily/peak-window household load and grid import/export, plus real cost — see below), and tuning assist sections
-- Optional link to Home Assistant Octopus Energy for real electricity + gas cost, and a running year-to-date net-cost total
-- Optional push notifications via any HA notify service
+**Overnight charging**
+- 01:55 plan for the 02:00–05:00 cheap window. It buys just enough to reach the morning solar, or fills to 95–100% when the forecast is poor (under 7 kWh).
+- Charge window sized from the learned charge rate, charge losses and battery temperature.
+- Weekly full-charge day, picked on Sunday from the weather forecast and re-checked daily against the solar forecast.
+- Charge watchdog at 02:20, automatic retry if a plan push fails, and a 2-hourly check that the inverter still matches the plan.
+- Gentle charging (optional, observe-only by default): the lowest grid charge current that still reaches the target by 05:00.
+
+**Day and evening**
+- Peak cover (optional, observe-only by default): before 16:00, tops the battery up at the day rate if it would not last the 16:00–19:00 peak.
+- Evening reserve: the battery keeps enough charge at 19:00 to run the house until the 02:00 charge.
+- Evening export pause when grid draw is high (watt trigger, with a cost-based trigger running in observe-only mode).
+- Daytime trim: above 85% SOC, sells down towards 82% for 45 minutes. It never goes below the evening reserve or, before 16:00, below the SOC bought cheaply overnight. On the full-charge day it holds 100% for an hour first.
+- Optional peak export: sells the surplus above the evening reserve at the peak export rate (observe-only by default).
+
+**Free electricity events**
+- Enter a free-electricity window (start and end). The integration sells down before it and refills during it, then restores the normal plan.
+
+**Learning**
+- Forecast correction, overnight drain buffer, evening SOC nudge, effective charge rate and learned household load, all from your own history.
+- Separate away profile (manual switch or automatic from people and calendar), so holidays don't skew the everyday learning.
+
+**Costs and reports**
+- Optional Octopus Energy link for real electricity and gas cost, a running year-to-date total and tariff rates read from Octopus.
+- Daily efficiency KPIs and what the battery saved you, a weekly cost digest, a monthly tariff comparison (Flux vs Go, Cosy, Agile, Intelligent and others) and a bill check against your statement.
+- Alerts: tariff price changes, overnight load well above normal, daytime grid import spikes, low battery capacity and spare midday solar.
+- "Cost of 1 kWh now" sensor for automations (run appliances when energy is cheap).
+- Optional AI Task weekly insight.
+
+**Safety**
+- Monitor mode runs all the logic without writing to the inverter.
+- Every inverter write reports success or failure. A failed push sends a "⚠️ … NOT applied" notification.
 
 ## Requirements
 
 Install and configure these first.
 
-### 1. SolarSynkV3
+1. **[SolarSynkV3](https://github.com/martinville/solarsynkv3)**: inverter sensors, such as `sensor.solarsynkv3_<inverter_serial>_battery_soc`, `_grid_pac`, `_pv_mppt0_power`, `_pv_mppt1_power`, `_pv_etoday` and the daily load and grid meters. Setup checks that `battery_soc` and `grid_pac` exist.
+2. **Forecast.Solar**: daily forecast, for example `sensor.energy_production_today`. A tomorrow forecast sensor and an hourly forecast are optional.
+3. **A weather entity**, for example `weather.forecast_home`, used for full-charge day scoring.
+4. **[Sunsynk Power Flow Card](https://github.com/slipx06/sunsynk-power-flow-card)**: needed by the generated dashboard.
 
-Required for inverter sensor entities.
-
-GitHub repository:
-`https://github.com/martinville/solarsynkv3`
-
-This integration provides entities such as:
-
-- `sensor.solarsynkv3_<inverter_serial>_battery_soc`
-- `sensor.solarsynkv3_<inverter_serial>_grid_pac`
-- `sensor.solarsynkv3_<inverter_serial>_pv_mppt0_power`
-- `sensor.solarsynkv3_<inverter_serial>_pv_mppt1_power`
-- `sensor.solarsynkv3_<inverter_serial>_pv_etoday` (used for actual solar logging)
-
-Setup validation checks that `battery_soc` and `grid_pac` entities exist before the integration will save.
-
-### 2. Forecast.Solar
-
-Required for solar forecast input.
-
-This integration should provide:
-
-- `sensor.energy_production_today`
-
-### 3. Weather entity
-
-Required for full-charge day scoring.
-
-Example:
-
-- `weather.forecast_home`
-
-### 4. Sunsynk Power Flow Card (required for dashboard)
-
-The optimizer dashboard uses the custom power flow card:
-
-https://github.com/slipx06/sunsynk-power-flow-card
+Optional: **[Home Assistant Octopus Energy](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy)** for real costs, tariff rates and the tariff comparison.
 
 ## Installation via HACS
 
-### Step 1: Add the custom repository
+1. Open **HACS**, then the top-right menu, then **Custom repositories**.
+2. Add `https://github.com/dharv79/Sunsynk_HA_Optimizer` with category **Integration**.
+3. Search for **Sunsynk Optimizer** and click **Download**.
+4. Restart Home Assistant.
+5. Go to **Settings → Devices & Services → Add Integration** and choose **Sunsynk Optimizer**.
 
-In Home Assistant:
+## Configuration
 
-1. Open **HACS**
-2. Go to **Integrations**
-3. Open the menu in the top right
-4. Select **Custom repositories**
-5. Add this repository URL:
+Setup asks for the essentials. Everything else is under **Configure** on the integration. The options flow has four steps: main settings, tariff rows 1–4, tariff rows 5–8, and the baseline Flux 1 (import) and Flux 2 (export) windows.
 
-```text
-https://github.com/dharv79/Sunsynk_HA_Optimizer
-```
-
-6. Set the category to:
-
-```text
-Integration
-```
-
-7. Click **Add**
-8. Search for:
-
-```text
-Sunsynk Optimizer
-```
-
-9. Click **Download**
-
-## Step 2: Add the integration and configure it
-
-After download:
-
-1. Go to **Settings → Devices & Services**
-2. Click **Add Integration**
-3. Search for:
-
-```text
-Sunsynk Optimizer
-```
-
-4. Open the integration setup
-5. Enter the requested values
-
-### Configuration fields
-
-#### Sunsynk username / password
-
-Your Sunsynk cloud account credentials. Login is validated during setup.
-
-#### Plant ID
-
-The Sunsynk API plant/station ID used for all API writes. Numeric.
-
-Example:
-
-```text
-111111
-```
-
-#### Inverter Serial
-
-The SolarSynkV3 inverter serial used to build HA sensor entity IDs. Alphanumeric.
-
-Example:
-
-```text
-1111111111
-```
-
-#### Forecast sensor
-
-Entity ID of the solar energy forecast sensor.
-
-```text
-sensor.energy_production_today
-```
-
-#### Weather entity
-
-Entity ID of a daily weather forecast entity.
-
-```text
-weather.forecast_home
-```
-
-#### Notify service
-
-HA notify service to use for plan and action notifications.
-
-```text
-notify.notify
-```
-
-#### Notify target (optional)
-
-Target channel or device for the notify service.
-
-#### Data report target (optional)
-
-A secondary notify target that receives a full JSON debug report at 22:00 each day, containing the import plan, morning state (including overnight household load), day actuals (including daily household load and grid import/export), the 16:00–19:00 peak-window usage, and the settled daily cost (see Octopus Energy cost link below, tagged with the prior day's date). Useful for logging to a Slack channel or similar.
-
-#### Octopus Energy cost link (optional)
-
-Three free-text entity-ID fields — **Octopus import cost sensor**, **Octopus export income sensor**, **Octopus gas cost sensor** — let you point at the separately-installed [Home Assistant Octopus Energy](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy) integration's "previous accumulative cost" sensors. Find the exact entity IDs for your account in **Developer Tools → States** (filter `octopus`), since they include an account-specific MPAN/MPRN/serial suffix.
-
-All three are optional and independent — leave any blank to skip it. When set, the integration reads them each morning (these sensors settle to reflect the *prior* day a few hours after midnight) and logs the real cost, surfaced on the dashboard's Consumption section as both the last settled day's figures and a running **year-to-date net cost** (electricity import − electricity export income + gas), so you can track the actual annual bill the optimizer is working towards minimising.
-
-Octopus's own billing settlement occasionally lags more than a day (seen around UK bank holidays) — the integration detects this by checking each sensor's actual settled date and, rather than recording an old day's cost under the wrong date, logs it under its real date once it arrives (accepting readings up to 5 days late), so a lag shows up as a delayed entry, never a mislabelled one.
-
-Every Sunday at 18:00, if a **data report target** is configured, a weekly cost summary — the last 7 days' import/export/gas costs, net cost, household load, solar generation, the current year-to-date figure, and the cost-aware export threshold's shadow-mode divergence tally (see below) — is sent as one more JSON line to that same debug stream.
-
-#### AI Task weekly insight (optional, off by default)
-
-**Enable AI Task weekly insight** turns on a Sunday 18:00 request to Home Assistant's built-in [AI Task](https://www.home-assistant.io/integrations/ai_task/) feature — it hands your tariff price bands and the week's actual cost/load/solar figures to whatever AI Task provider you have configured, and asks for a short plain-English insight (notable trends, one suggested config change if clearly justified). The result is sent as its own notification to your main **Notify target**, separate from the JSON debug stream.
-
-Off by default. If you turn it on but haven't configured an AI Task provider (Settings → Voice assistants), or your HA version predates AI Task (introduced in 2025.7), this silently does nothing — no error, just no weekly message. Since this calls out to whatever LLM you've configured as your AI Task provider, it may incur cost on that provider's side.
-
-#### Operation mode
-
-- `auto` — full optimizer behaviour, API writes enabled
-- `monitor` — all logic runs and state is updated, but no API calls are made
-
-#### Export disable threshold (W)
-
-Grid/load power above this wattage between 16:00–19:00 disables Flux 2 export by setting target SOC to 100%.
-
-Default: `1500`
-
-#### Cost-aware export threshold (optional, shadow mode by default)
-
-Two additional fields let the export-disable decision above be driven by real cost instead of a flat Watt number:
-
-- **Evening export disable cost threshold (p/hour)** — disable export when `grid draw (kW) × your configured 16:00–19:00 import price (p/kWh)` exceeds this. Default `58.32` p/h, back-computed from the default Watt threshold (1500 W) at the default Flux peak price (38.88 p/kWh) — a fresh install behaves identically to before.
-- **Cost-aware export threshold — observe only** — **on by default**. While on, the cost trigger is computed and tallied every 30 minutes but never acts; the Watt threshold above stays in full control. Every disagreement between the two is included in the weekly cost digest (see below) so you can review a few weeks of real divergence data before switching this off and letting the cost trigger take over.
-
-#### Average consumption (weekday / weekend)
-
-Average home load in kW, used for the solar bridge target calculation. Separate values for weekdays, weekends, and away (holiday).
-
-Default weekday: `0.75` kW  
-Default weekend: `0.90` kW  
-Default away: `0.30` kW (used only while the Away switch is on; takes precedence over weekday/weekend)
-
-#### Away mode
-
-A built-in **Away mode** switch (`switch.away_mode`, in the dashboard's Manual controls). Turn it on for holidays: the optimizer runs a separate away calibration (its own overnight-drain profile with a lower default buffer, and the away consumption above) so low-load holiday days don't skew the everyday home learning — and vice versa. Turn it off when home to resume the home profile, which is unaffected by the away days.
-
-#### Default full-charge day
-
-Fallback full-charge day used before the weekly scoring has run.
-
-Default: `Wednesday`
-
-## Important ID mapping
+### Important ID mapping
 
 These two values are different and must not be swapped.
 
 | Use | Field |
 |---|---|
-| SolarSynkV3 sensor entity suffix | `inverter_serial` |
-| Sunsynk API writes | `plant_id` |
+| Sunsynk API writes | **Plant ID** (numeric) |
+| SolarSynkV3 sensor entity IDs | **Inverter serial** |
 
-## Options flow (reconfiguring)
+### Main settings
 
-After initial setup, open the integration and select **Configure** to re-enter settings. The options flow is multi-step:
-
-1. **init** — main settings (all fields above except credentials)
-2. **charges_1** — import/export tariff rows 1–4
-3. **charges_2** — import/export tariff rows 5–8
-4. **flux** — baseline Flux 1 (import) and Flux 2 (export) window times and target SOC
-
-## Operation modes
-
-### auto
-
-All optimizer behaviour is active. Import plans are calculated and pushed to the Sunsynk API via Flux override. Flux 2 export control and SOC trimming are active.
-
-### monitor
-
-All logic paths run and state entities are updated, but no API calls are made. Useful for observing what the optimizer would do without affecting the inverter. The `binary_sensor.monitor_only_mode` entity turns on when this mode is active.
-
-## Automation behaviour
-
-### Import plan (01:55 daily)
-
-Runs each night at 01:55 to set the overnight charging window (Flux 1).
-
-Before calculating targets, four adaptive corrections are fetched from historical data:
-
-1. **Forecast correction** — scales the raw forecast by the *median* actual/forecast ratio from the last 30 days (median so one freak day can't skew it). Active after 7+ paired days.
-2. **Overnight drain compensation** — extra % added to target SOC to cover battery drain between charge end and 06:00. Uses the 75th percentile of recent drain values so appliance-heavy nights are covered, measured only on nights where the battery actually charged (so a night that started already-full isn't mistaken for drain). Active after 5+ qualifying mornings (returns 15% fallback until then).
-3. **Evening SOC nudge** — shifts target ±5% if the battery consistently ends the day too full or too empty. Active after 5+ matching days per forecast band.
-4. **Effective charge rate** — calibrated kW rate from historical charging sessions, used to size the import window precisely. When recent nights are too short to calibrate (common in summer), the last learned rate is reused rather than reverting to the configured nameplate rate.
-
-Low-solar decisions use the **pessimistic** of the raw and corrected forecast, so a genuinely poor day isn't inflated above the low-solar threshold by the learned correction (which is derived mostly from good days).
-
-SOC target is calculated as:
-
-| Condition | Target SOC |
+| Setting | Notes |
 |---|---|
-| Full-charge day (solar bridge) | 20% + hours-to-solar × consumption / capacity |
-| Low solar (< 7 kWh), winter-like | 100% |
-| Low solar (< 7 kWh), other | 95% |
-| Solar bridge (normal) | 20% + hours-to-solar × consumption / capacity |
-| Band fallback, summer-like | 80% |
-| Band fallback, shoulder | 85% |
-| Band fallback, winter-like | 95% |
+| Sunsynk username / password | Cloud account, validated at setup |
+| Plant ID / Inverter serial | See the ID mapping above |
+| Weather entity, Forecast.Solar sensor | Required |
+| Hourly forecast sensor + attribute, tomorrow's forecast sensor | Optional; improve the morning bridge and multi-day planning |
+| Notify service / Notify target | Human notifications, for example `notify.notify` |
+| Daily data report notify target | Optional; machine-readable JSON debug lines (see below) |
+| Operation mode | `auto` (writes to the inverter) or `monitor` (no writes) |
+| Battery capacity (kWh), charge rate (kW), nominal voltage (V) | Defaults 10 kWh, 3 kW, 51.2 V |
+| Average consumption: weekday / weekend / away (kW) | Defaults 0.75 / 0.9 / 0.3. Replaced by the learned load once enough days are logged |
+| Hours after sunrise until solar covers load | Sets the morning solar start |
+| Default full-charge day | Used until the first Sunday pick. Default Wednesday |
+| Evening export disable threshold (W) | Default 1500 |
+| Evening export disable cost threshold (p/hour) + observe-only switch | Cost-based trigger; observe-only by default |
+| Free event charge rate / export rate (kW) | Used to plan free-electricity events |
+| Inverter export limit (W) | Turns on clipped-solar detection; 0 = off |
+| Battery purchase cost (£) + lifetime throughput (kWh) | Optional wear cost in export decisions |
+| Auto away: person entities, calendar + keyword, hours away | Optional automatic away mode |
+| Spare solar notification threshold (kWh) | Optional morning prompt |
+| Octopus cost sensors (import, export, gas) | Optional real cost and year-to-date total |
+| Octopus import / export rates entities | Optional; tariff prices read from Octopus instead of the tariff rows |
+| Octopus accumulative consumption sensors + comparison overrides | Optional monthly tariff comparison |
+| AI Task weekly insight | Optional, off by default; needs an AI Task provider (HA 2025.7+) |
 
-Adaptive corrections are applied on top (clamped 30–100%).
+### Behaviour switches
 
-### Morning state capture (06:00 daily)
+New decision logic ships in observe-only mode first. It logs what it would do without changing the inverter, until you turn its option on:
 
-Records battery SOC and combined PV MPPT0+MPPT1 power at 06:00 to measure overnight battery drain for adaptive correction.
+| Option | Default |
+|---|---|
+| Cost-aware export threshold — observe only | On (observing) |
+| Adjust the overnight target from day-rate import | Off (observing) |
+| Sell the surplus above the evening reserve at the peak rate | Off (observing) |
+| Charge gently across 02:00–05:00 | Off (observing) |
+| Top up before 16:00 if the battery would not last the peak | Off (observing) |
+| Notify at 05:00 when overnight load is high | On |
 
-### Full-charge day selection (Sunday at 18:00)
+## How it works
 
-Scores Monday–Friday from the daily weather forecast. Scoring:
+### Overnight plan (01:55)
 
-- Base: `100 − cloud_coverage − (rain_probability × 0.7)`
-- Condition bonus: +25 sunny/clear, +10 partly cloudy, −10 cloudy/fog, −25 rain/snow
-- Temperature: +3 if ≥ 18 °C, −3 if ≤ 5 °C
-- Day-of-week penalty: Thursday −5, Friday −15
+Target SOC:
 
-The highest-scoring day is set as the full-charge day for the coming week.
+| Condition | Target |
+|---|---|
+| Normal day | Enough to reach the time solar covers the house load, plus the overnight drain buffer and evening nudge |
+| Forecast under 7 kWh, winter-like | 100% |
+| Forecast under 7 kWh, other seasons | 95% (the drain buffer can take it to 100%) |
+| Weekly full-charge day, sunny | As a normal day; solar fills the battery to 100% |
+| Weekly full-charge day, dull | 100% from the grid |
+| Sunrise time unavailable | 80% / 85% / 95% by season |
 
-### Flux 2 check (every 30 minutes, and on SOC change)
+Low-solar decisions use the more pessimistic of the raw and corrected forecasts.
 
-Controls Flux 2 (export window) based on real-time conditions:
+The window starts at 02:00 and ends when the battery should reach the target, rounded up to 15 minutes, between 02:15 and 05:00. Dull days always use the full window. House load during the window is supplied by the grid alongside the charge, so it doesn't lengthen the window.
 
-- If grid/load power exceeds the export disable threshold between 16:00–19:00 → sets Flux 2 target SOC to 100% (disables export)
-- If SOC exceeds 85% on a non-full-charge day → trims to 82% for a 45-minute window
-- On the full-charge day, when SOC reaches 99.5%, schedules a 1-hour hold then trims to 82%
+Learning (active once enough days are logged):
+1. **Forecast correction**: median actual/forecast ratio over 30 days.
+2. **Overnight drain buffer**: 75th percentile of the SOC lost between charge end and 06:00.
+3. **Evening SOC nudge**: ±5% if the battery keeps ending the day too full or too empty.
+4. **Effective charge rate**: measured SOC gained per hour of charging, then derated when the battery is cold.
+5. **Learned household load**: replaces the configured consumption.
 
-### Evening actuals capture (22:00 daily)
+### Daily schedule
 
-Records end-of-day battery SOC and actual PV generation (`pv_etoday`) for adaptive learning. If a data report target is configured, posts the full day JSON to that notify target.
+| Time | What happens |
+|---|---|
+| 01:55 | Overnight plan pushed to Flux 1 |
+| 02:00, 05:00, 16:00, 19:00, 22:00 | Meter snapshots for the daily KPIs |
+| 02:20 | Charge watchdog (is the battery actually charging?) |
+| 05:00 | Overnight house load check |
+| 06:00 | Morning SOC recorded |
+| 06:05 | Spare solar estimate |
+| 06:10 | Tariff price-change check |
+| Before 16:00 | Peak cover check |
+| 16:00 | Peak export decision |
+| 18:00 (Sundays, and daily re-check) | Full-charge day choice |
+| 22:00 | Day actuals, KPIs and the data report |
+| Every 30 min and on SOC change | Evening export pause, daytime trim, daytime import alert, cost of 1 kWh now |
+| Every 2 h | Inverter drift check |
 
-## Adaptive learning
+### Full-charge day scoring
 
-History is written to JSONL files at:
-
-```text
-{ha_config_dir}/sunsynk_optimizer_data/YYYY-MM.jsonl
-```
-
-Four record types are logged:
-
-| Type | When | Contents |
-|---|---|---|
-| `import_plan` | 01:55 | SOC, forecast, corrections, target SOC, import window |
-| `morning_state` | 06:00 | Battery SOC and PV power at dawn |
-| `day_actuals` | 22:00 | Evening SOC and actual solar kWh |
-| `full_charge_day` | Sunday 18:00 | Scores and chosen day |
-
-Files older than 13 months are pruned automatically on HA startup.
-
-All corrections return neutral values until enough days have accumulated — the optimizer behaves conservatively on a fresh install.
+Sunday 18:00 scores Monday–Friday: `100 − cloud − 0.7 × rain`, with +25 sunny/clear, +10 partly cloudy, −10 cloudy/fog, −25 rain/snow, ±3 for temperature, and Thursday −5 / Friday −15. The daily 18:00 re-check can move the day to tomorrow if tomorrow's solar forecast is good enough to fill the battery and scores better.
 
 ## Entities
 
-### Sensors
-
-| Entity | Description |
+| Entity | What it shows |
 |---|---|
-| `sensor.selected_full_charge_day` | Currently selected full-charge day. Attributes include all day scores. |
-| `sensor.import_plan_end` | Current import window summary. Attributes expose the full plan including all adaptive corrections. |
-| `sensor.flux_2_action` | Last Flux 2 action taken. Attributes expose the full action dict. |
-| `sensor.next_import_window` | Import window string for the upcoming night. |
-| `sensor.current_soc_target` | Target SOC set by the last import plan. |
-| `sensor.operation_mode` | Current mode: `auto` or `monitor`. |
-| `sensor.last_error` | Last error message, or `OK`. |
-| `sensor.last_updated` | ISO timestamp of the last state update. |
+| `sensor.selected_full_charge_day` | This week's full-charge day (attributes: scores) |
+| `sensor.import_plan_end` | Tonight's plan (attributes: the full plan) |
+| `sensor.next_import_window`, `sensor.current_soc_target` | Window and target |
+| `sensor.flux_2_action` | Last export-window action |
+| `sensor.consumption` | Overnight, daily and peak-window load, grid import/export, cost |
+| `sensor.free_event` | Current free-electricity event |
+| `sensor.spare_solar_today` | Expected spare midday solar (kWh) |
+| `sensor.cost_of_1_kwh_now` | What using 1 kWh now costs (p/kWh) |
+| `sensor.operation_mode` | `auto` or `monitor` |
+| Diagnostic sensors | Forecast correction, drain adjustment, evening SOC adjustment, effective charge rate, battery capacity estimate, last error, last updated |
+| `binary_sensor.evening_export_disabled`, `binary_sensor.monitor_only_mode` | Status flags |
+| `switch.away_mode` | Away (holiday) profile |
+| `datetime` Free event start / end | Manual free-event entry |
+| `number.billed_last_month` | Enter last month's bill (£) to check it against the logged cost |
+| Buttons | Test plan (dry run), Run choose best day, Reset to baseline, Update dashboard, Cancel free event |
 
-### Binary sensors
+**Test plan** recomputes tonight's plan and sends the JSON to your notify target. It doesn't push, log or change state, so it's safe to press at any time.
 
-| Entity | Description |
-|---|---|
-| `binary_sensor.evening_export_disabled` | On when Flux 2 export has been disabled by a high grid draw event. |
-| `binary_sensor.monitor_only_mode` | On when operation mode is `monitor`. |
+## Dashboard
 
-### Buttons
-
-| Button | Action |
-|---|---|
-| Test plan (dry run) | Recomputes the full import plan and sends the complete JSON to the app notification — no inverter push, safe to use any time |
-| Reset to baseline | Push the baseline Flux settings from config and clear export-disabled state |
-| Update dashboard | Regenerate the Lovelace dashboard YAML file |
-
-## Step 3: Install the dashboard
-
-Once the integration is configured:
-
-1. Open **Settings → Devices & Services**
-2. Open the **Sunsynk Optimizer** integration
-3. Go to its **Entities**
-4. Find and press **Update dashboard**
-
-This generates a dashboard YAML file in the HA config directory, with all SolarSynkV3 entity IDs built automatically from your configured inverter serial.
-
-## Step 4: Add the Lovelace dashboard config
-
-After pressing **Update dashboard**, a persistent notification shows the generated filename.
-
-Add the snippet from the notification to your `configuration.yaml`:
+1. Press **Update dashboard**. This writes `sunsynk_optimizer_<entry_id>.yaml` to your config folder and shows the snippet in a notification.
+2. Add it to `configuration.yaml`:
 
 ```yaml
 lovelace:
@@ -381,74 +196,36 @@ lovelace:
       show_in_sidebar: true
 ```
 
-## Step 5: Restart HA
+3. Restart Home Assistant.
 
-Restart HA after saving `configuration.yaml`. Once back up, open the dashboard from the sidebar.
+Press **Update dashboard** again after an update that changes the layout.
 
-## Dashboard sections
+## Data and debug report
 
-| Section | Contents |
-|---|---|
-| Power flow | Live Sunsynk power flow card |
-| KPI summary | Daily energy totals and optimizer KPIs |
-| Adaptive learning | Active correction factors and a plain-English explanation of what the system has learned |
-| Optimizer status | All optimizer state entities |
-| Manual controls | Test plan, Reset baseline, Update dashboard buttons |
-| Forecast and live values | Weather, forecast sensor, key inverter values, 48-hour SOC/grid and PV history graphs |
-| Tuning assist | Seasonal guidance and all relevant input values |
-| Event detail | Last import plan, last Flux 2 action, logbook |
+Decisions and actuals are logged to `{config}/sunsynk_optimizer_data/YYYY-MM.jsonl`. Files older than 13 months are pruned. Every record carries the integration `version`.
 
-## Updating the dashboard
-
-If you change the integration configuration or the dashboard layout changes in a new release, press **Update dashboard** again. The dashboard file is rebuilt immediately — no manual editing needed.
+If a **daily data report target** is set, the integration posts one JSON line per record each day at 22:00 (for example to a Slack channel). The records are tonight's plan, the morning state, day actuals, KPIs, peak-window usage, peak cover, peak export and the latest settled cost. A weekly cost summary follows on Sundays at 18:00. Record types are described in [docs/architecture/data-logging.md](docs/architecture/data-logging.md).
 
 ## Notifications
 
-Notifications use the configured notify service and are sent for:
-
-- Import plan calculated (01:55)
-- Full-charge day updated (Sunday 18:00)
-- Evening export disabled
-- SOC trim to 82%
-- Full-charge day trim to 82%
-- Baseline restored
+Titles start with "🔋 Sunsynk:", for example: import plan set, full-charge day chosen or moved, evening export paused, battery trim, topping up before the peak, free event scheduled, started or finished, spare solar today, overnight load high, daytime grid import, Flux prices changed, tariff comparison, bill check, battery value, weekly insight. A failed inverter write is titled "⚠️ Sunsynk: … NOT applied".
 
 ## Troubleshooting
 
-### Integration will not save during setup
-
-The setup validates that `sensor.solarsynkv3_{inverter_serial}_battery_soc` and `sensor.solarsynkv3_{inverter_serial}_grid_pac` exist. Ensure SolarSynkV3 is installed and has loaded at least one data cycle before adding this integration.
-
-### Dashboard installs with wrong sensors
-
-Check that `inverter_serial` is the SolarSynkV3 serial (alphanumeric) and `plant_id` is the Sunsynk API plant ID (numeric), then press **Update dashboard** again.
-
-### Notifications do not send
-
-Check the notify service exists in HA, the notify target is correct if required, and the integration **Last error** entity for details.
-
-### Import plan fails
-
-Check that `plant_id` is correct, Sunsynk credentials are correct, and the integration can reach the Sunsynk API (check **Last error** entity).
-
-### Adaptive corrections not activating
-
-Corrections are inactive until enough days of history exist (7+ for forecast correction, 5+ for drain and evening nudge). This is expected on a fresh install. The overnight drain adjustment returns a 15% safety buffer until the 5-day threshold is met.
-
-### HACS shows no information
-
-Press **Update information** from the HACS context menu for this integration to force a refresh of the repository info.
+- **Setup won't save**: SolarSynkV3 must be installed with `battery_soc` and `grid_pac` loaded for your inverter serial.
+- **Dashboard shows wrong sensors**: check the Inverter serial vs Plant ID mapping, then press **Update dashboard**.
+- **Plan not applied**: check the **Last error** sensor, the Plant ID and your Sunsynk credentials.
+- **Learning not active yet**: corrections stay neutral until enough days exist (about 5–7). The drain buffer uses a safe fallback until then.
+- **HACS shows no information**: use **Update information** from the HACS menu.
 
 ## Updating
 
-When updating through HACS:
-
-1. Download the update
-2. Reload the integration via **Settings → Devices & Services**
-3. Press **Update dashboard** if the dashboard structure has changed in the release notes
+1. Download the update in HACS.
+2. Restart Home Assistant.
+3. Press **Update dashboard** if the release notes mention dashboard changes.
 
 ## Notes
 
-This integration requires SolarSynkV3 and Forecast.Solar to already be installed and working. It does not replace those integrations; it builds optimisation logic on top of them.
+This integration builds on SolarSynkV3 and Forecast.Solar. It does not replace them. The `cryptography` library used for the Sunsynk login ships with Home Assistant.
 
-The `cryptography` library used for Sunsynk API login is bundled with Home Assistant and does not need to be installed separately.
+Design notes and the end-to-end logic are in [docs/logic.md](docs/logic.md) and [docs/architecture/](docs/architecture/).
