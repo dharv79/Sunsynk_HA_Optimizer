@@ -72,3 +72,11 @@ Option `export_limit_w` (0 = off). The 30-min tick (`optimizer._async_track_clip
 - `day_kpis(..., over_limit=)` takes each segment's over-limit kWh (capped at that segment's import) out of the day and peak parts of `avoidable_import_gbp`. The import bands still include it, because it was paid for. A new field, `over_limit_import_kwh`, is logged.
 
 **Verification.** `tests/test_kpis.py::test_over_limit_import_step` and `test_day_kpis_leave_over_limit_import_out_of_avoidable`. In HA, `day_kpis` gains `over_limit_import_kwh` from the first full day after install. Records already logged stay as written.
+
+## Version stamp (29/10/2026)
+
+**Why.** A missing field in the debug bundle could mean either a bug or an older build still running, and the logs could not tell which.
+
+**Design.** `const.INTEGRATION_VERSION` is read once from `manifest.json` at import (`None` if unreadable). `data_logger._record` adds `version` to every JSONL record. The 01:55 plan and the 22:00 `day_kpis` record also carry it, so every 22:00 debug bundle names the running build.
+
+**Verification.** `tests/test_data_logger.py::test_records_carry_the_manifest_version`. Live: the next 22:00 bundle shows `"version": "1.0.12b29"`.

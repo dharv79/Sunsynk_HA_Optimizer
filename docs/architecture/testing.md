@@ -34,7 +34,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | File | Covers |
 |---|---|
 | `tests/conftest.py` | HA stubs, direct module loading, `dl`/`planning`/`flux_helpers`/`safe_id` fixtures, `make_day` |
-| `tests/test_data_logger.py` | `compute_*` / `count_*` adaptive-learning maths, `_is_drain_night`, `_percentile` |
+| `tests/test_data_logger.py` | `compute_*` / `count_*` adaptive-learning maths, `_is_drain_night`, `_percentile`; version stamp on records |
 | `tests/test_away_mode.py` | Home/away calibration split |
 | `tests/test_day_actuals.py` | day_actuals / peak_window_usage logging and dedup; unavailable meters log None; charge_watchdog dedup |
 | `tests/test_daily_cost.py` | daily_cost pairing, net cost, fill-only merge, month-boundary catch-up |

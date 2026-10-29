@@ -10,7 +10,22 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 DOMAIN = "sunsynk_optimizer"
+
+
+def _manifest_version() -> str | None:
+    try:
+        return json.loads((Path(__file__).parent / "manifest.json").read_text())["version"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+# Read once at import (off the event loop) and stamped on every log record and
+# the 22:00 debug bundle, so each line says which build produced it.
+INTEGRATION_VERSION = _manifest_version()
 PLATFORMS = ["sensor", "button", "binary_sensor", "switch", "datetime", "number"]
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}_state"

@@ -211,3 +211,15 @@ def test_charge_rate_counter_matches_the_calibration_filter(dl):
     # 02:00 -> 04:30 used to count only from >2.5h; 02:15 (0.25h) charges count in both.
     days = [make_day(target_soc=80, initial_soc=40, flux1_end=end) for end in ("02:15", "04:30", "06:30")]
     assert dl.count_charge_rate_calibration_days(days) == 2
+
+
+def test_records_carry_the_manifest_version():
+    import json
+    import sys
+    from pathlib import Path
+
+    manifest = Path(__file__).resolve().parents[1] / "custom_components" / "sunsynk_optimizer" / "manifest.json"
+    version = json.loads(manifest.read_text())["version"]
+    assert sys.modules["sunsynk_optimizer.const"].INTEGRATION_VERSION == version
+    rec = sys.modules["sunsynk_optimizer.data_logger"]._record("day_kpis", date="2026-10-29")
+    assert rec["version"] == version and rec["date"] == "2026-10-29"
