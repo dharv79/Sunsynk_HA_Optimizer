@@ -1,6 +1,6 @@
 # Phase 41 — Shadow go-live scorecard
 
-**Status:** Planned, not built. **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Built, awaiting merge. **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not built: no scorecard or aggregate code exists. The record types `peak_export`
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- `planning.shadow_scorecard(records, today)` scores import feedback (15), peak export (17), weighted correction (20), gentle charge (23), peak cover (30), capacity (34), 85% cap (`day_kpis.soc_cap_shadow`) and multi-day (39) over 30 days. Each returns verdict, days, changed, `delta_gbp`, last 5 evidence dates and a note. `delta_gbp` is `None` where no £ counterfactual exists (import feedback, gentle charge, multi-day).
+- Verdicts: `no_records` (nothing logged; peak export and peak cover also when 14 days are silent), `harmful` (delta ≤ -£0.50, or weighted error ≥ 10% worse), `ready` (≥7 days, ≥3 changed, delta > 0; weighted error ≥ 5% better), else `not_yet`.
+- Runs on the first Sunday of the month at 18:00 (`_async_send_shadow_scorecard`, after battery value). Sends a `shadow_scorecard` JSON line to the debug target, a short human summary, and sets `sensor.shadow_scorecard` (state = number of ready features, attributes per feature). Read-only: no API writes, safe in monitor mode, never changes a `*_live` option.
+- Tests: `tests/test_planning.py` (phase 41 section).

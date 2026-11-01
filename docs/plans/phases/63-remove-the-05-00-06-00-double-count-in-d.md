@@ -1,6 +1,6 @@
 # Phase 63 — Remove the 05:00-06:00 double count in drain and bridge
 
-**Status:** Built, pending merge. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, merged (b9e8e85, PR #92); median switch deferred. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 

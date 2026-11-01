@@ -114,6 +114,7 @@ class OptimizerState:
     # Battery capacity tracking (phase 34): date, estimate_kwh, samples,
     # configured_kwh, pct_of_configured. Shadow: never changes battery_capacity.
     battery_capacity_estimate: dict[str, Any] = field(default_factory=dict)
+    shadow_scorecard: dict[str, Any] = field(default_factory=dict)
     # Today's 16:00 peak export decision (phase 17). Persisted so a restart
     # keeps the 22:00 debug line and a live export's hold on Flux 2.
     peak_export: dict[str, Any] = field(default_factory=dict)

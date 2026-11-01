@@ -190,6 +190,9 @@ from .planning import (
     charge_progress_ok,
     daily_report_plans,
     day_kpis,
+    SCORECARD_WINDOW_DAYS,
+    scorecard_summary,
+    shadow_scorecard,
     soc_cap_shadow,
     daytime_load_kw,
     evening_reserve_soc,
@@ -1559,6 +1562,7 @@ class SunsynkOptimizer:
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
             await self._guarded(self._async_send_monthly_tariff_comparison, "Monthly tariff comparison")
             await self._guarded(self._async_send_monthly_battery_value, "Monthly battery value")
+            await self._guarded(self._async_send_shadow_scorecard, "Shadow scorecard")
             if dt_util.now().day <= 7:
                 await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
@@ -2626,6 +2630,23 @@ class SunsynkOptimizer:
             f"Battery saved ~£{summary['saving_gbp']:.2f} this month{wear} ({summary['days']} days) "
             "vs the same days with no battery, 00:00–22:00 at your Flux rates.",
         )
+
+    async def _async_send_shadow_scorecard(self) -> None:
+        """First Sunday of the month: score every shadow feature against what happened (phase 41); read-only."""
+        today = dt_util.now().date()
+        if today.day > 7:
+            return
+        records = await self.data_logger.async_load_records(SCORECARD_WINDOW_DAYS + 2)
+        card = shadow_scorecard(records, today.isoformat())
+        self.coordinator.update_state(touch=False, shadow_scorecard=card)
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify(
+                "Sunsynk Shadow Scorecard",
+                json.dumps({"type": "shadow_scorecard", "date": today.isoformat(), "features": card}),
+                target=data_report_target,
+            )
+        await self.async_notify("🔋 Sunsynk: shadow feature scorecard", scorecard_summary(card))
 
     async def async_set_billed_amount(self, billed_gbp: float) -> None:
         """User entered last month's billed net £ (number entity); reconcile it now (phase 36)."""

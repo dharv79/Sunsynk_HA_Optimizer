@@ -48,7 +48,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 38. "Cost of 1 kWh now" sensor | Done, merged (f790c19, PR #64) | S, ~30k |
 | 39. Multi-day low-solar planning | Done, merged (1935017, PR #61), shadow | S, ~30k |
 | 40. Daytime load spike alert | Done, merged (33fb1fd, PR #63) | XS, ~20k |
-| 41. Shadow go-live scorecard | Planned, not built | M |
+| 41. Shadow go-live scorecard | Built, awaiting merge | M, ~40k actual |
 | 42. Import cause ledger ("why did I import?") | Planned, not built | M |
 | 43. Inverter fault and event log feed (feasibility-gated) | Planned, not built | S |
 | 44. CT clamp vs smart-meter reconciliation (1.0.12b31) | Done, merged (9fd7115, PR #90) | XS, ~35k actual |
@@ -70,7 +70,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 60. Peak cover sizing: add wear and stop stacking p75 with a 1.1 margin | Planned, not built | S |
 | 61. Learn the charge rate from the 02:00/05:00 meter snapshots, and stop derating it twice | Planned, not built | M |
 | 62. Run Flux 1 to 05:00 every night, capped by the target | Planned, not built | S |
-| 63. Remove the 05:00-06:00 double count in drain and bridge | In progress (built, pending merge; median switch deferred pending backtest) | S, ~25k |
+| 63. Remove the 05:00-06:00 double count in drain and bridge | Done, merged (b9e8e85, PR #92); median switch deferred pending backtest | S, ~25k actual |
 | 64. Pick the bridge target from the forecast-error distribution (newsvendor rule) | Planned, not built | M |
 | 65. Move trims into the peak window when the solar left today can wait | Planned, not built | M |
 | 66. Re-check the peak export plan at 17:00 and 18:00 using the observed peak load | Planned, not built | S |

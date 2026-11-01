@@ -362,6 +362,10 @@ class DataLogger:
     # History analysis                                                     #
     # ------------------------------------------------------------------ #
 
+    async def async_load_records(self, days: int) -> list[dict[str, Any]]:
+        """All raw records of the last ``days`` days (phase 41 scorecard); read-only."""
+        return await self.hass.async_add_executor_job(self._read_recent, days)
+
     async def async_load_paired_days(self, days: int = 30) -> list[dict[str, Any]]:
         """Return days where both an import_plan and day_actuals record exist."""
         records = await self.hass.async_add_executor_job(self._read_recent, days)
