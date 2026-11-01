@@ -282,3 +282,33 @@ def test_full_window_nights_excluded_from_drain(dl):
     full = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct_0500=0.0,
                      overnight_drain_pct=0.0, full_window=True) for _ in range(6)]
     assert dl.compute_overnight_drain_adjustment(normal + full) == 10
+
+
+# --------------------------------------------------------------------------- #
+# Phase 61: measured charge rate                                                #
+# --------------------------------------------------------------------------- #
+
+def _measured_day(date, kw, temp=12.0, full_window=False):
+    return {"date": date, "measured_charge_kw": kw, "battery_temp_c": temp, "full_window": full_window}
+
+
+def test_compute_measured_charge_rate(dl):
+    days = [_measured_day(f"2026-10-{d:02d}", 2.0 + d / 100) for d in range(1, 6)]
+    kw, at_temp = dl.compute_measured_charge_rate_kw(days, 12.0)
+    assert at_temp is True and 2.0 < kw < 2.1
+    assert dl.compute_measured_charge_rate_kw(days[:2], 12.0) is None
+
+
+def test_compute_measured_charge_rate_skips_full_window_and_none(dl):
+    days = [_measured_day(f"2026-10-0{d}", 2.0) for d in range(1, 4)]
+    days[0]["full_window"] = True
+    days[1]["measured_charge_kw"] = None
+    assert dl.compute_measured_charge_rate_kw(days, 12.0) is None
+
+
+def test_meter_delta_rejects_reset(dl):
+    from conftest import _data_logger
+    _meter_delta = _data_logger._meter_delta
+    assert _meter_delta({"load_kwh": 1}, {"load_kwh": 4}, "load_kwh") == 3
+    assert _meter_delta({"load_kwh": 5}, {"load_kwh": 1}, "load_kwh") is None
+    assert _meter_delta({}, {"load_kwh": 1}, "load_kwh") is None

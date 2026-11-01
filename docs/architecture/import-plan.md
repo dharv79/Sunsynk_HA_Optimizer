@@ -224,3 +224,7 @@ Missing inputs → `None` fields (rule 11).
 ## Full window to 05:00 (01/11/2026, phase 62)
 
 `CONF_FULL_WINDOW_LIVE` (default off) ends Flux 1 at 05:00 on every charge night so the battery holds the target and the grid serves the house. `import_plan` logs `full_window_end`/`full_window_live`; such nights are excluded from drain learning (`_is_drain_night`).
+
+## Measured charge rate (01/11/2026, phase 61)
+
+The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.measured_charge_kw`). `data_logger.compute_measured_charge_rate_kw` takes the p75 over 14 nights, bucketed by battery temperature. `CONF_MEASURED_RATE_LIVE` (default off) switches the plan to it and stops the temperature derate being applied twice; off, `measured_charge_rate_kw` is logged only.
