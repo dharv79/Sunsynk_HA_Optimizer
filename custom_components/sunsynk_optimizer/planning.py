@@ -2401,3 +2401,56 @@ def reconcile_month(
         "partial": partial,
         "alert": gap is not None and not partial and abs(gap) > threshold_gbp,
     }
+
+
+def meter_reconciliation(
+    inverter_kwh: float | None,
+    slots: Any,
+    tolerance_pct: float = 8.0,
+    min_diff_kwh: float = 0.5,
+    through_slot: int = 44,
+) -> dict[str, Any] | None:
+    """Compare the inverter's grid kWh with the smart meter's half-hourly slots (phase 44).
+
+    The inverter total is read at 22:00, so only the first ``through_slot`` slots
+    (00:00-22:00) are summed. None when either side is missing or the slots are not
+    48 numbers (rule 11: never guess). ``diverged`` needs both a % gap and an
+    absolute gap, so a tiny day cannot trip it on rounding alone.
+    """
+    if inverter_kwh is None or not isinstance(slots, (list, tuple)) or len(slots) != HALF_HOURS_PER_DAY:
+        return None
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in slots):
+        return None
+    meter = float(sum(slots[:through_slot]))
+    diff = float(inverter_kwh) - meter
+    pct = diff / meter * 100.0 if meter >= 1.0 else None
+    diverged = abs(diff) >= min_diff_kwh and (pct is None or abs(pct) >= tolerance_pct)
+    return {
+        "inverter_kwh": round(float(inverter_kwh), 2),
+        "meter_kwh": round(meter, 2),
+        "diff_kwh": round(diff, 2),
+        "pct": None if pct is None else round(pct, 1),
+        "diverged": diverged,
+    }
+
+
+def divergence_streak(history: list[dict[str, Any]]) -> int:
+    """Length of the trailing run of consecutive-date diverged days in ``history``.
+
+    ``history`` holds ``{"date": "YYYY-MM-DD", "diverged": bool}`` in any order; a
+    gap in dates or a non-diverged day ends the run.
+    """
+    days = sorted(
+        ((date.fromisoformat(str(h["date"])), bool(h.get("diverged"))) for h in history if h.get("date")),
+        key=lambda x: x[0],
+    )
+    run = 0
+    prev: date | None = None
+    for d, bad in reversed(days):
+        if prev is not None and (prev - d).days != 1:
+            break
+        if not bad:
+            break
+        run += 1
+        prev = d
+    return run

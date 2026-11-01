@@ -1,6 +1,6 @@
 # Phase 44 — CT clamp vs smart-meter reconciliation
 
-**Status:** Planned, not built. **Size:** XS. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** In progress — built, PR pending. **Size:** XS. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,9 @@ Confirmed both sources: day_actuals grid fields in data_logger.py and the Octopu
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- `planning.meter_reconciliation` compares the 22:00 inverter total with slots 00:00–22:00 only (44 slots), diverged = gap ≥ 0.5 kWh and ≥ 8%; `planning.divergence_streak` counts trailing consecutive diverged dates.
+- Records `meter_reconciliation_import` / `_export` (per date, deduped) written from `_async_reconcile_meters`, called at the end of `_async_capture_half_hourly`. One notification when the streak reaches exactly 3 days.
+- Not done: weekly digest ratio (deferred).

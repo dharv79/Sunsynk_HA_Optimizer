@@ -291,6 +291,29 @@ class DataLogger:
                     target[str(rec["date"])] = rec["kwh"]
         return out
 
+    async def async_log_meter_reconciliation(self, kind: str, date: str, **fields: Any) -> None:
+        """Log one day's inverter-vs-smart-meter comparison (phase 44); ``kind`` is "import" or "export"."""
+        await self._async_append(_record(f"meter_reconciliation_{kind}", date=date, **fields))
+
+    async def async_load_reconciliation_inputs(
+        self, days: int = 30
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+        """({date: day_actuals}, {date: import reconciliation}, {date: export reconciliation})."""
+        records = await self.hass.async_add_executor_job(self._read_recent, days)
+        actuals: dict[str, dict[str, Any]] = {}
+        recon: tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]] = ({}, {})
+        for rec in records:
+            date = rec.get("date")
+            if not date:
+                continue
+            if rec.get("type") == "day_actuals":
+                actuals[str(date)] = rec
+            elif rec.get("type") == "meter_reconciliation_import":
+                recon[0][str(date)] = rec
+            elif rec.get("type") == "meter_reconciliation_export":
+                recon[1][str(date)] = rec
+        return actuals, recon[0], recon[1]
+
     async def async_recent_overnight_loads(self, today: str, days: int = 30) -> list[dict[str, Any]]:
         """Prior nights' {"load_kwh", "away"} from overnight_load records (excluding ``today``)."""
         records = await self.hass.async_add_executor_job(self._read_recent, days)
@@ -751,6 +774,7 @@ class DataLogger:
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load",
         "half_hourly_import", "half_hourly_export", "capacity_estimate",
+        "meter_reconciliation_import", "meter_reconciliation_export",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:

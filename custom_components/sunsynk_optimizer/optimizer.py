@@ -133,6 +133,8 @@ from .planning import (
     multi_day_peak_floor_soc,
     multi_day_shadow,
     parse_half_hourly_charges,
+    meter_reconciliation,
+    divergence_streak,
     auto_away,
     CLIPPED_SOC_PCT,
     estimate_clipped_kwh,
@@ -2532,6 +2534,33 @@ class SunsynkOptimizer:
             parsed = parse_half_hourly_charges(state.attributes) if state is not None else None
             if parsed is not None:
                 await self.data_logger.async_log_half_hourly(kind, parsed[0], parsed[1])
+        await self._async_reconcile_meters()
+
+    async def _async_reconcile_meters(self) -> None:
+        """Compare inverter grid kWh with settled smart-meter slots; alert on 3 diverged days (phase 44)."""
+        actuals, recon_import, recon_export = await self.data_logger.async_load_reconciliation_inputs()
+        half_import, half_export = await self.data_logger.async_load_half_hourly(30)
+        for kind, slots_by_date, existing, field in (
+            ("import", half_import, recon_import, "day_grid_import_kwh"),
+            ("export", half_export, recon_export, "day_grid_export_kwh"),
+        ):
+            history = [{"date": d, "diverged": bool(r.get("diverged"))} for d, r in existing.items()]
+            newest = None
+            for date, slots in sorted(slots_by_date.items()):
+                if date in existing or date not in actuals:
+                    continue
+                result = meter_reconciliation(actuals[date].get(field), slots)
+                if result is None:
+                    continue
+                await self.data_logger.async_log_meter_reconciliation(kind, date, **result)
+                history.append({"date": date, "diverged": result["diverged"]})
+                newest = date
+            if newest is not None and divergence_streak(history) == 3:
+                await self.async_notify(
+                    f"🔋 Sunsynk: {kind} meter mismatch",
+                    f"The inverter's grid {kind} has differed from your smart meter by more than 8% for 3 days in a row. "
+                    "Check the CT clamp position/orientation, or compare with your Octopus bill.",
+                )
 
     def _agile_region(self, overrides: Any) -> str | None:
         """Agile region: the "agile_region" override, else the import rates entity's tariff code."""

@@ -51,7 +51,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 41. Shadow go-live scorecard | Planned, not built | M |
 | 42. Import cause ledger ("why did I import?") | Planned, not built | M |
 | 43. Inverter fault and event log feed (feasibility-gated) | Planned, not built | S |
-| 44. CT clamp vs smart-meter reconciliation | Planned, not built | XS |
+| 44. CT clamp vs smart-meter reconciliation | In progress — built, PR pending (1.0.12b31) | XS, ~35k |
 | 45. Nightly data-integrity audit, HA Repairs and a diagnostics download | Planned, not built | M |
 | 46. HA service actions and actionable notifications | Planned, not built | M |
 | 47. KPI and money sensors with long-term statistics | Planned, not built | S |
