@@ -98,3 +98,39 @@ def test_latest_peak_cover_record_from_the_log():
         "type": "peak_cover", "date": "2026-10-23", "decision": "top_up",
     }
     assert _data_logger.latest_record(records, "peak_cover", "2026-10-24") == {}
+
+
+def test_worth_it_counts_wear(planning):
+    # 27.77 / 0.92 = 30.18p; peak 38.88p leaves 8.7p of margin, which 9p wear wipes out.
+    assert planning.peak_cover_worth_it(DAY, PEAK) is True
+    assert planning.peak_cover_worth_it(DAY, PEAK, wear_pence=6.0) is True
+    assert planning.peak_cover_worth_it(DAY, PEAK, wear_pence=9.0) is False
+    assert planning.peak_cover_worth_it(None, PEAK, wear_pence=6.0) is None
+
+
+def test_plan_not_worth_it_after_wear_and_logs_gain_after_wear(planning):
+    assert _plan(planning, wear_pence=9.0)["decision"] == "not_worth_it"
+    plan = _plan(planning, wear_pence=6.0)
+    assert plan["decision"] == "top_up"
+    assert 0 < plan["gain_after_wear_gbp"] < plan["gain_gbp"]
+    assert _plan(planning)["gain_after_wear_gbp"] == _plan(planning)["gain_gbp"]  # unknown wear = none
+    assert _plan(planning, soc=85.0)["gain_after_wear_gbp"] is None
+
+
+def test_peak_load_split_uses_weekday_median_without_margin(planning):
+    # 2026-10-05..: 7 weekdays (Mon-Fri, Mon-Tue) plus two weekend days.
+    weekdays = [("2026-10-05", 2.0), ("2026-10-06", 2.4), ("2026-10-07", 2.2), ("2026-10-08", 2.6),
+                ("2026-10-09", 4.0), ("2026-10-12", 2.3), ("2026-10-13", 2.5)]
+    weekend = [("2026-10-10", 5.0), ("2026-10-11", 6.0)]
+    kwh, src, margin = planning.peak_load_estimate_split(weekdays + weekend, 3.0, weekend=False)
+    assert (kwh, src, margin) == (2.4, "history_weekday_median", 1.0)
+
+
+def test_peak_load_split_keeps_p75_and_margin_when_thin_or_weekend(planning):
+    days = [("2026-10-05", 2.0), ("2026-10-06", 2.4), ("2026-10-07", 2.2), ("2026-10-10", 5.0), ("2026-10-11", 6.0)]
+    # Weekend, and too few weekdays: the old all-days p75 x 1.1.
+    for weekend in (True, False):
+        assert planning.peak_load_estimate_split(days, 3.0, weekend) == (
+            planning.peak_load_estimate_kwh([k for _, k in days], 3.0)[0], "history", planning.PEAK_COVER_MARGIN)
+    assert planning.peak_load_estimate_split([], 3.0, False) == (3.0, "default", planning.PEAK_COVER_MARGIN)
+    assert planning.peak_load_estimate_split([("bad", 9.0)], 3.0, False)[1] == "default"

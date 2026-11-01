@@ -1204,6 +1204,7 @@ PEAK_COVER_LAST_LOG_MINUTES = 15 * 60 + 30
 PEAK_COVER_MIN_LOAD_HOURS = 2.0  # hours of 05:00-now data before the observed load is trusted
 PEAK_COVER_LOAD_PERCENTILE = 75
 PEAK_COVER_MIN_PEAK_DAYS = 3
+PEAK_COVER_MIN_SPLIT_DAYS = 7  # same-day-type samples before the median drops the margin (phase 60)
 DISCHARGE_EFFICIENCY = 0.92  # battery -> house; ~ CHARGE_EFFICIENCY, so round trip ~ ROUND_TRIP_EFFICIENCY
 
 
@@ -1250,12 +1251,43 @@ def peak_load_estimate_kwh(recent_kwh: list[float], default_kwh: float) -> tuple
     return round(values[low] + (values[high] - values[low]) * (rank - low), 2), "history"
 
 
-def peak_cover_worth_it(day_pence: float | None, peak_pence: float | None, efficiency: float = CHARGE_EFFICIENCY) -> bool | None:
-    """True when charging at the day rate beats buying the same kWh at the peak rate after charge losses.
-    None when a price is missing — never treat a missing price as 0p."""
+def peak_load_estimate_split(
+    samples: list[tuple[str, float]], default_kwh: float, weekend: bool
+) -> tuple[float, str, float]:
+    """(kWh, source, margin) for the 16:00-19:00 load, split by weekday/weekend (phase 60).
+
+    ``samples`` are (ISO date, kWh). With >= PEAK_COVER_MIN_SPLIT_DAYS days of
+    tonight's day type the median is used with no margin (the old p75 x 1.1
+    stacked two layers of pessimism). Weekends keep the p75 and the margin: the
+    evening load is known to be higher and spikier. Anything thinner falls back
+    to ``peak_load_estimate_kwh`` (p75 of all days) with PEAK_COVER_MARGIN.
+    """
+    same: list[float] = []
+    for day, kwh in samples:
+        try:
+            is_weekend = date.fromisoformat(str(day)).weekday() >= 5
+        except ValueError:
+            continue
+        if is_weekend == weekend and kwh is not None and kwh >= 0:
+            same.append(float(kwh))
+    if not weekend and len(same) >= PEAK_COVER_MIN_SPLIT_DAYS:
+        same.sort()
+        mid = len(same) // 2
+        median = same[mid] if len(same) % 2 else (same[mid - 1] + same[mid]) / 2.0
+        return round(median, 2), "history_weekday_median", 1.0
+    kwh, source = peak_load_estimate_kwh([k for _, k in samples], default_kwh)
+    return kwh, source, PEAK_COVER_MARGIN
+
+
+def peak_cover_worth_it(
+    day_pence: float | None, peak_pence: float | None, efficiency: float = CHARGE_EFFICIENCY,
+    wear_pence: float | None = None,
+) -> bool | None:
+    """True when charging at the day rate beats buying the same kWh at the peak rate after charge losses and wear.
+    None when a price is missing — never treat a missing price as 0p. Unknown wear counts as none."""
     if day_pence is None or peak_pence is None or efficiency <= 0:
         return None
-    return peak_pence > day_pence / efficiency
+    return peak_pence > day_pence / efficiency + (wear_pence or 0.0)
 
 
 def peak_cover_plan(
@@ -1270,6 +1302,7 @@ def peak_cover_plan(
     peak_pence: float | None,
     floor_soc: int = PEAK_COVER_FLOOR_SOC,
     margin: float = PEAK_COVER_MARGIN,
+    wear_pence: float | None = None,
 ) -> dict[str, Any]:
     """Will the battery reach 16:00 with enough to run the peak window? If not, how to top up.
 
@@ -1287,7 +1320,7 @@ def peak_cover_plan(
     projected_soc = round(min(100.0, max(float(floor_soc), projected)), 1)
     required_soc = min(100, math.ceil(floor_soc + peak_need_soc(peak_load_kwh, capacity_kwh, margin)))
     shortfall_soc = max(0.0, required_soc - projected_soc)
-    worth = peak_cover_worth_it(day_pence, peak_pence)
+    worth = peak_cover_worth_it(day_pence, peak_pence, wear_pence=wear_pence)
     if worth is None:
         decision = "no_price"
     elif shortfall_soc < PEAK_COVER_MIN_SHORTFALL_SOC:
@@ -1299,9 +1332,10 @@ def peak_cover_plan(
     topping = decision == "top_up"
     topup_kwh = round(shortfall_soc / 100.0 * capacity_kwh, 2) if topping else 0.0
     charge_minutes = math.ceil(topup_kwh / CHARGE_EFFICIENCY / charge_rate_kw * 60.0) if topping and charge_rate_kw > 0 else 0
-    gain_gbp = None
+    gain_gbp = gain_after_wear_gbp = None
     if topping:
         gain_gbp = round_or_none(topup_kwh * (peak_pence - day_pence / CHARGE_EFFICIENCY) / 100.0)
+        gain_after_wear_gbp = round_or_none(topup_kwh * (peak_pence - day_pence / CHARGE_EFFICIENCY - (wear_pence or 0.0)) / 100.0)
     return {
         "decision": decision,
         "projected_soc_16": projected_soc,
@@ -1312,6 +1346,7 @@ def peak_cover_plan(
         "charge_minutes": charge_minutes,
         "push_now": topping and minutes_to_peak <= charge_minutes + PEAK_COVER_LEAD_MINUTES,
         "gain_gbp": gain_gbp,
+        "gain_after_wear_gbp": gain_after_wear_gbp,
     }
 
 
