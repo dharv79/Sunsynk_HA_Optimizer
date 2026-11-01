@@ -143,6 +143,14 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 
 **Verification.** `tests/test_peak_cover.py`.
 
+## Peak cover hold (01/11/2026, phase 59)
+
+**Root cause.** On 31/10 the SOC fell from 95 to 40 by 13:45 and peak cover then bought 4.71 kWh at the day rate to get back to 73. The import price is the same either way, but recharging pays the 0.92 charge loss and an extra cycle that holding the battery earlier would have avoided.
+
+**Design.** `peak_cover_plan` returns `hold` when SOC is already at or above the requirement but will fall short by 16:00. It pushes the same Flux 1 now->16:00 slot at `required_soc`. Checks run from 09:00 for holds only; top-ups start at 12:00. Records gain `gain_vs_topup_gbp`. Behind `peak_cover_live`; needs a real-inverter check that a target below the current SOC stops discharge.
+
+**Verification.** `tests/test_peak_cover.py`.
+
 ## Peak cover re-checks after a restart (23/10/2026, b26)
 
 **Symptom:** on 23/10 HA restarted during the afternoon; the battery sat at the 25% floor from about 14:00 and the 16:00-19:00 peak ran from the grid with no top-up.

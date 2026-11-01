@@ -66,8 +66,8 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 56. Intraday solar re-scaling from PV produced so far | Planned, not built | M |
 | 57. API request timeout and catch-up for missed monthly reports | Done, merged (69eb281, PR #97) | XS |
 | 58. Plain-English plan explanation on the notification and sensor | Planned, not built | S |
-| 59. Peak cover: hold the battery early instead of recharging it at 13:45 | Planned, not built | M |
-| 60. Peak cover sizing: add wear and stop stacking p75 with a 1.1 margin | Planned, not built | S |
+| 59. Peak cover: hold the battery early instead of recharging it at 13:45 | Done, merged (SHA_59, PR #N_59; peak cover live option off) | M |
+| 60. Peak cover sizing: add wear and stop stacking p75 with a 1.1 margin | Done, merged (883d1dc, PR #100) | S |
 | 61. Learn the charge rate from the 02:00/05:00 meter snapshots, and stop derating it twice | Done, merged (96e2022, PR #98; option off) | M |
 | 62. Run Flux 1 to 05:00 every night, capped by the target | Done, merged (9680c00, PR #96; option off) | S |
 | 63. Remove the 05:00-06:00 double count in drain and bridge | Done, merged (b9e8e85, PR #92); median switch deferred pending backtest | S, ~25k actual |
