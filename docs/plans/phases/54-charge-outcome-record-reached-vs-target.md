@@ -1,6 +1,6 @@
 # Phase 54 — Charge outcome record: reached vs target, likely cause and alert
 
-**Status:** Planned, not built. **Size:** S. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (01/11/2026), PR pending. **Size:** S. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Merges 'end-of-charge outcome' and 'explain shortfall'. I confirmed charge_watch
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- `planning.charge_outcome(target, reached, battery_temp_c)` returns shortfall, a heuristic `likely_cause` (`taper` for a gap of 8 points or less on a target of 92 or more, `cold_derate` below 10 C, else `stopped_early`) and `alert` (shortfall above 5). `planning.achievable_max_soc` is the median reached on target >= 95 nights (logged only).
+- `optimizer.async_run_charge_outcome` runs after the 05:00 meter snapshot (`_guarded`), reads SOC from that snapshot rather than sampling every 15 min, writes a `charge_outcome` record (in `_DEDUP_TYPES`) with a 14-day `achievable_max_soc`, and sends "🔋 Sunsynk: overnight charge stopped short" on an alert. Read-only; skipped in monitor mode or when the charge was not planned.
+- Not built: 15-minute SOC trace and window-ended/current-below-setting causes.
+- Tests: `tests/test_planning.py` (phase 54).

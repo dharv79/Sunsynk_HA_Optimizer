@@ -895,3 +895,23 @@ def test_scorecard_multi_day_capacity_and_summary(planning):
     assert card["multi_day"]["changed"] == 1 and card["multi_day"]["verdict"] == "not_yet"
     assert card["capacity"]["verdict"] == "ready" and card["capacity"]["estimate_kwh"] == 9.4
     assert "capacity: ready" in planning.scorecard_summary(card)
+
+
+# Phase 54: charge outcome
+def test_charge_outcome_causes_and_alert(planning):
+    f = planning.charge_outcome
+    assert f(None, 90) is None and f(100, None) is None       # rule 11
+    assert f(100, 100)["likely_cause"] is None and not f(100, 100)["alert"]
+    o = f(100, 95)
+    assert o["likely_cause"] == "taper" and not o["alert"]     # 5 short is not > 5
+    assert f(100, 90)["likely_cause"] == "stopped_early" and f(100, 90)["alert"]
+    assert f(80, 70, battery_temp_c=5)["likely_cause"] == "cold_derate"
+    assert f(80, 85)["shortfall_pct"] == -5.0
+
+
+def test_achievable_max_soc_median_of_high_targets(planning):
+    outs = [{"target_soc": 100, "reached_soc": v} for v in (94, 98, 96)]
+    outs.append({"target_soc": 60, "reached_soc": 20})
+    outs.append({"target_soc": 100, "reached_soc": None})
+    assert planning.achievable_max_soc(outs) == 96
+    assert planning.achievable_max_soc([]) is None

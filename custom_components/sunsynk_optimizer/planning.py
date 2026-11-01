@@ -649,6 +649,55 @@ def charge_shortfall_suspect(drain_0500: float | None, flux1_end: str | None) ->
     return drain_0500 > SHORTFALL_BASE_PCT + SHORTFALL_PCT_PER_HOUR * hours
 
 
+OUTCOME_ALERT_PCT = 5.0        # notify when the charge ended this many points below target
+OUTCOME_TAPER_FROM_PCT = 92.0  # targets this high usually taper at the top
+OUTCOME_TAPER_MAX_GAP = 8.0
+OUTCOME_COLD_C = 10.0
+
+
+def charge_outcome(
+    target_soc: float | None,
+    reached_soc: float | None,
+    battery_temp_c: float | None = None,
+) -> dict[str, Any] | None:
+    """Reached-vs-target result of the overnight charge (phase 54); None when unknown.
+
+    shortfall_pct is target - reached (negative = overshoot). The cause is a
+    heuristic label: taper above ~92% for a small gap on a high target, cold
+    derate below 10 C, otherwise the inverter stopped early.
+    """
+    if target_soc is None or reached_soc is None:
+        return None
+    gap = round(target_soc - reached_soc, 1)
+    cause = None
+    if gap > 0:
+        if target_soc >= OUTCOME_TAPER_FROM_PCT and gap <= OUTCOME_TAPER_MAX_GAP:
+            cause = "taper"
+        elif battery_temp_c is not None and battery_temp_c < OUTCOME_COLD_C:
+            cause = "cold_derate"
+        else:
+            cause = "stopped_early"
+    return {
+        "target_soc": target_soc,
+        "reached_soc": reached_soc,
+        "shortfall_pct": gap,
+        "likely_cause": cause,
+        "alert": gap > OUTCOME_ALERT_PCT,
+    }
+
+
+def achievable_max_soc(outcomes: list[dict[str, Any]], min_target: float = 95.0) -> float | None:
+    """Median SOC reached on nights that aimed for >= min_target (shadow, phase 54)."""
+    vals = sorted(
+        o["reached_soc"] for o in outcomes
+        if o.get("reached_soc") is not None and (o.get("target_soc") or 0) >= min_target
+    )
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    return float(vals[mid]) if len(vals) % 2 else round((vals[mid - 1] + vals[mid]) / 2, 1)
+
+
 KPI_VERSION = 2  # 2 = phase 52 self-sufficiency (excludes battery grid-charge and free import)
 DAY_KPI_FIELDS = (
     "grid_import_offpeak_kwh",
