@@ -220,3 +220,7 @@ Missing inputs → `None` fields (rule 11).
 - `planning.recent_soc(current, last, now)`: `_read_soc` remembers the last numeric SOC (on every SOC change and each snapshot read). A meter snapshot with no live SOC uses it if at most `SNAPSHOT_SOC_MAX_AGE_MINUTES` (30) old, and logs `soc_from_cache: true`.
 
 **Verification.** `tests/test_planning.py` (`test_soc_retry_due`, `test_recent_soc`). Live: a night with an SOC dropout shows a plan with `source: automatic` a few minutes after 01:55, and the 02:00 snapshot keeps an SOC.
+
+## Full window to 05:00 (01/11/2026, phase 62)
+
+`CONF_FULL_WINDOW_LIVE` (default off) ends Flux 1 at 05:00 on every charge night so the battery holds the target and the grid serves the house. `import_plan` logs `full_window_end`/`full_window_live`; such nights are excluded from drain learning (`_is_drain_night`).

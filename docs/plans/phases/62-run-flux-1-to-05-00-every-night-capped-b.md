@@ -1,6 +1,6 @@
 # Phase 62 — Run Flux 1 to 05:00 every night, capped by the target
 
-**Status:** Planned, not built. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done (01/11/2026), PR pending; live option off by default. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- `CONF_FULL_WINDOW_LIVE` (default off, options flow). When on and a charge is needed on a non-low-solar night, `async_run_import_plan` ends Flux 1 at 05:00 with `logic_branch = "full_window"`. Off, the plan is unchanged.
+- `import_plan` gains `full_window_end` and `full_window_live` (both in `_IMPORT_PLAN_FIELDS`, rule 10). `_pair_records` carries `full_window`, and `_is_drain_night` excludes those nights so the drain p75 cannot collapse towards 0.
+- Compare the logged `full_window_end` plan with the 05:00 snapshot SOC before switching the option on. The `window_grid_kwh` cost estimate already follows `end_minutes`.
+- Tests: `tests/test_data_logger.py` (phase 62).

@@ -44,6 +44,7 @@ from .const import (
     CONF_BATTERY_COST_GBP,
     CONF_BATTERY_LIFETIME_KWH,
     CONF_SPARE_SOLAR_NOTIFY_KWH,
+    CONF_FULL_WINDOW_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
     CONF_BASELOAD_ALERT,
@@ -89,6 +90,7 @@ from .const import (
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_PEAK_EXPORT_LIVE,
+    DEFAULT_FULL_WINDOW_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
     DEFAULT_FULL_CHARGE_DAY,
@@ -183,6 +185,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Required(
                 CONF_GENTLE_CHARGE_LIVE,
                 default=values.get(CONF_GENTLE_CHARGE_LIVE, DEFAULT_GENTLE_CHARGE_LIVE),
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_FULL_WINDOW_LIVE,
+                default=values.get(CONF_FULL_WINDOW_LIVE, DEFAULT_FULL_WINDOW_LIVE),
             ): selector.BooleanSelector(),
             vol.Required(
                 CONF_PEAK_COVER_LIVE,

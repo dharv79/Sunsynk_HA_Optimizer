@@ -143,6 +143,8 @@ DEFAULT_PEAK_EXPORT_LIVE = False
 # mains, as in sdChargeOn), read/written via common/setting/{inverter sn}.
 CONF_GENTLE_CHARGE_LIVE = "gentle_charge_live"
 DEFAULT_GENTLE_CHARGE_LIVE = False
+CONF_FULL_WINDOW_LIVE = "full_window_live"   # phase 62: Flux 1 runs to 05:00 every night
+DEFAULT_FULL_WINDOW_LIVE = False
 CONF_BATTERY_VOLTAGE = "battery_voltage"
 GENTLE_CHARGE_SETTING = "sdBatteryCurrent"
 

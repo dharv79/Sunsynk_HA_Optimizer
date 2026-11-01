@@ -61,7 +61,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 51. Free events: DST-safe timers, a watch_from guard and sold-energy split | Planned, not built | S |
 | 52. Self-sufficiency KPI that excludes battery grid-charging and free import | Done, merged (32376c0, PR #91) | XS, ~30k actual |
 | 53. Measure overnight drain from the 05:00 snapshot SOC, not target_soc | Done, merged (5b70e67, PR #94) | S |
-| 54. Charge outcome record: reached vs target, likely cause and alert | Done, PR pending | S |
+| 54. Charge outcome record: reached vs target, likely cause and alert | Done, merged (9d14d5d, PR #95) | S |
 | 55. Evening reserve from learned 16:00-22:00 load (shadow first) | Planned, not built | M |
 | 56. Intraday solar re-scaling from PV produced so far | Planned, not built | M |
 | 57. API request timeout and catch-up for missed monthly reports | Planned, not built | XS |
@@ -69,7 +69,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 59. Peak cover: hold the battery early instead of recharging it at 13:45 | Planned, not built | M |
 | 60. Peak cover sizing: add wear and stop stacking p75 with a 1.1 margin | Planned, not built | S |
 | 61. Learn the charge rate from the 02:00/05:00 meter snapshots, and stop derating it twice | Planned, not built | M |
-| 62. Run Flux 1 to 05:00 every night, capped by the target | Planned, not built | S |
+| 62. Run Flux 1 to 05:00 every night, capped by the target | Done, PR pending (option off) | S |
 | 63. Remove the 05:00-06:00 double count in drain and bridge | Done, merged (b9e8e85, PR #92); median switch deferred pending backtest | S, ~25k actual |
 | 64. Pick the bridge target from the forecast-error distribution (newsvendor rule) | Planned, not built | M |
 | 65. Move trims into the peak window when the solar left today can wait | Planned, not built | M |

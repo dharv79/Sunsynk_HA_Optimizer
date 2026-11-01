@@ -40,6 +40,8 @@ _IMPORT_PLAN_FIELDS = (
     "target_soc",
     "target_soc_reason",
     "soc_adjustment",
+    "full_window_end",
+    "full_window_live",
     "overnight_drain_adjustment",
     "flux1_end",
     "logic_branch",
@@ -464,6 +466,7 @@ class DataLogger:
                 "away": bool(plan.get("away", False)),
                 "actual_solar_kwh": actual.get("actual_solar_kwh"),
                 "forecast_band": plan.get("forecast_band"),
+                "full_window": bool(plan.get("full_window_live", False)),
                 "target_soc": target_soc,
                 "morning_soc": morning_soc,
                 "morning_pv_power": morning_pv_power,
@@ -535,6 +538,7 @@ class DataLogger:
             d for d in paired_days
             if d["forecast_band"] == forecast_band
             and not d["is_full_day"]
+            and not d.get("full_window")  # phase 62: no gap after the charge, so no drain to measure
             and not d["evening_export_disabled"]
             and d.get("evening_soc") is not None
             and d.get("actual_solar_kwh") is not None
