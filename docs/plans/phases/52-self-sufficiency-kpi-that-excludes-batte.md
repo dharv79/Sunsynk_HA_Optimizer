@@ -1,6 +1,6 @@
 # Phase 52 — Self-sufficiency KPI that excludes battery grid-charging and free import
 
-**Status:** Planned, not built. **Size:** XS. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Built, in PR (01/11/2026). **Size:** XS. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,9 @@ Confirmed. Line 725 uses raw imp22, and free_credit is unused for this KPI. This
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- `planning.day_kpis`: `self_sufficiency_pct` = 1 − (imp22 − free-event import − max(0, soc05 − soc02) × capacity) / load22, clamped 0-100; `None` if either SOC is missing. Old ratio kept as `grid_independence_pct`. `kpi_version` = 2 returned and written on paired day records.
+- `week_kpis` averages both percentages (`week_grid_independence_pct` new).
+- Tests: `tests/test_kpis.py` (25 Oct shape, free-event day, clamp, missing SOC).

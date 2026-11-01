@@ -31,7 +31,10 @@ def test_day_kpis_bands_and_prices():
     assert k["grid_import_offpeak_kwh"] == 6.0
     assert k["grid_import_peak_kwh"] == 0.2
     assert k["grid_import_day_kwh"] == 1.8  # 0.5 before 02:00 + 1.0 + 0.3
-    assert k["self_sufficiency_pct"] == pytest.approx(42.9)
+    assert k["grid_independence_pct"] == pytest.approx(42.9)  # old ratio kept
+    # Phase 52: 8.0 import less the 5 kWh the night added (30%→80% of 10 kWh) = 3.0 for the house.
+    assert k["self_sufficiency_pct"] == pytest.approx(78.6)
+    assert k["kpi_version"] == 2
     assert k["avoidable_import_gbp"] == round((1.8 * 27.77 + 0.2 * 38.88) / 100, 2)
     assert k["export_peak_kwh"] == 2.0
     assert k["export_peak_gbp"] == round(2.0 * 27.81 / 100, 2)
@@ -58,7 +61,8 @@ def test_missing_snapshot_gives_none_never_zero():
     assert k["unused_charge_kwh"] is None
     # Bands that don't need 05:00 still compute.
     assert k["grid_import_peak_kwh"] == 0.2
-    assert k["self_sufficiency_pct"] is not None
+    assert k["grid_independence_pct"] is not None
+    assert k["self_sufficiency_pct"] is None  # needs the 05:00 SOC
 
 
 def test_missing_meter_value_and_missing_price_give_none():
@@ -818,3 +822,22 @@ def test_soc_cap_shadow_missing_inputs_are_none():
     assert rec["lowest_soc"] is None and rec["shortfall_kwh"] is None and rec["extra_cost_gbp"] is None
     rec = planning.soc_cap_shadow(_SOC_CAP_PLAN, _soc_cap_snaps(), 10.0, 0.4, {"day": None, "offpeak": 17.0})
     assert rec["shortfall_kwh"] == 1.3 and rec["extra_cost_gbp"] is None
+
+
+def test_self_sufficiency_excludes_battery_charge_and_free_import():
+    # 25 Oct shape: off-peak charge + free refill exceed the day's load → old ratio 0%.
+    snaps = _snaps(**{"22_00": {"grid_import_kwh": 12.0, "grid_export_kwh": 5.0, "load_kwh": 9.0, "soc": 40}})
+    old = planning.day_kpis(snaps, PRICES, 10.0, 0.5)
+    assert old["grid_independence_pct"] == 0.0
+    assert old["self_sufficiency_pct"] == pytest.approx(22.2)  # (12-5)/9 imported for the house
+    free = planning.day_kpis(snaps, PRICES, 10.0, 0.5, free_credit={"05:00": (4.0, 0.0)})
+    assert free["self_sufficiency_pct"] == pytest.approx(66.7)  # 12-5-4 = 3 of 9 kWh
+
+
+def test_self_sufficiency_clamped_and_week_mean_of_both():
+    snaps = _snaps(**{"22_00": {"grid_import_kwh": 8.0, "grid_export_kwh": 5.0, "load_kwh": 14.0, "soc": 40}})
+    k = planning.day_kpis(snaps, PRICES, 10.0, 0.5, free_credit={"05:00": (9.0, 0.0)})
+    assert k["self_sufficiency_pct"] == 100.0
+    w = planning.week_kpis([{"self_sufficiency_pct": 80.0, "grid_independence_pct": 20.0}, {}])
+    assert w["week_self_sufficiency_pct"] == 80.0
+    assert w["week_grid_independence_pct"] == 20.0

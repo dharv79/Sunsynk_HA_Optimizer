@@ -599,6 +599,7 @@ def resolve_load_kw(config_kw: float, learned_kw: float | None) -> tuple[float, 
 # (22:00-24:00 is not covered, same as day_actuals).
 KPI_RESERVE_SOC = BATTERY_BOTTOM_SOC
 KPI_LATE_LOAD_HOURS = 4.0  # 22:00 → next 02:00 charge
+KPI_VERSION = 2  # 2 = phase 52 self-sufficiency (excludes battery grid-charge and free import)
 DAY_KPI_FIELDS = (
     "grid_import_offpeak_kwh",
     "grid_import_day_kwh",
@@ -606,6 +607,7 @@ DAY_KPI_FIELDS = (
     "grid_import_peak_kwh",
     "grid_import_evening_kwh",
     "self_sufficiency_pct",
+    "grid_independence_pct",  # phase 52: the pre-v2 ratio (all import, incl. battery charging)
     "avoidable_import_gbp",
     "export_peak_kwh",
     "export_peak_gbp",
@@ -720,9 +722,17 @@ def day_kpis(
     day = None if any(p is None for p in parts) else sum(parts)
 
     load22, imp22 = _snap(snapshots, "22:00", "load_kwh"), _snap(snapshots, "22:00", imp)
-    self_sufficiency = None
+    self_sufficiency = grid_independence = None
+    soc02_ss, soc05_ss = _snap(snapshots, "02:00", "soc"), _snap(snapshots, "05:00", "soc")
     if load22 is not None and imp22 is not None and load22 > 0:
-        self_sufficiency = max(0.0, min(100.0, 100.0 * (1 - imp22 / load22)))
+        grid_independence = max(0.0, min(100.0, 100.0 * (1 - imp22 / load22)))
+        if soc02_ss is not None and soc05_ss is not None and battery_capacity_kwh > 0:
+            # Phase 52: paid import that served the house = total less free import and
+            # the 02:00-05:00 battery gain (grid-charged, not consumed).
+            free_kwh = sum(c[0] for c in (free_credit or {}).values())
+            gain_kwh = max(0.0, soc05_ss - soc02_ss) / 100 * battery_capacity_kwh
+            house_import = max(0.0, imp22 - free_kwh - gain_kwh)
+            self_sufficiency = max(0.0, min(100.0, 100.0 * (1 - house_import / load22)))
 
     avoidable_pence = over_limit_kwh = None
     over = over_limit or {}
@@ -753,6 +763,8 @@ def day_kpis(
         "grid_import_peak_kwh": round_or_none(peak),
         "grid_import_evening_kwh": round_or_none(evening),
         "self_sufficiency_pct": round_or_none(self_sufficiency, 1),
+        "grid_independence_pct": round_or_none(grid_independence, 1),
+        "kpi_version": KPI_VERSION,
         "avoidable_import_gbp": round_or_none(None if avoidable_pence is None else avoidable_pence / 100),
         "export_peak_kwh": round_or_none(export_peak),
         "export_peak_gbp": round_or_none(None if export_peak_pence is None else export_peak_pence / 100),
@@ -812,9 +824,12 @@ def soc_cap_shadow(
 
 def week_kpis(days: list[dict[str, Any]]) -> dict[str, float | None]:
     """Weekly roll-up: kWh/£ fields summed, self-sufficiency averaged over days that have it."""
-    out = {f"week_{key}": sum_field(days, key) for key in DAY_KPI_FIELDS if key != "self_sufficiency_pct"}
+    pct = ("self_sufficiency_pct", "grid_independence_pct")
+    out = {f"week_{key}": sum_field(days, key) for key in DAY_KPI_FIELDS if key not in pct}
+    for key in pct:
+        vals = [d[key] for d in days if d.get(key) is not None]
+        out[f"week_{key}"] = round(sum(vals) / len(vals), 1) if vals else None
     ss = [d["self_sufficiency_pct"] for d in days if d.get("self_sufficiency_pct") is not None]
-    out["week_self_sufficiency_pct"] = round(sum(ss) / len(ss), 1) if ss else None
     out["week_kpi_days"] = len(ss)
     return out
 
