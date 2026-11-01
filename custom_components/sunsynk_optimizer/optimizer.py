@@ -180,6 +180,9 @@ from .planning import (
     grid_current_drift,
     tariff_price_changes,
     plan_retry_due,
+    recent_soc,
+    soc_retry_due,
+    SOC_RETRY_INTERVAL_MINUTES,
     apply_soc_adjustments,
     charge_efficiency,
     charge_progress_ok,
@@ -334,9 +337,12 @@ class SunsynkOptimizer:
         # Charge watchdog (phase 22) 15-minute re-check handle. Not persisted:
         # a restart mid-check just skips that night's re-check.
         self._charge_watchdog_recheck = None
-        # Phase 32 failed-plan-push retry handle. Not persisted: a restart runs
-        # the startup plan push instead.
+        # Phase 32 failed-plan-push retry handle (also the unavailable-SOC
+        # re-plan). Not persisted: a restart runs the startup plan push instead.
         self._plan_retry = None
+        # Last numeric battery SOC and when it was read (UTC), for meter
+        # snapshots taken while the sensor is briefly unavailable. Unpersisted.
+        self._last_valid_soc: tuple[float, datetime] | None = None
         # Phase 31 drift check 10 min after a push; None = the plant income GET
         # is untested, False = it returned no fluxProducts (Flux check disabled
         # until restart). Both unpersisted.
@@ -908,9 +914,16 @@ class SunsynkOptimizer:
         # which would size a full-window max-import.
         soc = self._essential_state(self.battery_soc_entity)
         if soc is None:
-            await self._async_skip_plan(
-                f"Battery SOC entity {self.battery_soc_entity} unavailable — import plan skipped"
-            )
+            msg = f"Battery SOC entity {self.battery_soc_entity} unavailable"
+            now_local = dt_util.now()
+            if not dry_run and soc_retry_due(now_local.hour * 60 + now_local.minute):
+                _LOGGER.warning("%s — retrying the import plan in %d min", msg, SOC_RETRY_INTERVAL_MINUTES)
+                self.coordinator.update_state(last_error=f"{msg} — import plan retrying")
+                self._plan_retry = async_call_later(
+                    self.hass, SOC_RETRY_INTERVAL_MINUTES * 60, partial(self._async_soc_plan_retry, source)
+                )
+                return
+            await self._async_skip_plan(f"{msg} — import plan skipped")
             return
 
         cfg = self.cfg
@@ -1184,6 +1197,10 @@ class SunsynkOptimizer:
             partial(self._async_plan_retry, payload, source, attempts + 1),
         )
         return True
+
+    async def _async_soc_plan_retry(self, source: str, _now) -> None:
+        self._plan_retry = None
+        await self._guarded(lambda: self.async_run_import_plan(source=source), "Import plan SOC retry")
 
     async def _async_plan_retry(self, payload: dict[str, Any], source: str, attempt: int, _now) -> None:
         self._plan_retry = None
@@ -2001,13 +2018,15 @@ class SunsynkOptimizer:
         """
         # Close the over-limit interval at the band edge so it lands in the right segment.
         await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
+        soc, soc_cached = recent_soc(self._read_soc(), self._last_valid_soc, dt_util.utcnow())
         await self.data_logger.async_log_meter_snapshot(
             date=dt_util.now().date().isoformat(),
             time=time,
             grid_import_kwh=round_or_none(self._essential_state(self.day_grid_import_entity)),
             grid_export_kwh=round_or_none(self._essential_state(self.day_grid_export_entity)),
             load_kwh=round_or_none(self._essential_state(self.day_load_entity)),
-            soc=round_or_none(self._essential_state(self.battery_soc_entity), 1),
+            soc=round_or_none(soc, 1),
+            soc_from_cache=soc_cached,
         )
 
     def _wear_pence(self) -> float | None:
@@ -2255,11 +2274,19 @@ class SunsynkOptimizer:
             "grid_export": self._essential_state(self.day_grid_export_entity),
         }
 
+    def _read_soc(self) -> float | None:
+        """Live battery SOC (None when unavailable); remembers the last numeric reading."""
+        soc = self._essential_state(self.battery_soc_entity)
+        if soc is not None:
+            self._last_valid_soc = (soc, dt_util.utcnow())
+        return soc
+
     async def _async_battery_soc_changed(self, event: Event) -> None:
         """Handle SOC threshold-based reactions."""
         new_state = event.data.get("new_state")
         if new_state is None:
             return
+        self._read_soc()
         await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
         await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         if self._slots_held():
