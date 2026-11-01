@@ -119,6 +119,7 @@ from .flux_helpers import (
 )
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    monthly_report_due,
     achievable_max_soc,
     charge_outcome,
     TARIFF_IMPORT_BANDS,
@@ -1566,19 +1567,32 @@ class SunsynkOptimizer:
         # restart; re-check now rather than wait for the 30-minute tick,
         # which may not come before 16:00. No-op outside 12:00-16:00.
         await self._guarded(self.async_run_peak_cover, "Peak cover")
+        await self._guarded(self._async_monthly_reports, "Monthly reports")
 
     async def _async_choose_best_full_charge_day(self, _now) -> None:
         """Time-change callback at 18:00 daily: Sunday weekly pick, then the daily re-check."""
         if dt_util.now().strftime("%A") == "Sunday":
             await self._guarded(self.async_choose_best_full_charge_day, "Full-charge-day selection")
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
-            await self._guarded(self._async_send_monthly_tariff_comparison, "Monthly tariff comparison")
-            await self._guarded(self._async_send_monthly_battery_value, "Monthly battery value")
             await self._guarded(self._async_send_shadow_scorecard, "Shadow scorecard")
-            if dt_util.now().day <= 7:
-                await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
+        await self._guarded(self._async_monthly_reports, "Monthly reports")
         await self._guarded(self.async_recheck_full_charge_day, "Full-charge-day re-check")
+
+    async def _async_monthly_reports(self) -> None:
+        """Send last month's reports once, catching up a missed first Sunday (phase 57).
+
+        State is written only after the sends, so a failure retries at the next
+        18:00 or startup. Each report keeps its own error handling via _guarded.
+        """
+        today = dt_util.now().date()
+        if not monthly_report_due(self.coordinator.state.last_monthly_report_month, today):
+            return
+        await self._guarded(lambda: self._async_send_monthly_tariff_comparison(force=True), "Monthly tariff comparison")
+        await self._guarded(lambda: self._async_send_monthly_battery_value(force=True), "Monthly battery value")
+        await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
+        report_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        self.coordinator.update_state(last_monthly_report_month=report_month)
 
     async def _async_send_weekly_cost_summary(self) -> None:
         """Sunday 18:00: roll up the 7 complete days ending yesterday (Sun–Sat) and send it as JSON.
@@ -2642,10 +2656,10 @@ class SunsynkOptimizer:
             await self.hass.async_add_executor_job(_write, results)
         return agile_prices_by_date(results, dt_util.DEFAULT_TIME_ZONE)
 
-    async def _async_send_monthly_battery_value(self) -> None:
+    async def _async_send_monthly_battery_value(self, force: bool = False) -> None:
         """First Sunday of the month: what the battery + optimiser saved last month vs no battery (phase 37)."""
         today = dt_util.now().date()
-        if today.day > 7:
+        if today.day > 7 and not force:
             return
         month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         days = [
@@ -2770,14 +2784,14 @@ class SunsynkOptimizer:
             )
         return record
 
-    async def _async_send_monthly_tariff_comparison(self) -> None:
+    async def _async_send_monthly_tariff_comparison(self, force: bool = False) -> None:
         """First Sunday of the month: cost last month's logged usage under Flux and the alternatives.
 
         Usage is held fixed (battery behaviour would differ on another tariff), so this is a
         guide, not a quote. Totals include standing charges and VAT (phase 35).
         """
         today = dt_util.now().date()
-        if today.day > 7:
+        if today.day > 7 and not force:
             return
         month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         imp, exp = await self.data_logger.async_load_half_hourly()

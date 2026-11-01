@@ -698,6 +698,20 @@ def achievable_max_soc(outcomes: list[dict[str, Any]], min_target: float = 95.0)
     return float(vals[mid]) if len(vals) % 2 else round((vals[mid - 1] + vals[mid]) / 2, 1)
 
 
+def monthly_report_due(last_month: str | None, today: date) -> bool:
+    """True when last month's reports are unsent and the first Sunday has passed (phase 57).
+
+    Covers the report month (the one before ``today``'s). Not due before this
+    month's first Sunday, so the normal Sunday run is unchanged; any later day
+    catches up a missed Sunday.
+    """
+    report_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    if last_month == report_month:
+        return False
+    first_sunday = 1 + (6 - today.replace(day=1).weekday()) % 7
+    return today.day >= first_sunday
+
+
 KPI_VERSION = 2  # 2 = phase 52 self-sufficiency (excludes battery grid-charge and free import)
 DAY_KPI_FIELDS = (
     "grid_import_offpeak_kwh",

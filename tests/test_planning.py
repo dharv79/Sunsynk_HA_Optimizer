@@ -915,3 +915,17 @@ def test_achievable_max_soc_median_of_high_targets(planning):
     outs.append({"target_soc": 100, "reached_soc": None})
     assert planning.achievable_max_soc(outs) == 96
     assert planning.achievable_max_soc([]) is None
+
+
+# Phase 57: monthly report catch-up
+def test_monthly_report_due(planning):
+    from datetime import date
+    f = planning.monthly_report_due
+    # Nov 2026: first Sunday is the 1st
+    assert f(None, date(2026, 11, 1)) is True
+    assert f("2026-10", date(2026, 11, 1)) is False       # already sent
+    assert f("2026-09", date(2026, 11, 20)) is True       # missed Sunday catches up
+    # Oct 2026: first Sunday is the 4th; not due on the 2nd
+    assert f("2026-08", date(2026, 10, 2)) is False
+    assert f("2026-08", date(2026, 10, 4)) is True
+    assert f("2026-09", date(2026, 10, 9)) is False       # Sept report sent
