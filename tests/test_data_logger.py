@@ -223,3 +223,25 @@ def test_records_carry_the_manifest_version():
     assert sys.modules["sunsynk_optimizer.const"].INTEGRATION_VERSION == version
     rec = sys.modules["sunsynk_optimizer.data_logger"]._record("day_kpis", date="2026-10-29")
     assert rec["version"] == version and rec["date"] == "2026-10-29"
+
+
+# --------------------------------------------------------------------------- #
+# Phase 63: drain measured to 05:00                                            #
+# --------------------------------------------------------------------------- #
+
+def test_drain_pct_to_0500_prefers_snapshot_and_scales_fallback():
+    from conftest import _planning
+    f = _planning.drain_pct_to_0500
+    assert f(59, 52, 20.0, "04:00") == 7.0            # 05:00 snapshot wins
+    assert f(59, None, 20.0, "04:00") == 10.0         # window 2h -> x(1/2)
+    assert f(59, None, 20.0, "05:30") == 20.0         # window <= 1h keeps 06:00 figure
+    assert f(59, None, 20.0, "") == 20.0              # unparseable end keeps 06:00 figure
+    assert f(None, None, None, "04:00") is None       # missing stays None (rule 11)
+
+
+def test_drain_adjustment_uses_0500_drain_when_present(dl):
+    days = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct=20.0,
+                     overnight_drain_pct_0500=10.0) for _ in range(6)]
+    assert dl.compute_overnight_drain_adjustment(days) == 10
+    dl._DRAIN_USE_0500 = False
+    assert dl.compute_overnight_drain_adjustment(days) == 20
