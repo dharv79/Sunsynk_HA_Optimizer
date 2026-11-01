@@ -273,3 +273,12 @@ def test_drain_adjustment_ignores_short_charge_nights(dl):
     dl._DRAIN_EXCLUDE_SHORT = True
     # too few clean nights: keep every night rather than fall back to the default
     assert dl.compute_overnight_drain_adjustment(good[:2] + short) == 20
+
+
+# Phase 62: full-window nights carry no drain
+def test_full_window_nights_excluded_from_drain(dl):
+    normal = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct_0500=10.0,
+                       overnight_drain_pct=10.0) for _ in range(6)]
+    full = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct_0500=0.0,
+                     overnight_drain_pct=0.0, full_window=True) for _ in range(6)]
+    assert dl.compute_overnight_drain_adjustment(normal + full) == 10

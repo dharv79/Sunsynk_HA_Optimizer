@@ -55,6 +55,7 @@ from .const import (
     CONF_BATTERY_COST_GBP,
     CONF_BATTERY_LIFETIME_KWH,
     CONF_SPARE_SOLAR_NOTIFY_KWH,
+    CONF_FULL_WINDOW_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
     CONF_BASELOAD_ALERT,
@@ -94,6 +95,7 @@ from .const import (
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_PEAK_EXPORT_LIVE,
+    DEFAULT_FULL_WINDOW_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
@@ -1064,6 +1066,12 @@ class SunsynkOptimizer:
             # Physics-based window: charge exactly as long as needed to reach target.
             end_minutes = flux1_end_minutes(energy_needed_kwh / efficiency, used_charge_rate)
             logic_branch = "adaptive_hourly" if decision.hourly_forecast_used else "adaptive"
+        # Phase 62: hold the target to 05:00 so the grid, not the battery, runs the house.
+        full_window_live = bool(cfg.get(CONF_FULL_WINDOW_LIVE, DEFAULT_FULL_WINDOW_LIVE))
+        full_window_end = "05:00"
+        if full_window_live and not low_solar and end_minutes < 5 * 60 and energy_needed_kwh > 0:
+            end_minutes = 5 * 60
+            logic_branch = "full_window"
         flux1_end = minutes_to_hhmm(end_minutes)
         # Phase 23: the lowest grid-charge current that still reaches the target
         # by 05:00. Logged only unless the live option is on; then the current
@@ -1108,6 +1116,8 @@ class SunsynkOptimizer:
             "low_solar_forecast_kwh": round(low_solar_forecast_kwh, 2),
             "forecast_band": band,
             "logic_branch": logic_branch,
+            "full_window_end": full_window_end,
+            "full_window_live": full_window_live and logic_branch == "full_window",
             "solar_start_time": solar_start_time,
             "hours_to_solar": round(hours_to_solar or 0.0, 2),
             "target_soc": target_soc,
