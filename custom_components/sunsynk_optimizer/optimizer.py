@@ -218,6 +218,7 @@ from .planning import (
     minutes_to_hhmm,
     net_cost_gbp,
     peak_cover_plan,
+    explain_plan,
     peak_export_plan,
     peak_export_recheck,
     peak_export_skip_reason,
@@ -1189,7 +1190,7 @@ class SunsynkOptimizer:
         if dry_run:
             await self.async_notify(
                 f"🧪 Sunsynk: test plan (dry run) — {plan_state['date']}",
-                json.dumps(plan_state),
+                "\n".join(explain_plan(plan_state)) + "\n\n" + json.dumps(plan_state),
             )
             return
 
@@ -1329,6 +1330,7 @@ class SunsynkOptimizer:
                 f"Solar forecast: {round(plan['solar_forecast_kwh'], 1)} kWh{forecast_note}{fallback_note}. "
                 f"Import: 02:00 → {plan['flux1_end']} target {plan['target_soc']}%{adjustment_note}. "
                 f"Season: {season}.{fallback_logic_note}{api_note}"
+                + (f"\nWhy: {' '.join(explain_plan(plan))}" if explain_plan(plan) else "")
             ),
         )
 
