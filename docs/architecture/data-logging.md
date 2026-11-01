@@ -84,3 +84,7 @@ Option `export_limit_w` (0 = off). The 30-min tick (`optimizer._async_track_clip
 ## Drain measured to 05:00 (01/11/2026, phase 63)
 
 The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 too. Paired days carry `overnight_drain_pct_0500` (`planning.drain_pct_to_0500`): from the 05:00 meter snapshot SOC, else the 06:00 drain scaled by (window-1)/window. `compute_overnight_drain_adjustment` uses it when `_DRAIN_USE_0500` is True. p75 and nearest-5 rounding are unchanged pending a backtest.
+
+## Charge-shortfall nights excluded from drain (01/11/2026, phase 53)
+
+`target - SOC@05:00` is drain only if the charge reached target. `planning.charge_shortfall_suspect` flags a gap above 3 points + 5 points per hour between Flux 1 end and 05:00; `_pair_records` stores `charge_short` and `drain_source`, and `compute_overnight_drain_adjustment` skips flagged nights (`_DRAIN_EXCLUDE_SHORT`) while at least 5 clean nights remain. Heuristic thresholds; tune from live `charge_short` counts.

@@ -627,6 +627,28 @@ def drain_pct_to_0500(
     return round(drain_0600 * (window - 1.0) / window, 1)
 
 
+SHORTFALL_BASE_PCT = 3.0       # SOC points of drain tolerated even with no gap after the charge
+SHORTFALL_PCT_PER_HOUR = 5.0   # plausible overnight drain per hour between Flux 1 end and 05:00
+
+
+def charge_shortfall_suspect(drain_0500: float | None, flux1_end: str | None) -> bool | None:
+    """True when a target-to-05:00 gap is too big to be pure drain (phase 53).
+
+    The gap target - SOC@05:00 is drain only if the charge reached target. After
+    a charge that stopped short the same gap is shortfall, and learning it as
+    drain inflates the buffer. Allowed drain is a base plus a per-hour rate for
+    the hours between the Flux 1 end and 05:00. Unknown inputs give None.
+    """
+    if drain_0500 is None:
+        return None
+    try:
+        hh, mm = str(flux1_end).split(":")[:2]
+        hours = max(0.0, 5.0 - (int(hh) + int(mm) / 60.0))
+    except (ValueError, TypeError):
+        return None
+    return drain_0500 > SHORTFALL_BASE_PCT + SHORTFALL_PCT_PER_HOUR * hours
+
+
 KPI_VERSION = 2  # 2 = phase 52 self-sufficiency (excludes battery grid-charge and free import)
 DAY_KPI_FIELDS = (
     "grid_import_offpeak_kwh",
