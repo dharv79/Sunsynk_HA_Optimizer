@@ -1,6 +1,6 @@
 # Phase 57 — API request timeout and catch-up for missed monthly reports
 
-**Status:** Planned, not built. **Size:** XS. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (01/11/2026), PR pending. **Size:** XS. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,11 @@ Confirmed: there is no timeout in api.py, and the monthly gating is in optimizer
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- `api._TIMEOUT` (30 s total) on every Sunsynk request, including the token refresh retry.
+- `planning.monthly_report_due(last_month, today)`: true once this month's first Sunday has passed and last month's reports are unsent. `OptimizerState.last_monthly_report_month` is persisted and written only after the sends.
+- `optimizer._async_monthly_reports` (tariff comparison, battery value, capacity estimate) runs from the daily 18:00 dispatcher and from the startup refresh. The two report functions gain `force` to bypass their `day > 7` gate. The shadow scorecard keeps its own first-Sunday gate.
+- A report that fails inside `_guarded` still marks the month done; only a crash before the state write retries.
+- Tests: `tests/test_planning.py` (phase 57).

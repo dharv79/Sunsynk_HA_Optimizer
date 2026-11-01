@@ -24,6 +24,7 @@ BASE_API = "https://api.sunsynk.net"
 SOURCE = "sunsynk"      # required literal value in all Sunsynk API requests
 CLIENT_ID = "csp-web"  # required OAuth client identifier for the web portal flow
 _BASE_HEADERS = {"accept": "application/json", "origin": BASE_WEB, "referer": f"{BASE_WEB}/"}
+_TIMEOUT = aiohttp.ClientTimeout(total=30)  # phase 57: fail fast so the plan retry gets its chance
 _JSON_HEADERS = {**_BASE_HEADERS, "content-type": "application/json;charset=UTF-8"}
 
 
@@ -75,6 +76,7 @@ class SunsynkApiClient:
             f"{BASE_API}/anonymous/publicKey",
             params={"nonce": nonce, "source": SOURCE, "sign": sign},
             headers=_BASE_HEADERS,
+            timeout=_TIMEOUT,
         ) as response:
             body = await self._json_or_raise(response)
             public_key = body.get("data")
@@ -120,6 +122,7 @@ class SunsynkApiClient:
             f"{BASE_API}/oauth/token/new",
             json=payload,
             headers=_JSON_HEADERS,
+            timeout=_TIMEOUT,
         ) as response:
             body = await self._json_or_raise(response)
             data = body.get("data")
@@ -144,13 +147,13 @@ class SunsynkApiClient:
         def _headers() -> dict[str, str]:
             return {**_JSON_HEADERS, "Authorization": f"Bearer {self._token}"}
 
-        async with self._session.request(method, url, json=payload, headers=_headers()) as response:
+        async with self._session.request(method, url, json=payload, headers=_headers(), timeout=_TIMEOUT) as response:
             if response.status != 401:
                 return await self._json_or_raise(response)
         # Token expired mid-session — re-authenticate and retry once.
         self._token = None
         await self.async_login()
-        async with self._session.request(method, url, json=payload, headers=_headers()) as retry_response:
+        async with self._session.request(method, url, json=payload, headers=_headers(), timeout=_TIMEOUT) as retry_response:
             return await self._json_or_raise(retry_response)
 
     async def async_post_income(self, plant_id: str, payload: dict[str, Any]) -> dict[str, Any]:

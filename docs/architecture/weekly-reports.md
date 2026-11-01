@@ -87,3 +87,7 @@ It alerts only for a complete month with |gap| > £2: "⚠️ Sunsynk: bill diff
 
 Assumes the bill covers a calendar month. Read-only. Tests: `test_reconcile_*` and `test_logged_day_cost` in `tests/test_kpis.py`.
 
+
+## Monthly report catch-up (01/11/2026, phase 57)
+
+The monthly tariff comparison, battery value and capacity estimate now run through `_async_monthly_reports`, called daily at 18:00 and at startup. `planning.monthly_report_due` makes them run once per month after the first Sunday, so a Sunday missed while HA was down is sent at the next 18:00 or restart. `last_monthly_report_month` (persisted) prevents duplicates. Sunsynk API calls now time out after 30 s.
