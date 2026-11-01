@@ -1,6 +1,6 @@
 # Phase 58 — Plain-English plan explanation on the notification and sensor
 
-**Status:** Planned, not built. **Size:** S. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Built. **Size:** S. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Confirmed that the dry run dumps raw JSON and that no explain helper exists. It 
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built
+
+- `planning.explain_plan(plan, shadow=None) -> list[str]`: sentences from the reason code (weekly full-charge day, low-solar override and winter-like, the three solar-bridge variants, the band fallback), forecast and correction, drain and evening adjustments, import feedback (applied or logged only), free-event cap, the full-window branch, and the optional `soc_cap_shadow` counterfactual. Missing fields are omitted.
+- Exposed as an `explanation` attribute on the import-plan sensor, a "Why:" line on the plan notification, and a leading text block on the dry-run notification (still a pure dry run: no push, log or state).
+- The shadow counterfactual is only known after the day closes, so the notification and sensor do not pass it yet.
+- Tests: `tests/test_explain_plan.py`.

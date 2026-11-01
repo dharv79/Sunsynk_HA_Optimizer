@@ -21,7 +21,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .data_logger import DataLogger
-from .planning import free_event_attributes
+from .planning import explain_plan, free_event_attributes
 
 
 _ADAPTIVE_THRESHOLDS = {
@@ -217,7 +217,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         state = self.coordinator.state
         if self._sensor_key == "import_plan_end" and isinstance(state.last_import_plan, dict):
-            return state.last_import_plan
+            return {**state.last_import_plan, "explanation": " ".join(explain_plan(state.last_import_plan))}
         if self._sensor_key == "flux2_action":
             action = state.last_flux2_action
             if isinstance(action, dict):

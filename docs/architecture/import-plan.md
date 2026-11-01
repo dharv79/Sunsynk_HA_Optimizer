@@ -228,3 +228,7 @@ Missing inputs → `None` fields (rule 11).
 ## Measured charge rate (01/11/2026, phase 61)
 
 The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.measured_charge_kw`). `data_logger.compute_measured_charge_rate_kw` takes the p75 over 14 nights, bucketed by battery temperature. `CONF_MEASURED_RATE_LIVE` (default off) switches the plan to it and stops the temperature derate being applied twice; off, `measured_charge_rate_kw` is logged only.
+
+## Plain-English plan explanation (01/11/2026, phase 58)
+
+`planning.explain_plan(plan_state, shadow=None)` turns the plan's reason code and adjustment fields into short sentences. It feeds the `explanation` attribute on the import-plan sensor, the "Why:" line of the plan notification and the dry-run notification. It reads only fields already in `plan_state`, so it cannot drift from the decision; `tests/test_explain_plan.py` covers each reason code.

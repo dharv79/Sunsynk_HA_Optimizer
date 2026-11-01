@@ -1007,6 +1007,77 @@ def soc_cap_shadow(
     }
 
 
+def _num(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def explain_plan(plan: dict[str, Any] | None, shadow: dict[str, Any] | None = None) -> list[str]:
+    """Plain-English sentences saying why the import plan chose its target (phase 58).
+
+    Built only from the plan's own fields (reason code, forecast, adjustments,
+    free-event cap, full-charge day), so it cannot drift from the decision.
+    Missing fields are left out, never guessed as 0. ``shadow`` is a
+    ``soc_cap_shadow`` result (known only after the day closes) for the 85%
+    counterfactual.
+    """
+    if not isinstance(plan, dict):
+        return []
+    target = _num(plan.get("target_soc"))
+    if target is None:
+        return []
+    reason = str(plan.get("target_soc_reason") or "")
+    out: list[str] = []
+    forecast = _num(plan.get("solar_forecast_kwh"))
+    low = _num(plan.get("low_solar_forecast_kwh"))
+    raw = _num(plan.get("raw_forecast_kwh"))
+    low_txt = f"{low:.1f} kWh" if low is not None else "the forecast"
+    if reason == "weekly_full_charge_day":
+        out.append(f"Target {target:.0f}%: this is the weekly full-charge day, so the battery is charged for the scoring run.")
+    elif reason == "low_solar_override_winter_like":
+        out.append(
+            f"Target {target:.0f}%: low-solar winter night — the pessimistic forecast of {low_txt} is below the "
+            f"{LOW_SOLAR_THRESHOLD_KWH:.0f} kWh line, so the battery is filled from cheap import."
+        )
+    elif reason == "low_solar_override":
+        out.append(
+            f"Target {target:.0f}%: the pessimistic forecast of {low_txt} is below the "
+            f"{LOW_SOLAR_THRESHOLD_KWH:.0f} kWh line, so the battery is filled from cheap import."
+        )
+    elif reason in ("solar_bridge_hourly", "solar_bridge", "solar_bridge_ramp"):
+        hour = plan.get("bridge_hour")
+        until = f" until solar covers the house around {int(hour):02d}:00" if isinstance(hour, int) else " until solar takes over"
+        extra = " (raised for a slow-ramp morning)" if reason == "solar_bridge_ramp" else ""
+        out.append(f"Target {target:.0f}%: enough charge to bridge the house load{until}{extra}.")
+    else:
+        out.append(f"Target {target:.0f}%: no solar start time, so the {str(plan.get('forecast_band') or 'seasonal').replace('_', '-')} default is used.")
+    if forecast is not None:
+        factor = _num(plan.get("forecast_correction_factor"))
+        if raw is not None and factor not in (None, 1.0):
+            out.append(f"Forecast {forecast:.1f} kWh (raw {raw:.1f} kWh x {factor}); low-solar decisions use the lower of raw and corrected.")
+        else:
+            out.append(f"Forecast {forecast:.1f} kWh.")
+    drain, evening = _num(plan.get("overnight_drain_adjustment")), _num(plan.get("soc_adjustment"))
+    if drain:
+        out.append(f"+{drain:.0f}% for overnight drain learned from past nights.")
+    if evening:
+        out.append(f"{evening:+.0f}% evening nudge from how past days ended.")
+    feedback = _num(plan.get("import_feedback_adjustment"))
+    if feedback:
+        live = plan.get("import_feedback_live")
+        out.append(f"Import feedback suggests {feedback:+.0f}% ({'applied' if live else 'logged only'}).")
+    if plan.get("free_event_capped"):
+        out.append("Capped by a free-electricity event, which will refill the battery.")
+    if plan.get("logic_branch") == "full_window":
+        out.append("Charging is held open to 05:00 so the grid, not the battery, runs the house.")
+    if isinstance(shadow, dict):
+        cap, extra_cost = _num(shadow.get("cap_soc")), _num(shadow.get("extra_cost_gbp"))
+        if cap is not None and extra_cost is not None:
+            out.append(f"Shadow: capping at {cap:.0f}% would have cost about £{extra_cost:.2f} extra.")
+        elif cap is not None:
+            out.append(f"Shadow: capping at {cap:.0f}% could not be costed (missing data).")
+    return out
+
+
 def week_kpis(days: list[dict[str, Any]]) -> dict[str, float | None]:
     """Weekly roll-up: kWh/£ fields summed, self-sufficiency averaged over days that have it."""
     pct = ("self_sufficiency_pct", "grid_independence_pct")

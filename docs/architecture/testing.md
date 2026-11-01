@@ -47,6 +47,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_tariff_comparison.py` | Phase 28 band boundaries, `cost_under_tariff` (missing slot → None), `parse_half_hourly_charges`, `compare_tariffs`, rate overrides; phase 35 standing charge × days, VAT, Intelligent window, Agile slot pricing and unavailability, `agile_prices_by_date`, `newest_agile_product`, region/VAT overrides |
 | `tests/test_gentle_charging.py` | Phase 23 `gentle_charge_current_a` (margin, clamps, zero need), `max_charge_current_a`, `gentle_current_lowers` (never above the user's Grid Amps), gentle fields on the logged import plan |
 | `tests/test_meter_reconciliation.py` | Phase 44 `meter_reconciliation` (22:00 cut-off, tolerance, missing → None), `divergence_streak` |
+| `tests/test_explain_plan.py` | Phase 58 `explain_plan` (one test per reason code, adjustments, shadow, missing data) |
 | `tests/test_peak_export_recheck.py` | Phase 66 `peak_export_recheck` (lower/raise, 0.5 kWh gate, reserve floor, missing inputs) |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
