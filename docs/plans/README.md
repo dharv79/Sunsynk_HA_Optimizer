@@ -48,10 +48,50 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 38. "Cost of 1 kWh now" sensor | Done, merged (f790c19, PR #64) | S, ~30k |
 | 39. Multi-day low-solar planning | Done, merged (1935017, PR #61), shadow | S, ~30k |
 | 40. Daytime load spike alert | Done, merged (33fb1fd, PR #63) | XS, ~20k |
+| 41. Shadow go-live scorecard | Planned, not built | M |
+| 42. Import cause ledger ("why did I import?") | Planned, not built | M |
+| 43. Inverter fault and event log feed (feasibility-gated) | Planned, not built | S |
+| 44. CT clamp vs smart-meter reconciliation | In progress — built, PR pending (1.0.12b31) | XS, ~35k |
+| 45. Nightly data-integrity audit, HA Repairs and a diagnostics download | Planned, not built | M |
+| 46. HA service actions and actionable notifications | Planned, not built | M |
+| 47. KPI and money sensors with long-term statistics | Planned, not built | S |
+| 48. Grid outage detection, runtime sensor and outage log | Planned, not built | S |
+| 49. PV string health monitor (MPPT0 vs MPPT1) | Planned, not built | S |
+| 50. Battery and PV upgrade advisor | Planned, not built | M |
+| 51. Free events: DST-safe timers, a watch_from guard and sold-energy split | Planned, not built | S |
+| 52. Self-sufficiency KPI that excludes battery grid-charging and free import | Planned, not built | XS |
+| 53. Measure overnight drain from the 05:00 snapshot SOC, not target_soc | Planned, not built | S |
+| 54. Charge outcome record: reached vs target, likely cause and alert | Planned, not built | S |
+| 55. Evening reserve from learned 16:00-22:00 load (shadow first) | Planned, not built | M |
+| 56. Intraday solar re-scaling from PV produced so far | Planned, not built | M |
+| 57. API request timeout and catch-up for missed monthly reports | Planned, not built | XS |
+| 58. Plain-English plan explanation on the notification and sensor | Planned, not built | S |
+| 59. Peak cover: hold the battery early instead of recharging it at 13:45 | Planned, not built | M |
+| 60. Peak cover sizing: add wear and stop stacking p75 with a 1.1 margin | Planned, not built | S |
+| 61. Learn the charge rate from the 02:00/05:00 meter snapshots, and stop derating it twice | Planned, not built | M |
+| 62. Run Flux 1 to 05:00 every night, capped by the target | Planned, not built | S |
+| 63. Remove the 05:00-06:00 double count in drain and bridge | Planned, not built | S |
+| 64. Pick the bridge target from the forecast-error distribution (newsvendor rule) | Planned, not built | M |
+| 65. Move trims into the peak window when the solar left today can wait | Planned, not built | M |
+| 66. Re-check the peak export plan at 17:00 and 18:00 using the observed peak load | Planned, not built | S |
+| 67. Cache config and tariff parsing on the SOC-change path | Planned, not built | S |
+| 68. Replace the weekly full-charge day with 'days since the last 100%' | Planned, not built | S |
+| 69. Receding-horizon MPC planner (48 h, half-hourly) in shadow | Planned, not built | XL |
+| 70. Self-learned probabilistic solar forecast (own P10/P50/P90) | Planned, not built | L |
+| 71. Half-hourly household load forecaster (weather and calendar aware) | Planned, not built | L |
+| 72. Full digital twin: replay every subsystem on half-hourly history | Planned, not built | XL |
+| 73. Native inverter time-of-use programming via the six system-mode slots | Planned, not built | L |
+| 74. Local Modbus/RS485 control path as a cloud-outage fallback | Planned, not built | XL |
+| 75. Battery state-of-health and degradation ledger | Planned, not built | L |
+| 76. Dynamic-tariff native mode (Agile / half-hourly prices in the loop) | Planned, not built | XL |
+| 77. Flexibility-market export bidding (non-Saving-Sessions VPP) | Planned, not built | L |
+| 78. Household electrification and system-sizing advisor | Planned, not built | L |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
 Phases 31–40 come from improvement list 3 (14/10/2026). Recommended order: 32 → 31 → 33 (protect existing savings), then 35 and 39 (largest new value); 31 and 36 start with a feasibility check (Flux read-back / Octopus statement sensor) and go "On hold" in part if it fails; 36 after 35; 37 and 38 independent; 39 ships in shadow first.
+
+Phases 41–78 come from the idea sweep of 01/11/2026: new features 41–50, improvements 51–58, optimisations 59–68, blue sky 69–78. Features and improvements were vetted against the code; optimisations and blue sky were not (re-vet before building). Two duplicate improvements (diagnostics download, shadow scoreboard) were merged into the matching feature phases. Suggested first builds: CT reconciliation, self-sufficiency KPI fix, 05:00–06:00 double count, shadow scorecard; blue-sky phases need a design pass before any code.
 
 Phase 30 is a user request (13/10/2026). Phases 22–29 come from the second improvement list (06/10/2026; items 26 hot-water diversion and 31 EV battery hold were declined). 22 is independent and recommended early; 23 needs 22 (safety net) and an API check; 24 before 17; 26 shares phase 12's missing-meter guard; 28 and 23 start with a feasibility check and go "On hold" if it fails.
 
