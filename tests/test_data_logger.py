@@ -245,3 +245,31 @@ def test_drain_adjustment_uses_0500_drain_when_present(dl):
     assert dl.compute_overnight_drain_adjustment(days) == 10
     dl._DRAIN_USE_0500 = False
     assert dl.compute_overnight_drain_adjustment(days) == 20
+
+
+# --------------------------------------------------------------------------- #
+# Phase 53: exclude charge-shortfall nights from the drain sample              #
+# --------------------------------------------------------------------------- #
+
+def test_charge_shortfall_suspect_scales_with_gap_hours():
+    from conftest import _planning
+    f = _planning.charge_shortfall_suspect
+    assert f(3.0, "05:00") is False        # full window: only the base allowance
+    assert f(6.0, "05:00") is True
+    assert f(12.0, "03:00") is False       # 2h gap allows 13 points
+    assert f(14.0, "03:00") is True
+    assert f(None, "03:00") is None        # missing stays None (rule 11)
+    assert f(10.0, "") is None
+
+
+def test_drain_adjustment_ignores_short_charge_nights(dl):
+    good = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct_0500=5.0,
+                     overnight_drain_pct=5.0) for _ in range(6)]
+    short = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct_0500=20.0,
+                      overnight_drain_pct=20.0, charge_short=True) for _ in range(4)]
+    assert dl.compute_overnight_drain_adjustment(good + short) == 5
+    dl._DRAIN_EXCLUDE_SHORT = False
+    assert dl.compute_overnight_drain_adjustment(good + short) == 20
+    dl._DRAIN_EXCLUDE_SHORT = True
+    # too few clean nights: keep every night rather than fall back to the default
+    assert dl.compute_overnight_drain_adjustment(good[:2] + short) == 20

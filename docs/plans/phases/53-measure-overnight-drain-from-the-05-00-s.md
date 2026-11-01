@@ -1,6 +1,6 @@
 # Phase 53 — Measure overnight drain from the 05:00 snapshot SOC, not target_soc
 
-**Status:** Planned, not built. **Size:** S. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (01/11/2026), PR pending. **Size:** S. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Confirmed in data_logger.py:506-564. The drain is computed against target_soc, a
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- Phase 63 already measured drain as target minus the 05:00 snapshot SOC, but a charge that stopped short still read as drain. `planning.charge_shortfall_suspect(drain_0500, flux1_end)` flags a gap larger than 3 points plus 5 points per hour between Flux 1 end and 05:00 (unknown is `None`).
+- `_pair_records` adds `drain_source` (`soc_0500` / `scaled_0600`) and `charge_short`. `compute_overnight_drain_adjustment` drops `charge_short` nights behind `DataLogger._DRAIN_EXCLUDE_SHORT` (True), but only if at least 5 clean nights remain; otherwise it keeps all nights rather than fall back to the default.
+- p75 and the nearest-5 rounding are unchanged. The thresholds are heuristic; check `charge_short` counts in live logs before tuning.
+- Tests: `tests/test_data_logger.py` (phase 53 section).
