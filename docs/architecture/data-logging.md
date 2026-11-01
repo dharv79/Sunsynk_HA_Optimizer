@@ -80,3 +80,7 @@ Option `export_limit_w` (0 = off). The 30-min tick (`optimizer._async_track_clip
 **Design.** `const.INTEGRATION_VERSION` is read once from `manifest.json` at import (`None` if unreadable). `data_logger._record` adds `version` to every JSONL record. The 01:55 plan and the 22:00 `day_kpis` record also carry it, so every 22:00 debug bundle names the running build.
 
 **Verification.** `tests/test_data_logger.py::test_records_carry_the_manifest_version`. Live: the next 22:00 bundle shows `"version": "1.0.12b29"`.
+
+## Drain measured to 05:00 (01/11/2026, phase 63)
+
+The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 too. Paired days carry `overnight_drain_pct_0500` (`planning.drain_pct_to_0500`): from the 05:00 meter snapshot SOC, else the 06:00 drain scaled by (window-1)/window. `compute_overnight_drain_adjustment` uses it when `_DRAIN_USE_0500` is True. p75 and nearest-5 rounding are unchanged pending a backtest.

@@ -19,7 +19,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from .const import INTEGRATION_VERSION
-from .planning import DAY_KPI_FIELDS, net_cost_gbp, round_or_none
+from .planning import DAY_KPI_FIELDS, drain_pct_to_0500, net_cost_gbp, round_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ class DataLogger:
     _MIN_DAYS_SOC_ADJUSTMENT = 5        # minimum for drain and evening-nudge corrections
     _DEFAULT_DRAIN_ADJUSTMENT = 15      # home fallback when fewer than 5 drain days exist — avoids cliff-edge drop to 0%
     _DEFAULT_DRAIN_ADJUSTMENT_AWAY = 8  # away fallback: holidays are known-low-drain, so start lower than home
+    _DRAIN_USE_0500 = True              # phase 63: drain measured to 05:00 (bridge starts there), not 06:00
     _DRAIN_PERCENTILE = 75              # buffer sized to cover ~3 of 4 nights, not the average night
     _EVENING_SOC_LOW = 20.0             # below this at 22:00 → battery ran low; we under-charged
     _EVENING_SOC_HIGH = 35.0            # above this at 22:00 → battery still full; we over-charged
@@ -442,6 +443,7 @@ class DataLogger:
                 if morning_soc is not None and target_soc is not None
                 else None
             )
+            soc_0500 = (snapshots_for_date(records, date).get("05:00") or {}).get("soc")
             paired.append({
                 "date": date,
                 "solar_forecast_kwh": plan.get("solar_forecast_kwh", 0.0),
@@ -455,6 +457,9 @@ class DataLogger:
                 "morning_pv_power": morning_pv_power,
                 "overnight_load_kwh": morning.get("overnight_load_kwh"),
                 "overnight_drain_pct": overnight_drain_pct,
+                "overnight_drain_pct_0500": drain_pct_to_0500(
+                    target_soc, soc_0500, overnight_drain_pct, plan.get("flux1_end")
+                ),
                 "evening_soc": actual.get("evening_soc"),
                 "evening_export_disabled": actual.get("evening_export_disabled", False),
                 "day_load_kwh": actual.get("day_load_kwh"),
@@ -558,7 +563,8 @@ class DataLogger:
         valid = [d for d in paired_days if self._is_drain_night(d, away)]
         if len(valid) < self._MIN_DAYS_SOC_ADJUSTMENT:
             return self._DEFAULT_DRAIN_ADJUSTMENT_AWAY if away else self._DEFAULT_DRAIN_ADJUSTMENT
-        drains = [d["overnight_drain_pct"] for d in valid]
+        key = "overnight_drain_pct_0500" if self._DRAIN_USE_0500 else "overnight_drain_pct"
+        drains = [d[key] if d.get(key) is not None else d["overnight_drain_pct"] for d in valid]
         buffer_drain = self._percentile(drains, self._DRAIN_PERCENTILE)
         rounded = round(buffer_drain / 5) * 5
         return max(0, min(20, int(rounded)))  # cap at 20% to avoid overreacting to outlier nights

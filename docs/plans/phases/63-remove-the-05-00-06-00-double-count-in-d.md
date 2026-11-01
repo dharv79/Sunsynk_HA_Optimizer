@@ -1,6 +1,6 @@
 # Phase 63 — Remove the 05:00-06:00 double count in drain and bridge
 
-**Status:** Planned, not built. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Built, pending merge. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- `planning.drain_pct_to_0500` returns the drain to 05:00: target minus the 05:00 snapshot SOC when it exists, otherwise the 06:00 drain scaled by (window-1)/window (window = Flux 1 end to 06:00; <=1h or unparseable keeps the 06:00 figure; missing is `None`).
+- `_pair_records` adds `overnight_drain_pct_0500`; `compute_overnight_drain_adjustment` uses it behind `DataLogger._DRAIN_USE_0500` (True), falling back to the 06:00 drain per night.
+- Deliberately NOT changed: p75 stays (`_DRAIN_PERCENTILE`) and rounding stays to nearest 5. No logged nights exist in the repo, so the 30-night backtest could not be run; the median switch needs that backtest first (see Risk). Do it from live logs with `tools/backtest.py --target-offset`.
+- Tests: `tests/test_data_logger.py` (phase 63 section).

@@ -599,6 +599,34 @@ def resolve_load_kw(config_kw: float, learned_kw: float | None) -> tuple[float, 
 # (22:00-24:00 is not covered, same as day_actuals).
 KPI_RESERVE_SOC = BATTERY_BOTTOM_SOC
 KPI_LATE_LOAD_HOURS = 4.0  # 22:00 → next 02:00 charge
+def drain_pct_to_0500(
+    target_soc: float | None,
+    soc_0500: float | None,
+    drain_0600: float | None,
+    flux1_end: str | None,
+) -> float | None:
+    """Overnight drain (SOC points) measured to 05:00, where the solar bridge starts counting.
+
+    The bridge sizes load from 05:00, so a drain measured to 06:00 double counts
+    05:00-06:00 (phase 63). Prefer the 05:00 meter snapshot SOC; otherwise scale
+    the 06:00 drain by (window-1)/window, where window is the hours from the
+    Flux 1 end to 06:00. Missing inputs give None, never 0 (rule 11). A window
+    of 1h or less, or an unparseable end time, keeps the 06:00 figure.
+    """
+    if target_soc is not None and soc_0500 is not None:
+        return round(target_soc - soc_0500, 1)
+    if drain_0600 is None:
+        return None
+    try:
+        hh, mm = str(flux1_end).split(":")[:2]
+        window = 6.0 - (int(hh) + int(mm) / 60.0)
+    except (ValueError, TypeError):
+        return drain_0600
+    if window <= 1.0:
+        return drain_0600
+    return round(drain_0600 * (window - 1.0) / window, 1)
+
+
 KPI_VERSION = 2  # 2 = phase 52 self-sufficiency (excludes battery grid-charge and free import)
 DAY_KPI_FIELDS = (
     "grid_import_offpeak_kwh",
