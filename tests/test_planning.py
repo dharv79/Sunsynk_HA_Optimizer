@@ -839,3 +839,59 @@ def test_recent_soc(planning):
     assert planning.recent_soc(None, (30.0, now - timedelta(minutes=31)), now) == (None, False)
     assert planning.recent_soc(None, (30.0, now + timedelta(minutes=1)), now) == (None, False)
     assert planning.recent_soc(None, None, now) == (None, False)
+
+
+# ---- Phase 41: shadow go-live scorecard ---------------------------------
+
+def _days(n, end="2026-11-01"):
+    from datetime import date, timedelta
+    e = date.fromisoformat(end)
+    return [(e - timedelta(days=i)).isoformat() for i in range(n)][::-1]
+
+
+def test_scorecard_no_records_and_silent_failure(planning):
+    card = planning.shadow_scorecard([], "2026-11-01")
+    assert {v["verdict"] for v in card.values()} == {"no_records"}
+    old = [{"type": "peak_export", "date": "2026-10-05", "decision": "export", "gain_gbp": 0.5}]
+    assert planning.shadow_scorecard(old, "2026-11-01")["peak_export"]["verdict"] == "no_records"
+
+
+def test_scorecard_peak_export_ready_and_not_yet(planning):
+    recs = [{"type": "peak_export", "date": d, "decision": "export", "gain_gbp": 0.1} for d in _days(8)]
+    s = planning.shadow_scorecard(recs, "2026-11-01")["peak_export"]
+    assert s["verdict"] == "ready" and s["changed"] == 8 and s["delta_gbp"] == 0.8
+    quiet = [{"type": "peak_export", "date": d, "decision": "no_surplus"} for d in _days(7)]
+    s = planning.shadow_scorecard(quiet, "2026-11-01")["peak_export"]
+    assert s["verdict"] == "not_yet" and s["delta_gbp"] is None
+
+
+def test_scorecard_soc_cap_harmful_and_missing_stays_none(planning):
+    recs = [{"type": "day_kpis", "date": d, "soc_cap_shadow": {"extra_cost_gbp": 0.14}} for d in _days(5)]
+    s = planning.shadow_scorecard(recs, "2026-11-01")["soc_cap_85"]
+    assert s["verdict"] == "harmful" and s["delta_gbp"] == -0.7
+    none = [{"type": "day_kpis", "date": "2026-10-30", "soc_cap_shadow": {"extra_cost_gbp": None}}]
+    s = planning.shadow_scorecard(none, "2026-11-01")["soc_cap_85"]
+    assert s["delta_gbp"] is None and s["verdict"] == "not_yet"
+
+
+def test_scorecard_weighted_correction_compares_error(planning):
+    recs = []
+    for d in _days(8):
+        recs.append({"type": "import_plan", "date": d, "raw_forecast_kwh": 10, "forecast_correction_factor": 1.0,
+                     "forecast_correction_weighted": 0.8})
+        recs.append({"type": "day_actuals", "date": d, "actual_solar_kwh": 8})
+    s = planning.shadow_scorecard(recs, "2026-11-01")["weighted_correction"]
+    assert s["verdict"] == "ready" and s["error_ratio"] == 0.0
+    for r in recs:
+        if r["type"] == "import_plan":
+            r["forecast_correction_weighted"] = 1.5
+    assert planning.shadow_scorecard(recs, "2026-11-01")["weighted_correction"]["verdict"] == "harmful"
+
+
+def test_scorecard_multi_day_capacity_and_summary(planning):
+    recs = [{"type": "multi_day_plan", "date": "2026-10-30", "changes_target": True},
+            {"type": "capacity_estimate", "date": "2026-10-05", "estimate_kwh": 9.4, "pct_of_configured": 94.0}]
+    card = planning.shadow_scorecard(recs, "2026-11-01")
+    assert card["multi_day"]["changed"] == 1 and card["multi_day"]["verdict"] == "not_yet"
+    assert card["capacity"]["verdict"] == "ready" and card["capacity"]["estimate_kwh"] == 9.4
+    assert "capacity: ready" in planning.scorecard_summary(card)

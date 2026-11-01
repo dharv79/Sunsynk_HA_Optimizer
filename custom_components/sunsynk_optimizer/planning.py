@@ -2497,3 +2497,152 @@ def divergence_streak(history: list[dict[str, Any]]) -> int:
         run += 1
         prev = d
     return run
+
+
+# Shadow go-live scorecard (phase 41): read-only, never enables a *_live option.
+SCORECARD_WINDOW_DAYS = 30
+SCORECARD_MIN_DAYS = 7
+SCORECARD_MIN_CHANGED = 3
+SCORECARD_HARM_GBP = 0.5
+SCORECARD_SILENT_DAYS = 14
+SCORECARD_ERROR_GAIN = 0.05  # weighted correction must beat the live factor by 5%
+SCORECARD_ERROR_LOSS = 0.10  # ...and is harmful if 10% worse
+
+
+def _in_window(records: list[dict[str, Any]], record_type: str, today: str, days: int) -> list[dict[str, Any]]:
+    """``record_type`` records dated within the ``days`` ending ``today`` (ISO strings), one per date (last wins)."""
+    try:
+        floor = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
+    except (TypeError, ValueError):
+        return []
+    by_date: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        d = rec.get("date")
+        if rec.get("type") == record_type and isinstance(d, str) and floor < d <= today:
+            by_date[d] = rec
+    return [by_date[d] for d in sorted(by_date)]
+
+
+def _score(days: int, changed: int, delta_gbp: float | None, dates: list[str], note: str = "") -> dict[str, Any]:
+    """Verdict from record count, decisions changed and £ delta (positive = shadow would have helped).
+
+    no_records: nothing logged. harmful: delta below -£0.50. ready: enough
+    changed days with a positive delta. Otherwise not_yet (too few days, no
+    £ estimate, or no change). Conservative by design.
+    """
+    if days == 0:
+        verdict = "no_records"
+    elif delta_gbp is not None and delta_gbp <= -SCORECARD_HARM_GBP:
+        verdict = "harmful"
+    elif days >= SCORECARD_MIN_DAYS and changed >= SCORECARD_MIN_CHANGED and delta_gbp is not None and delta_gbp > 0:
+        verdict = "ready"
+    else:
+        verdict = "not_yet"
+    return {
+        "verdict": verdict, "days": days, "changed": changed, "delta_gbp": round_or_none(delta_gbp),
+        "evidence": dates[-5:], "note": note,
+    }
+
+
+def _sum_or_none(values: list[Any]) -> float | None:
+    nums = [v for v in values if isinstance(v, (int, float))]
+    return sum(nums) if nums else None
+
+
+def shadow_scorecard(
+    records: list[dict[str, Any]], today: str, window_days: int = SCORECARD_WINDOW_DAYS
+) -> dict[str, dict[str, Any]]:
+    """Score each shadow feature against logged outcomes over the last ``window_days``.
+
+    ``records`` are raw JSONL records. Returns {feature: {verdict, days,
+    changed, delta_gbp, evidence, note}}; delta_gbp is None where no £
+    counterfactual exists (never 0). A feature with no records in
+    SCORECARD_SILENT_DAYS reports ``no_records`` so silent failures show.
+    """
+    def win(kind: str, days: int = window_days) -> list[dict[str, Any]]:
+        return _in_window(records, kind, today, days)
+
+    out: dict[str, dict[str, Any]] = {}
+    plans = win("import_plan")
+    # 15 import feedback: days the feedback would have moved the target.
+    moved = [p for p in plans if p.get("import_feedback_adjustment") not in (None, 0)]
+    out["import_feedback"] = _score(
+        len([p for p in plans if "import_feedback_adjustment" in p]), len(moved), None,
+        [p["date"] for p in moved], "no £ counterfactual; review the adjustment dates",
+    )
+    # 17 peak export: income minus replacement cost on days it would have exported.
+    exports = win("peak_export")
+    sold = [r for r in exports if r.get("decision") == "export"]
+    out["peak_export"] = _score(
+        len(exports),
+        len(sold), _sum_or_none([r.get("gain_gbp") for r in sold]) if sold else None, [r["date"] for r in sold],
+    )
+    # 30 peak cover: day-rate top-up vs peak-rate purchase.
+    covers = win("peak_cover")
+    topped = [r for r in covers if r.get("decision") == "top_up"]
+    out["peak_cover"] = _score(
+        len(covers),
+        len(topped), _sum_or_none([r.get("gain_gbp") for r in topped]) if topped else None, [r["date"] for r in topped],
+    )
+    # 85% cap: positive extra cost is a loss, so the delta is its negative.
+    caps = [k for k in win("day_kpis") if isinstance(k.get("soc_cap_shadow"), dict)]
+    extra = _sum_or_none([k["soc_cap_shadow"].get("extra_cost_gbp") for k in caps])
+    out["soc_cap_85"] = _score(
+        len(caps), len([k for k in caps if (k["soc_cap_shadow"].get("extra_cost_gbp") or 0) > 0]),
+        None if extra is None else -extra, [k["date"] for k in caps],
+        "cap saves nothing modelled, so any extra cost counts against it",
+    )
+    # 20 weighted correction: mean absolute forecast error vs actual solar.
+    actuals = {a["date"]: a for a in win("day_actuals")}
+    live_err: list[float] = []
+    weighted_err: list[float] = []
+    dates: list[str] = []
+    for p in plans:
+        actual = (actuals.get(p["date"]) or {}).get("actual_solar_kwh")
+        raw, live, weighted = p.get("raw_forecast_kwh"), p.get("forecast_correction_factor"), p.get("forecast_correction_weighted")
+        if None in (actual, raw, live, weighted):
+            continue
+        live_err.append(abs(raw * live - actual))
+        weighted_err.append(abs(raw * weighted - actual))
+        dates.append(p["date"])
+    score = _score(len(dates), 0, None, dates, "mean absolute error vs live factor")
+    if len(dates) >= SCORECARD_MIN_DAYS and sum(live_err) > 0:
+        ratio = sum(weighted_err) / sum(live_err)
+        score["changed"] = len(dates)
+        score["delta_gbp"] = None
+        score["error_ratio"] = round(ratio, 3)
+        score["verdict"] = "ready" if ratio <= 1 - SCORECARD_ERROR_GAIN else "harmful" if ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
+    out["weighted_correction"] = score
+    # 23 gentle charge: nights it was applied (no £ counterfactual).
+    gentle = [p for p in plans if p.get("gentle_charge_applied")]
+    out["gentle_charge"] = _score(
+        len([p for p in plans if "gentle_charge_applied" in p]), len(gentle), None, [p["date"] for p in gentle],
+        "no £ counterfactual; check the charge-rate log",
+    )
+    # 39 multi-day: days where the shadow plan differed from the live plan.
+    multi = win("multi_day_plan")
+    differs = [m for m in multi if m.get("changes_target") or m.get("changes_peak")]
+    out["multi_day"] = _score(len(multi), len(differs), None, [m["date"] for m in differs], "needs a ≥2 day low-solar run")
+    # 34 capacity: latest estimate present and sampled.
+    caps_est = win("capacity_estimate", 70)
+    latest = caps_est[-1] if caps_est else {}
+    est = latest.get("estimate_kwh")
+    out["capacity"] = _score(len(caps_est), 0, None, [c["date"] for c in caps_est], "monthly estimate")
+    if est is not None:
+        out["capacity"]["verdict"] = "ready"
+        out["capacity"]["estimate_kwh"] = est
+        out["capacity"]["pct_of_configured"] = latest.get("pct_of_configured")
+    # Silent-failure check: expected daily records absent for SCORECARD_SILENT_DAYS.
+    for name, kind in (("peak_export", "peak_export"), ("peak_cover", "peak_cover")):
+        if not win(kind, SCORECARD_SILENT_DAYS):
+            out[name]["verdict"] = "no_records"
+    return out
+
+
+def scorecard_summary(card: dict[str, dict[str, Any]]) -> str:
+    """One short human line per feature for the monthly notification."""
+    lines = []
+    for name, s in card.items():
+        delta = "" if s.get("delta_gbp") is None else f", £{s['delta_gbp']:+.2f}"
+        lines.append(f"{name}: {s['verdict'].replace('_', ' ')} ({s['changed']}/{s['days']} days{delta})")
+    return "\n".join(lines)

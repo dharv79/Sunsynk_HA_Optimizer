@@ -54,6 +54,10 @@ action:
     target: {entity_id: switch.dishwasher}
 ```
 
+### Shadow scorecard (phase 41, 01/11/2026)
+
+Diagnostic `sensor.shadow_scorecard`: state is the number of shadow features with verdict `ready`; attributes hold one entry per feature (verdict, days, changed, `delta_gbp`, evidence dates, note). Built monthly (first Sunday, 18:00) by `planning.shadow_scorecard` from the raw log; read-only, never flips a `*_live` option. Verdict rules are in the phase 41 file.
+
 ### Battery capacity estimate (phase 34, 14/10/2026)
 
 Diagnostic `sensor.battery_capacity_estimate` (kWh): the measured usable capacity, with the `capacity_estimate` record as attributes. See import-plan.md.
