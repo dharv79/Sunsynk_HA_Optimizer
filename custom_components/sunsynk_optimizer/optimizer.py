@@ -173,6 +173,7 @@ from .planning import (
     CHEAP_WINDOW_END,
     CHEAP_WINDOW_HOURS,
     PEAK_COVER_FROM_MINUTES,
+    PEAK_COVER_HOLD_FROM_MINUTES,
     PEAK_COVER_LAST_LOG_MINUTES,
     PEAK_COVER_PEAK_START_MINUTES,
     DEFAULT_BATTERY_VOLTAGE,
@@ -3438,7 +3439,7 @@ class SunsynkOptimizer:
         """
         now = dt_util.now()
         minutes = now.hour * 60 + now.minute
-        if not PEAK_COVER_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES or self._slots_held():
+        if not PEAK_COVER_HOLD_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES or self._slots_held():
             return
         today = now.date().isoformat()
         if (self._peak_cover or {}).get("date") != today:
@@ -3470,7 +3471,9 @@ class SunsynkOptimizer:
             soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, solar_kwh, load_kw, peak_load_kwh,
             charge_rate_kw, prices["day"], prices["peak"], margin=peak_margin, wear_pence=self._wear_pence(),
         )
-        actionable = plan["decision"] == "top_up" and plan["push_now"]
+        actionable = plan["decision"] in ("top_up", "hold") and plan["push_now"]
+        if minutes < PEAK_COVER_FROM_MINUTES and plan["decision"] != "hold":
+            return  # 09:00-12:00 is for catching a falling SOC with a hold only
         if not actionable and minutes < PEAK_COVER_LAST_LOG_MINUTES:
             return
         live = bool(cfg.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE)) and self.operation_mode != "monitor"
@@ -3480,12 +3483,16 @@ class SunsynkOptimizer:
                 {"flux_1": {"startTime": now.strftime("%H:%M"), "endTime": "16:00", "targetSoc": plan["target_soc"]}}
             )
             state["pushed"] = api_ok is True
-            title = "🔋 Sunsynk: topping up before the peak" if api_ok else "⚠️ Sunsynk: peak top-up NOT applied"
+            hold = plan["decision"] == "hold"
+            if hold:
+                title = "🔋 Sunsynk: holding the battery for the peak" if api_ok else "⚠️ Sunsynk: peak hold NOT applied"
+            else:
+                title = "🔋 Sunsynk: topping up before the peak" if api_ok else "⚠️ Sunsynk: peak top-up NOT applied"
             await self.async_notify(
                 title,
                 f"SOC {round(soc)}% would reach about {round(plan['projected_soc_16'])}% by 16:00 but the peak window "
                 f"needs {plan['required_soc']}%. Holding {plan['target_soc']}% at the day rate until 16:00 "
-                f"(about {plan['topup_kwh']} kWh).{_api_note(api_ok)}",
+                f"(about {plan['topup_kwh']} kWh{' kept in the battery' if hold else ''}).{_api_note(api_ok)}",
             )
         state["logged"] = True
         record = {

@@ -1,6 +1,6 @@
 # Phase 59 — Peak cover: hold the battery early instead of recharging it at 13:45
 
-**Status:** Planned, not built. **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Built (behind `peak_cover_live`, off by default). **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built
+
+- `planning.peak_cover_plan` gains `decision="hold"`: SOC at or above `required_soc`, projected 16:00 SOC short by >= 3 points, and peak > day rate. `target_soc = required_soc`, `push_now = True`, `charge_minutes = 0`. `gain_gbp` is the peak cost avoided (kWh x (peak - day)); `gain_vs_topup_gbp` is the charge loss plus wear a later recharge would have cost.
+- `PEAK_COVER_HOLD_FROM_MINUTES` (09:00): `async_run_peak_cover` now runs from 09:00, but before 12:00 it acts only on a hold; top-ups still start at 12:00. The same Flux 1 now->16:00 slot and the 16:00 restore are reused, and the score card counts holds with top-ups.
+- Not verified on a real inverter: confirm that a Flux 1 slot with a target below the current SOC stops discharge before enabling `peak_cover_live`. The forecast is already inside the projection, so a sunny afternoon does not trigger a hold.
+- Tests: `tests/test_peak_cover.py`.

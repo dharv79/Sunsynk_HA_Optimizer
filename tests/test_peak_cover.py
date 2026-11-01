@@ -134,3 +134,30 @@ def test_peak_load_split_keeps_p75_and_margin_when_thin_or_weekend(planning):
             planning.peak_load_estimate_kwh([k for _, k in days], 3.0)[0], "history", planning.PEAK_COVER_MARGIN)
     assert planning.peak_load_estimate_split([], 3.0, False) == (3.0, "default", planning.PEAK_COVER_MARGIN)
     assert planning.peak_load_estimate_split([("bad", 9.0)], 3.0, False)[1] == "default"
+
+
+def test_hold_when_soc_is_above_the_requirement_but_falling_short(planning):
+    # 70% now, 0.8 kW x 3 h load, little solar: 70 - 19 = 51% at 16:00 vs 61% required.
+    plan = _plan(planning, soc=70.0, solar_kwh=0.5)
+    assert plan["required_soc"] == 61 and plan["projected_soc_16"] < 61
+    assert plan["decision"] == "hold" and plan["target_soc"] == 61 and plan["push_now"] is True
+    assert plan["topup_kwh"] > 0 and plan["charge_minutes"] == 0
+    assert plan["gain_gbp"] > 0 and plan["gain_vs_topup_gbp"] > 0  # losses avoided vs recharging later
+
+
+def test_hold_gain_vs_topup_counts_loss_and_wear(planning):
+    plan = _plan(planning, soc=70.0, wear_pence=6.0)
+    kwh = plan["topup_kwh"]
+    expected = round(kwh * (DAY * (1 / 0.92 - 1) + 6.0) / 100.0, 2)
+    assert plan["gain_vs_topup_gbp"] == expected
+
+
+def test_below_the_requirement_still_tops_up_not_holds(planning):
+    assert _plan(planning, soc=40.0)["decision"] == "top_up"
+
+
+def test_no_hold_when_projection_meets_the_requirement_or_price_missing(planning):
+    assert _plan(planning, soc=85.0)["decision"] == "ok"
+    assert _plan(planning, soc=70.0, day_pence=None)["decision"] == "no_price"
+    # Peak no dearer than the day rate: nothing to protect, and a top-up is not worth it either.
+    assert _plan(planning, soc=70.0, day_pence=40.0)["decision"] == "not_worth_it"

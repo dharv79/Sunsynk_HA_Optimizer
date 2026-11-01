@@ -1199,6 +1199,7 @@ PEAK_COVER_MARGIN = 1.1
 PEAK_COVER_MIN_SHORTFALL_SOC = 3
 PEAK_COVER_LEAD_MINUTES = 45  # start this long before the charge needs to begin
 PEAK_COVER_FROM_MINUTES = 12 * 60
+PEAK_COVER_HOLD_FROM_MINUTES = 9 * 60  # a hold (not a top-up) may start this early (phase 59)
 PEAK_COVER_PEAK_START_MINUTES = PEAK_START_MINUTES
 PEAK_COVER_LAST_LOG_MINUTES = 15 * 60 + 30
 PEAK_COVER_MIN_LOAD_HOURS = 2.0  # hours of 05:00-now data before the observed load is trusted
@@ -1309,7 +1310,8 @@ def peak_cover_plan(
     Projects SOC at 16:00 from the current SOC, forecast solar and house load
     (a battery that would run flat sits at the floor, the grid covering the
     rest), against the SOC needed to carry the expected peak load above the
-    floor. decision: ok / top_up / not_worth_it / no_price. A top-up is a Flux 1
+    floor. decision: ok / hold / top_up / not_worth_it / no_price. A hold (phase 59) is the same slot
+    pushed while the SOC is still at or above the requirement. A top-up is a Flux 1
     slot now->16:00 at target_soc: the inverter only imports while below the
     target, so it holds the battery there at the day rate. `push_now` waits
     until the charge would need to start (plus a lead) so later solar can still
@@ -1321,32 +1323,48 @@ def peak_cover_plan(
     required_soc = min(100, math.ceil(floor_soc + peak_need_soc(peak_load_kwh, capacity_kwh, margin)))
     shortfall_soc = max(0.0, required_soc - projected_soc)
     worth = peak_cover_worth_it(day_pence, peak_pence, wear_pence=wear_pence)
+    # Phase 59: still at or above the required SOC but heading below it by 16:00. Holding the
+    # battery there (the grid runs the house at the day rate) avoids recharging it later through
+    # the charge loss and an extra cycle. No wear or loss term: nothing is stored, so it is worth
+    # doing whenever the peak rate beats the day rate.
+    holding = (
+        day_pence is not None and peak_pence is not None
+        and soc >= required_soc and shortfall_soc >= PEAK_COVER_MIN_SHORTFALL_SOC and peak_pence > day_pence
+    )
     if worth is None:
         decision = "no_price"
     elif shortfall_soc < PEAK_COVER_MIN_SHORTFALL_SOC:
         decision = "ok"
+    elif holding:
+        decision = "hold"
     elif not worth:
         decision = "not_worth_it"
     else:
         decision = "top_up"
     topping = decision == "top_up"
-    topup_kwh = round(shortfall_soc / 100.0 * capacity_kwh, 2) if topping else 0.0
+    held = decision == "hold"
+    topup_kwh = round(shortfall_soc / 100.0 * capacity_kwh, 2) if (topping or held) else 0.0
     charge_minutes = math.ceil(topup_kwh / CHARGE_EFFICIENCY / charge_rate_kw * 60.0) if topping and charge_rate_kw > 0 else 0
-    gain_gbp = gain_after_wear_gbp = None
+    gain_gbp = gain_after_wear_gbp = gain_vs_topup_gbp = None
     if topping:
         gain_gbp = round_or_none(topup_kwh * (peak_pence - day_pence / CHARGE_EFFICIENCY) / 100.0)
         gain_after_wear_gbp = round_or_none(topup_kwh * (peak_pence - day_pence / CHARGE_EFFICIENCY - (wear_pence or 0.0)) / 100.0)
+    elif held:
+        gain_gbp = gain_after_wear_gbp = round_or_none(topup_kwh * (peak_pence - day_pence) / 100.0)
+        # What holding saves against recharging the same kWh later: the charge loss plus the cycle's wear.
+        gain_vs_topup_gbp = round_or_none(topup_kwh * (day_pence * (1.0 / CHARGE_EFFICIENCY - 1.0) + (wear_pence or 0.0)) / 100.0)
     return {
         "decision": decision,
         "projected_soc_16": projected_soc,
         "required_soc": required_soc,
         "shortfall_soc": round(shortfall_soc, 1),
-        "target_soc": required_soc if topping else None,
+        "target_soc": required_soc if (topping or held) else None,
         "topup_kwh": topup_kwh,
         "charge_minutes": charge_minutes,
-        "push_now": topping and minutes_to_peak <= charge_minutes + PEAK_COVER_LEAD_MINUTES,
+        "push_now": held or (topping and minutes_to_peak <= charge_minutes + PEAK_COVER_LEAD_MINUTES),
         "gain_gbp": gain_gbp,
         "gain_after_wear_gbp": gain_after_wear_gbp,
+        "gain_vs_topup_gbp": gain_vs_topup_gbp,
     }
 
 
@@ -2771,7 +2789,7 @@ def shadow_scorecard(
     )
     # 30 peak cover: day-rate top-up vs peak-rate purchase.
     covers = win("peak_cover")
-    topped = [r for r in covers if r.get("decision") == "top_up"]
+    topped = [r for r in covers if r.get("decision") in ("top_up", "hold")]
     out["peak_cover"] = _score(
         len(covers),
         len(topped), _sum_or_none([r.get("gain_gbp") for r in topped]) if topped else None, [r["date"] for r in topped],
