@@ -1,6 +1,6 @@
 # Phase 52 — Self-sufficiency KPI that excludes battery grid-charging and free import
 
-**Status:** Built, in PR (01/11/2026). **Size:** XS. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done, merged (32376c0, PR #91). **Size:** XS. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 

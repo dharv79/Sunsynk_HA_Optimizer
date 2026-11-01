@@ -59,7 +59,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 49. PV string health monitor (MPPT0 vs MPPT1) | Planned, not built | S |
 | 50. Battery and PV upgrade advisor | Planned, not built | M |
 | 51. Free events: DST-safe timers, a watch_from guard and sold-energy split | Planned, not built | S |
-| 52. Self-sufficiency KPI that excludes battery grid-charging and free import | In progress (PR open) | XS |
+| 52. Self-sufficiency KPI that excludes battery grid-charging and free import | Done, merged (32376c0, PR #91) | XS, ~30k actual |
 | 53. Measure overnight drain from the 05:00 snapshot SOC, not target_soc | Planned, not built | S |
 | 54. Charge outcome record: reached vs target, likely cause and alert | Planned, not built | S |
 | 55. Evening reserve from learned 16:00-22:00 load (shadow first) | Planned, not built | M |
