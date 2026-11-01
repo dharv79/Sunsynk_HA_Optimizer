@@ -1,6 +1,6 @@
 # Phase 66 — Re-check the peak export plan at 17:00 and 18:00 using the observed peak load
 
-**Status:** Planned, not built. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Built (pushes only when `peak_export_live` is on, off by default). **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built
+
+- `planning.peak_export_recheck(...)`: sizes the rest of the window from the observed 16:00-now load (x1.1 margin), runs `peak_export_plan`, and proposes `lower` (sell more) or, only if the 16:00 plan was pushed, `raise`, when the target moves >= 0.5 kWh. Target is never below reserve + margin. Missing soc or observed load is skipped, never 0.
+- `_async_peak_export_recheck` at 17:00 and 18:00 (`async_run_peak_export_recheck`): skipped while slots are held, after the export-disable fires, or with no 16:00 target. Pushes Flux 2 now->19:00 through `_async_push_flux2_action` only when live and not in monitor mode, and keeps the stored `peak_export` record in step so `_peak_export_holds_flux2` owns the window until 19:00.
+- New `peak_export_recheck` record (not deduped, two a day).
+- Tests: `tests/test_peak_export_recheck.py`.

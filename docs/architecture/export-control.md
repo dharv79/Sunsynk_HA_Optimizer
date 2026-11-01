@@ -151,6 +151,14 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 
 **Verification.** `tests/test_peak_cover.py`.
 
+## Peak export re-check (01/11/2026, phase 66)
+
+**Root cause.** The 16:00 peak export sized the peak load from history and never looked again. On 31/10 it assumed 4.0 kWh against 2.4 kWh used, leaving surplus unsold.
+
+**Design.** At 17:00 and 18:00 `peak_export_recheck` projects the remaining load from the observed rate since the 16:00 snapshot and re-runs `peak_export_plan`. Pushes (live only) need a target move of at least 0.5 kWh; a raise needs the 16:00 plan to have been pushed. Logged as `peak_export_recheck`.
+
+**Verification.** `tests/test_peak_export_recheck.py`.
+
 ## Peak cover re-checks after a restart (23/10/2026, b26)
 
 **Symptom:** on 23/10 HA restarted during the afternoon; the battery sat at the 25% floor from about 14:00 and the 16:00-19:00 peak ran from the grid with no top-up.

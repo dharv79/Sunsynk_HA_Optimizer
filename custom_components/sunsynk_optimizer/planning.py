@@ -1192,6 +1192,62 @@ def peak_export_plan(
     }
 
 
+PEAK_RECHECK_MIN_KWH = 0.5  # smallest target move (kWh) worth a mid-peak push (phase 66)
+PEAK_RECHECK_MARGIN = 1.1  # on the observed rate: a spike late in the window must not be bought at the peak rate
+
+
+def peak_export_recheck(
+    soc: float | None,
+    reserve_soc: int,
+    battery_capacity_kwh: float,
+    elapsed_minutes: float,
+    minutes_left: float,
+    observed_peak_kwh: float | None,
+    prior_target_soc: int | None,
+    prior_pushed: bool,
+    export_pence: float | None,
+    offpeak_pence: float | None,
+    wear_pence: float | None = None,
+) -> dict[str, Any]:
+    """17:00/18:00 re-check of the peak export target from the load seen since 16:00 (phase 66).
+
+    The 16:00 plan sized the peak load from history. The rest of the window is
+    sized from the observed rate instead (x PEAK_RECHECK_MARGIN) and run through
+    `peak_export_plan`, so the target never falls below reserve + margin. A push
+    is proposed only when it moves the target by >= PEAK_RECHECK_MIN_KWH versus
+    the 16:00 target: lower (sell more) when the load is lighter than assumed,
+    higher (stop selling) only if the 16:00 plan was actually pushed. Missing
+    soc or observed load is None, never 0.
+    """
+    base: dict[str, Any] = {
+        "decision": None, "action": None, "target_soc": None, "prior_target_soc": prior_target_soc,
+        "move_kwh": None, "export_kwh": 0.0, "gain_gbp": None,
+        "observed_peak_kwh": observed_peak_kwh, "remaining_load_kwh": None,
+    }
+    if soc is None:
+        return {**base, "decision": "skipped_no_soc"}
+    if observed_peak_kwh is None or observed_peak_kwh < 0 or elapsed_minutes <= 0:
+        return {**base, "decision": "skipped_no_observed_load"}
+    remaining_kwh = observed_peak_kwh / (elapsed_minutes / 60.0) * max(0.0, minutes_left) / 60.0
+    need = peak_need_soc(remaining_kwh, battery_capacity_kwh, margin=PEAK_RECHECK_MARGIN)
+    plan = peak_export_plan(
+        soc, reserve_soc, battery_capacity_kwh, export_pence, offpeak_pence,
+        wear_pence=wear_pence, peak_need_soc=need,
+    )
+    target = plan["target_soc"]
+    move = None if prior_target_soc is None else round((prior_target_soc - target) / 100.0 * battery_capacity_kwh, 2)
+    action = None
+    if plan["decision"] == "export" and (move is None or move >= PEAK_RECHECK_MIN_KWH):
+        action = "lower"
+    elif prior_pushed and move is not None and -move >= PEAK_RECHECK_MIN_KWH:
+        action = "raise"
+    return {
+        **base, "decision": plan["decision"], "action": action, "target_soc": target, "move_kwh": move,
+        "export_kwh": plan["export_kwh"], "gain_gbp": plan["gain_gbp"],
+        "remaining_load_kwh": round(remaining_kwh, 2),
+    }
+
+
 # Phase 30: peak cover — make sure the battery reaches 16:00 with enough charge
 # to run the house through 16:00-19:00, topping up at the (cheaper) day rate.
 PEAK_COVER_FLOOR_SOC = BATTERY_LOW_SOC  # full-power discharge through the peak
