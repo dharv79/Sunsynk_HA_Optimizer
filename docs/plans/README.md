@@ -48,7 +48,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 38. "Cost of 1 kWh now" sensor | Done, merged (f790c19, PR #64) | S, ~30k |
 | 39. Multi-day low-solar planning | Done, merged (1935017, PR #61), shadow | S, ~30k |
 | 40. Daytime load spike alert | Done, merged (33fb1fd, PR #63) | XS, ~20k |
-| 41. Shadow go-live scorecard | Built, awaiting merge | M, ~40k actual |
+| 41. Shadow go-live scorecard | Done, merged (9eb643f, PR #93) | M, ~40k actual |
 | 42. Import cause ledger ("why did I import?") | Planned, not built | M |
 | 43. Inverter fault and event log feed (feasibility-gated) | Planned, not built | S |
 | 44. CT clamp vs smart-meter reconciliation (1.0.12b31) | Done, merged (9fd7115, PR #90) | XS, ~35k actual |

@@ -1,6 +1,6 @@
 # Phase 41 — Shadow go-live scorecard
 
-**Status:** Built, awaiting merge. **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done, merged (9eb643f, PR #93). **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
