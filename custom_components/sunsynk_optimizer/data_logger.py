@@ -19,7 +19,16 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from .const import INTEGRATION_VERSION
-from .planning import DAY_KPI_FIELDS, charge_shortfall_suspect, drain_pct_to_0500, net_cost_gbp, round_or_none
+from .planning import (
+    DAY_KPI_FIELDS,
+    MEASURED_RATE_NIGHTS,
+    charge_shortfall_suspect,
+    drain_pct_to_0500,
+    learned_measured_rate,
+    measured_charge_kw,
+    net_cost_gbp,
+    round_or_none,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +70,9 @@ _IMPORT_PLAN_FIELDS = (
     "import_feedback_live",
     "gentle_current_a",
     "gentle_charge_applied",
+    "battery_temp_c",
+    "measured_charge_rate_kw",
+    "measured_charge_rate_live",
 )
 
 
@@ -454,7 +466,9 @@ class DataLogger:
                 if morning_soc is not None and target_soc is not None
                 else None
             )
-            soc_0500 = (snapshots_for_date(records, date).get("05:00") or {}).get("soc")
+            snaps = snapshots_for_date(records, date)
+            soc_0500 = (snaps.get("05:00") or {}).get("soc")
+            snap_02, snap_05 = snaps.get("02:00") or {}, snaps.get("05:00") or {}
             drain_0500 = drain_pct_to_0500(
                 target_soc, soc_0500, overnight_drain_pct, plan.get("flux1_end")
             )
@@ -467,6 +481,13 @@ class DataLogger:
                 "actual_solar_kwh": actual.get("actual_solar_kwh"),
                 "forecast_band": plan.get("forecast_band"),
                 "full_window": bool(plan.get("full_window_live", False)),
+                "battery_temp_c": plan.get("battery_temp_c"),
+                "measured_charge_kw": measured_charge_kw(
+                    _meter_delta(snap_02, snap_05, "grid_import_kwh"),
+                    _meter_delta(snap_02, snap_05, "load_kwh"),
+                    plan.get("flux1_end"), plan.get("soc"), target_soc,
+                    bool(snap_02.get("soc_from_cache")),
+                ),
                 "target_soc": target_soc,
                 "morning_soc": morning_soc,
                 "morning_pv_power": morning_pv_power,
@@ -726,6 +747,26 @@ class DataLogger:
             return None
         return round(sum(rates) / len(rates), 2)
 
+    def compute_measured_charge_rate_kw(
+        self, paired_days: list[dict[str, Any]], battery_temp_c: float
+    ) -> tuple[float, bool] | None:
+        """Phase 61: rate measured from the meter snapshots, over the last 14 qualifying nights.
+
+        Returns (kw, at_tonights_temperature) or None below 3 samples; the old
+        SOC back-calculation stays the fallback. Full-window nights are skipped.
+        """
+        nights = sorted(
+            (d for d in paired_days
+             if d.get("measured_charge_kw") is not None
+             and d.get("battery_temp_c") is not None
+             and not d.get("full_window")),
+            key=lambda d: d.get("date", ""),
+        )[-MEASURED_RATE_NIGHTS:]
+        return learned_measured_rate(
+            [(float(d["measured_charge_kw"]), float(d["battery_temp_c"])) for d in nights],
+            battery_temp_c,
+        )
+
     @staticmethod
     def last_known_charge_rate_kw(paired_days: list[dict[str, Any]]) -> float | None:
         """Return the most recent non-null learned charge rate from history, or None.
@@ -856,6 +897,14 @@ class DataLogger:
             rec.get("type") == record_type and rec.get("date") == date and rec.get("time") == time
             for rec in DataLogger._iter_jsonl(path)
         )
+
+
+def _meter_delta(snap_a: dict[str, Any], snap_b: dict[str, Any], key: str) -> float | None:
+    """snap_b[key] - snap_a[key], or None when either is missing or the meter reset (negative)."""
+    a, b = snap_a.get(key), snap_b.get(key)
+    if a is None or b is None or b < a:
+        return None
+    return b - a
 
 
 def snapshots_for_date(records: list[dict[str, Any]], date: str) -> dict[str, dict[str, Any]]:

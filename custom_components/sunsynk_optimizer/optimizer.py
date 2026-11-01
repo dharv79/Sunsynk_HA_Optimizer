@@ -56,6 +56,7 @@ from .const import (
     CONF_BATTERY_LIFETIME_KWH,
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_FULL_WINDOW_LIVE,
+    CONF_MEASURED_RATE_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
     CONF_BASELOAD_ALERT,
@@ -96,6 +97,7 @@ from .const import (
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_PEAK_EXPORT_LIVE,
     DEFAULT_FULL_WINDOW_LIVE,
+    DEFAULT_MEASURED_RATE_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
@@ -1051,8 +1053,15 @@ class SunsynkOptimizer:
         if effective_charge_rate is None:
             effective_charge_rate = self.data_logger.last_known_charge_rate_kw(paired_days)
         battery_temp_c = self._state_float(self.battery_temp_entity, 20.0)
+        # Phase 61: rate measured from the 02:00/05:00 meters; logged always, used when live.
+        measured = self.data_logger.compute_measured_charge_rate_kw(paired_days, battery_temp_c)
+        measured_live = bool(cfg.get(CONF_MEASURED_RATE_LIVE, DEFAULT_MEASURED_RATE_LIVE))
+        derate = True
+        if measured_live and measured is not None:
+            effective_charge_rate, at_temp = measured
+            derate = not at_temp
         used_charge_rate, temp_factor = resolve_used_charge_rate(
-            charge_rate_kw, effective_charge_rate, battery_temp_c
+            charge_rate_kw, effective_charge_rate, battery_temp_c, derate
         )
 
         # Phase 13: nameplate rate loses ~8% to conversion; in-window house load
@@ -1165,6 +1174,8 @@ class SunsynkOptimizer:
             "learned_load_days": learned_load_days,
             "battery_temp_c": battery_temp_c,
             "temp_deration_factor": temp_factor,
+            "measured_charge_rate_kw": measured[0] if measured else None,
+            "measured_charge_rate_live": measured_live and measured is not None,
             "hourly_forecast_used": decision.hourly_forecast_used,
             "synthetic_ramp": decision.synthetic_ramp,
             "bridge_hour": decision.bridge_hour,

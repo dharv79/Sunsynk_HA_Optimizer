@@ -196,18 +196,90 @@ def temp_deration_factor(battery_temp_c: float) -> float:
 
 
 def resolve_used_charge_rate(
-    config_rate_kw: float, effective_rate_kw: float | None, battery_temp_c: float
+    config_rate_kw: float,
+    effective_rate_kw: float | None,
+    battery_temp_c: float,
+    derate: bool = True,
 ) -> tuple[float, float]:
     """Return (used_charge_rate_kw, temp_deration_factor).
 
     The learned rate replaces nameplate only when it's meaningfully (>10%)
     lower; either way the result is then derated for battery temperature.
+    ``derate=False`` (phase 61) is for a rate already measured at tonight's
+    temperature band: the factor is still returned for the log but not applied.
     """
     rate = config_rate_kw
     if effective_rate_kw is not None and effective_rate_kw < config_rate_kw * 0.9:
         rate = min(config_rate_kw, effective_rate_kw)
     factor = temp_deration_factor(battery_temp_c)
-    return round(rate * factor, 2), factor
+    return round(rate * (factor if derate else 1.0), 2), factor
+
+
+# Phase 61: measure the charge rate directly from the 02:00 and 05:00 meters.
+MEASURED_RATE_MIN_SAMPLES = 3
+MEASURED_RATE_NIGHTS = 14
+MEASURED_RATE_PERCENTILE = 75   # capped nights read low, so lean high
+MEASURED_RATE_MIN_WINDOW_H = 0.5
+MEASURED_RATE_MAX_KW = 6.0      # above any plausible home battery: a bad meter reading
+
+
+def measured_charge_kw(
+    grid_import_kwh: float | None,
+    load_kwh: float | None,
+    flux1_end: str | None,
+    initial_soc: float | None,
+    target_soc: float | None,
+    soc_cached: bool = False,
+) -> float | None:
+    """Battery-side charge kW from the 02:00-05:00 meter deltas, else None.
+
+    Grid import over the window minus the house load that fell inside it
+    (load is spread evenly over the 3 h, so a window ending before 05:00 only
+    takes its share). A window that runs to 05:00 is skipped: the battery stops
+    at target well before the end, so the divisor would be wrong. A window
+    longer than the charge needed reads low, but that shrinks the next window,
+    so the estimate climbs to the true rate rather than sticking.
+    """
+    if None in (grid_import_kwh, load_kwh, initial_soc, target_soc) or not flux1_end or soc_cached:
+        return None
+    end_min = hhmm_to_minutes(flux1_end)
+    if end_min is None or end_min >= 5 * 60:
+        return None
+    window_h = (end_min - FLUX1_START_MINUTES) / 60.0
+    if window_h < MEASURED_RATE_MIN_WINDOW_H or target_soc - initial_soc < 5:
+        return None
+    net_kwh = grid_import_kwh - max(0.0, load_kwh) * window_h / 3.0
+    if net_kwh <= 0:
+        return None
+    rate = net_kwh * CHARGE_EFFICIENCY / window_h
+    return round(rate, 2) if rate <= MEASURED_RATE_MAX_KW else None
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    ordered = sorted(values)
+    pos = (len(ordered) - 1) * pct / 100.0
+    lo = int(pos)
+    hi = min(lo + 1, len(ordered) - 1)
+    return ordered[lo] + (ordered[hi] - ordered[lo]) * (pos - lo)
+
+
+def learned_measured_rate(
+    samples: list[tuple[float, float]], tonight_temp_c: float
+) -> tuple[float, bool] | None:
+    """(rate_kw, already_at_tonights_temperature) from (kw, battery_temp_c) samples.
+
+    Samples in tonight's derate band give the rate directly, so the caller must
+    not derate it again. Otherwise every sample is normalised to the warm rate
+    (kw / its band's factor) and the caller derates as usual. None until 3 samples.
+    """
+    if len(samples) < MEASURED_RATE_MIN_SAMPLES:
+        return None
+    tonight = temp_deration_factor(tonight_temp_c)
+    same = [kw for kw, t in samples if temp_deration_factor(t) == tonight]
+    if len(same) >= MEASURED_RATE_MIN_SAMPLES:
+        return round(_percentile(same, MEASURED_RATE_PERCENTILE), 2), True
+    warm = [kw / temp_deration_factor(t) for kw, t in samples]
+    return round(_percentile(warm, MEASURED_RATE_PERCENTILE), 2), False
 
 
 def flux1_end_minutes(energy_needed_kwh: float, charge_rate_kw: float) -> int:

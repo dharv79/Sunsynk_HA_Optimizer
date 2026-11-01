@@ -1,6 +1,6 @@
 # Phase 61 — Learn the charge rate from the 02:00/05:00 meter snapshots, and stop derating it twice
 
-**Status:** Planned, not built. **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Built, option off (shadow). **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,12 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (01/11/2026)
+
+- `planning.measured_charge_kw`: (02:00→05:00 grid import − load share inside the window) × 0.92 ÷ window hours. Skips windows ending at 05:00, cached SOC, tiny windows, <5% charge, implausible kW. Because a window longer than needed reads low but then shrinks, the estimate climbs to the true rate rather than sticking.
+- `planning.learned_measured_rate`: p75 (capped nights bias low) of the last 14 nights. Samples in tonight's temperature band are used directly (no second derate); otherwise they are normalised by their band factor and derated as usual. None below 3 samples, so the SOC back-calculation stays the fallback.
+- `_pair_records` carries `measured_charge_kw` and `battery_temp_c`; `import_plan` gains `battery_temp_c`, `measured_charge_rate_kw`, `measured_charge_rate_live` (rule 10). Full-window nights are excluded.
+- `CONF_MEASURED_RATE_LIVE` (default off). Off, the rate is logged only. On, it replaces the learned rate and `resolve_used_charge_rate(derate=False)` skips the repeat derate when the band matches.
+- Compare `measured_charge_rate_kw` with `effective_charge_rate_kw` in the plan log for a few weeks before enabling.
+- Tests: `tests/test_planning.py`, `tests/test_data_logger.py` (phase 61).

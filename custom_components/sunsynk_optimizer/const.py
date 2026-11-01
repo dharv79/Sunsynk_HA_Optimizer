@@ -145,6 +145,8 @@ CONF_GENTLE_CHARGE_LIVE = "gentle_charge_live"
 DEFAULT_GENTLE_CHARGE_LIVE = False
 CONF_FULL_WINDOW_LIVE = "full_window_live"   # phase 62: Flux 1 runs to 05:00 every night
 DEFAULT_FULL_WINDOW_LIVE = False
+CONF_MEASURED_RATE_LIVE = "measured_charge_rate_live"   # phase 61: size Flux 1 from the measured charge rate
+DEFAULT_MEASURED_RATE_LIVE = False
 CONF_BATTERY_VOLTAGE = "battery_voltage"
 GENTLE_CHARGE_SETTING = "sdBatteryCurrent"
 

@@ -929,3 +929,31 @@ def test_monthly_report_due(planning):
     assert f("2026-08", date(2026, 10, 2)) is False
     assert f("2026-08", date(2026, 10, 4)) is True
     assert f("2026-09", date(2026, 10, 9)) is False       # Sept report sent
+
+
+# Phase 61: measured charge rate
+def test_measured_charge_kw(planning):
+    f = planning.measured_charge_kw
+    # 3 h window: 9.9 kWh import, 1.8 kWh load -> 8.1 * 0.92 / 3 = 2.48
+    assert f(9.9, 1.8, "05:00", 20, 100) is None            # full window skipped
+    assert f(9.9, 1.8, "04:45", 20, 100) == round((9.9 - 1.8 * 2.75 / 3) * 0.92 / 2.75, 2)
+    assert f(None, 1.8, "04:00", 20, 100) is None            # rule 11
+    assert f(5, 1, "04:00", 20, 100, soc_cached=True) is None
+    assert f(5, 1, "02:15", 20, 100) is None                 # window under 30 min
+    assert f(5, 1, "04:00", 98, 100) is None                 # barely charged
+    assert f(1, 3, "04:00", 20, 100) is None                 # load exceeds import
+    assert f(30, 0, "03:00", 20, 100) is None                # implausible kW
+
+
+def test_learned_measured_rate(planning):
+    f = planning.learned_measured_rate
+    assert f([(2.5, 20), (2.4, 20)], 20) is None              # < 3 samples
+    # three samples in tonight's band: used directly, no further derate
+    assert f([(2.0, 12), (2.2, 13), (2.1, 11)], 12) == (2.15, True)
+    # no samples at tonight's temperature: normalised to warm, caller derates
+    kw, at_temp = f([(2.55, 12), (2.55, 12), (2.55, 12)], 22)
+    assert at_temp is False and kw == 3.0                     # 2.55 / 0.85
+
+
+def test_resolve_used_charge_rate_no_derate(planning):
+    assert planning.resolve_used_charge_rate(3.0, 2.0, 8, derate=False) == (2.0, 0.70)
