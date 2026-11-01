@@ -223,6 +223,7 @@ from .planning import (
     free_event_result,
     wear_cost_pence_per_kwh,
     peak_load_estimate_kwh,
+    peak_load_estimate_split,
     peak_need_soc,
     plan_free_event,
     FREE_EVENT_WATCH_MINUTES,
@@ -3456,8 +3457,8 @@ class SunsynkOptimizer:
         load_at_05 = (snapshots.get("05:00") or {}).get("load_kwh")
         load_now = self._essential_state(self.day_load_entity)
         load_kw, load_source = daytime_load_kw(load_now, load_at_05, now.hour + now.minute / 60.0 - 5.0, fallback_kw)
-        peak_load_kwh, peak_load_source = peak_load_estimate_kwh(
-            await self.data_logger.async_recent_peak_loads(), 3.0 * load_kw
+        peak_load_kwh, peak_load_source, peak_margin = peak_load_estimate_split(
+            await self.data_logger.async_recent_peak_load_days(), 3.0 * load_kw, now.weekday() >= 5
         )
         # Pessimistic solar, like the low-solar decisions: the raw (uncorrected) forecast.
         hourly = self._hourly_or_synthetic_forecast(cfg, now)
@@ -3467,7 +3468,7 @@ class SunsynkOptimizer:
             solar_kwh = 0.0  # no forecast: assume none rather than guess
         plan = peak_cover_plan(
             soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, solar_kwh, load_kw, peak_load_kwh,
-            charge_rate_kw, prices["day"], prices["peak"],
+            charge_rate_kw, prices["day"], prices["peak"], margin=peak_margin, wear_pence=self._wear_pence(),
         )
         actionable = plan["decision"] == "top_up" and plan["push_now"]
         if not actionable and minutes < PEAK_COVER_LAST_LOG_MINUTES:
@@ -3497,6 +3498,8 @@ class SunsynkOptimizer:
             "load_source": load_source,
             "peak_load_kwh": peak_load_kwh,
             "peak_load_source": peak_load_source,
+            "peak_margin": peak_margin,
+            "wear_cost_p": self._wear_pence(),
             "day_pence": prices["day"],
             "peak_pence": prices["peak"],
             "price_source": price_source(sources, "day", "peak"),

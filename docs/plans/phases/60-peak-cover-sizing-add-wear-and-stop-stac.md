@@ -1,6 +1,6 @@
 # Phase 60 — Peak cover sizing: add wear and stop stacking p75 with a 1.1 margin
 
-**Status:** Planned, not built. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Built (shadow-safe: peak cover is already off by default via `peak_cover_live`). **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,11 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built
+
+- `planning.peak_cover_worth_it(..., wear_pence)`: `peak > day/eff + wear`; unknown wear counts as none. `peak_cover_plan(..., wear_pence)` uses it and adds `gain_after_wear_gbp` (the old `gain_gbp` is kept, before wear).
+- `planning.peak_load_estimate_split(samples, default, weekend)` -> `(kWh, source, margin)`. Weekdays with >= 7 weekday samples use the median and margin 1.0 (`history_weekday_median`). Weekends and thinner history keep the all-days p75 and `PEAK_COVER_MARGIN` 1.1.
+- `DataLogger.async_recent_peak_load_days` supplies (date, kWh). `async_run_peak_cover` passes the margin and `_wear_pence()` and logs `peak_margin`, `wear_cost_p`, `gain_after_wear_gbp`.
+- The 01:55/16:00 peak-export sizing (`peak_need_soc`) is unchanged and still uses p75 x 1.1.
+- Tests: `tests/test_peak_cover.py`.

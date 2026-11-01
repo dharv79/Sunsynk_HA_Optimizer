@@ -135,6 +135,14 @@ In HA, set the import entity, then check that the 22:00 `day_kpis` line shows `p
 
 **Verification.** `tests/test_peak_cover.py::test_peak_need_allows_for_discharge_losses` and the updated required-SOC test; `tests/test_kpis.py::test_peak_export_keeps_the_peak_load`. In HA, the 22:00 `peak_export` line shows `peak_need_soc`, and its `target_soc` is about 90+.
 
+## Peak cover sizing: wear and a weekday median (01/11/2026, phase 60)
+
+**Root cause.** On 31/10 the top-up assumed 4.0 kWh of peak load but 2.4 kWh was used. `peak_load_estimate_kwh` took the p75 and `peak_need_soc` added a 1.1 margin on top. `peak_cover_worth_it` also ignored battery wear, so a top-up with only 8.7p/kWh of day-vs-peak margin looked profitable when 6-9p of wear erased it.
+
+**Design.** `peak_cover_worth_it(..., wear_pence)` requires `peak > day/eff + wear` (unknown wear counts as none). `peak_load_estimate_split` uses the median of weekday samples with margin 1.0 once there are 7; weekends and thinner history keep the all-days p75 x 1.1. `peak_cover` records gain `peak_margin`, `wear_cost_p` and `gain_after_wear_gbp`. The peak-export sizing is unchanged.
+
+**Verification.** `tests/test_peak_cover.py`.
+
 ## Peak cover re-checks after a restart (23/10/2026, b26)
 
 **Symptom:** on 23/10 HA restarted during the afternoon; the battery sat at the 25% floor from about 14:00 and the 16:00-19:00 peak ran from the grid with no top-up.
