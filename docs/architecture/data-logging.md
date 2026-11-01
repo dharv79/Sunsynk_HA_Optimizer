@@ -19,7 +19,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 
 **Goal.** Measure whether phases 12–20 reduce bought energy, and tune them offline before they go live.
 
-**Snapshots.** `meter_snapshot` records the cumulative SolarSynkV3 daily `grid_import_kwh`, `grid_export_kwh` and `load_kwh`, plus `soc`, at the Flux band edges.
+**Snapshots.** `meter_snapshot` records the cumulative SolarSynkV3 daily `grid_import_kwh`, `grid_export_kwh` and `load_kwh`, plus `soc`, at the Flux band edges. With no live SOC, the last reading up to 30 minutes old is used and `soc_from_cache` is true (01/11/2026, see import-plan.md).
 
 - 02:00, 05:00, 16:00 and 19:00 come from their own listeners, run through `_guarded`.
 - 22:00 is taken inside `_async_capture_day_actuals`.

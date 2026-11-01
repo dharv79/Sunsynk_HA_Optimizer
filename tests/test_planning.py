@@ -814,3 +814,28 @@ def test_multi_day_shadow(planning):
     assert peak["would_peak_target_soc"] == 60 and peak["changes_peak"]
     same = planning.multi_day_shadow(3, peak_target_soc=40, floor_soc=None)
     assert same["would_peak_target_soc"] == 40 and not same["changes_peak"]
+
+
+@pytest.mark.parametrize(
+    "now_minutes, due",
+    [
+        (115, True),   # 01:55 skip → retry at 02:00
+        (145, True),   # 02:25 → last retry at 02:30
+        (146, False),  # 02:31 would be past 02:30
+        (12 * 60, False),  # a daytime re-plan never loops
+        (80, False),   # 01:20 + 5 is before 01:30
+    ],
+)
+def test_soc_retry_due(planning, now_minutes, due):
+    assert planning.soc_retry_due(now_minutes) is due
+
+
+def test_recent_soc(planning):
+    from datetime import timedelta, timezone
+
+    now = datetime(2026, 11, 1, 2, 0, tzinfo=timezone.utc)
+    assert planning.recent_soc(41.0, (30.0, now - timedelta(minutes=5)), now) == (41.0, False)
+    assert planning.recent_soc(None, (30.0, now - timedelta(minutes=29)), now) == (30.0, True)
+    assert planning.recent_soc(None, (30.0, now - timedelta(minutes=31)), now) == (None, False)
+    assert planning.recent_soc(None, (30.0, now + timedelta(minutes=1)), now) == (None, False)
+    assert planning.recent_soc(None, None, now) == (None, False)

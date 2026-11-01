@@ -210,3 +210,13 @@ Missing inputs → `None` fields (rule 11).
 **Logged.** Nested as `soc_cap_shadow` in the `day_kpis` record (null on non-qualifying days), so it reaches the 22:00 debug bundle. Review after a few weeks of dull days; a live cap is a separate decision.
 
 **Verification.** `tests/test_kpis.py` (`test_soc_cap_shadow_*`): only low-solar overrides qualify, fully-used top, partly-spare top, missing inputs. Live: the next low-solar day's 22:00 `day_kpis` carries the field.
+
+## Unavailable SOC at 01:55 and at meter snapshots (01/11/2026)
+
+**Problem.** On 29/10 no plan was recorded: with the battery SOC sensor unavailable at 01:55 the plan was skipped once, with no retry, and the inverter ran on the previous night's settings. On 29/10 and 30/10 the 02:00 meter snapshot also had no SOC, so `battery_cycled_kwh` read 0.0 and `unused_charge_kwh` was null. SolarSynkV3 appears to drop the SOC briefly around 02:00.
+
+**Design.**
+- `planning.soc_retry_due(now_minutes)`: when the SOC is unavailable, a non-dry-run plan re-runs every `SOC_RETRY_INTERVAL_MINUTES` (5) while the next run lands in 01:30–02:30 (`SOC_RETRY_UNTIL_MINUTES`). The handle reuses `_plan_retry`, so a fresh plan or unload cancels it. `last_error` says it is retrying; only the final skip notifies "⚠️ Sunsynk: plan skipped". Daytime re-plans never loop.
+- `planning.recent_soc(current, last, now)`: `_read_soc` remembers the last numeric SOC (on every SOC change and each snapshot read). A meter snapshot with no live SOC uses it if at most `SNAPSHOT_SOC_MAX_AGE_MINUTES` (30) old, and logs `soc_from_cache: true`.
+
+**Verification.** `tests/test_planning.py` (`test_soc_retry_due`, `test_recent_soc`). Live: a night with an SOC dropout shows a plan with `source: automatic` a few minutes after 01:55, and the 02:00 snapshot keeps an SOC.

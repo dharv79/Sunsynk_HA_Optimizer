@@ -330,6 +330,37 @@ def plan_retry_due(now_minutes: int, attempts: int) -> bool:
         attempts < PLAN_RETRY_MAX_ATTEMPTS
         and PLAN_RETRY_FROM_MINUTES <= next_minutes <= PLAN_RETRY_UNTIL_MINUTES
     )
+
+
+# A plan skipped because the SOC sensor is unavailable (SolarSynkV3 sometimes
+# drops out around 02:00) re-runs every 5 minutes until 02:30.
+SOC_RETRY_INTERVAL_MINUTES = 5
+SOC_RETRY_UNTIL_MINUTES = 2 * 60 + 30
+# A meter snapshot with no live SOC uses the last reading up to this old.
+SNAPSHOT_SOC_MAX_AGE_MINUTES = 30
+
+
+def soc_retry_due(now_minutes: int) -> bool:
+    """Whether to re-run a plan skipped for an unavailable SOC in SOC_RETRY_INTERVAL_MINUTES."""
+    next_minutes = now_minutes + SOC_RETRY_INTERVAL_MINUTES
+    return PLAN_RETRY_FROM_MINUTES <= next_minutes <= SOC_RETRY_UNTIL_MINUTES
+
+
+def recent_soc(
+    current: float | None,
+    last: tuple[float, datetime] | None,
+    now: datetime,
+    max_age_minutes: int = SNAPSHOT_SOC_MAX_AGE_MINUTES,
+) -> tuple[float | None, bool]:
+    """(SOC, from_cache): the live reading, else `last` (value, time) if at most `max_age_minutes` old."""
+    if current is not None:
+        return current, False
+    if last is None:
+        return None, False
+    value, at = last
+    if 0 <= (now - at).total_seconds() <= max_age_minutes * 60:
+        return value, True
+    return None, False
 # Progress counts as "ok" once SOC has gained this share of the expected rise
 # (the charge ramps up and house load eats into it), with a 1% floor so SOC
 # rounding alone never passes; or while grid import is at least this share of
