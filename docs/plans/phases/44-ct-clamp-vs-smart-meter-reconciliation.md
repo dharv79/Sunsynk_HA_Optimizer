@@ -1,6 +1,6 @@
 # Phase 44 — CT clamp vs smart-meter reconciliation
 
-**Status:** In progress — built, PR pending. **Size:** XS. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done, merged (9fd7115, PR #90). **Size:** XS. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 

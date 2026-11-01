@@ -470,6 +470,7 @@ class DataLogger:
                 "initial_soc": plan.get("soc"),
                 "flux1_end": plan.get("flux1_end", ""),
                 **{key: kpis.get(date, {}).get(key) for key in DAY_KPI_FIELDS},
+                "kpi_version": kpis.get(date, {}).get("kpi_version"),
                 # Phase 17: shadow or live, only days whose 16:00 decision was export.
                 **_peak_export_fields(peak_exports.get(date, {})),
             })

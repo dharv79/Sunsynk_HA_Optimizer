@@ -51,7 +51,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 41. Shadow go-live scorecard | Planned, not built | M |
 | 42. Import cause ledger ("why did I import?") | Planned, not built | M |
 | 43. Inverter fault and event log feed (feasibility-gated) | Planned, not built | S |
-| 44. CT clamp vs smart-meter reconciliation | In progress — built, PR pending (1.0.12b31) | XS, ~35k |
+| 44. CT clamp vs smart-meter reconciliation (1.0.12b31) | Done, merged (9fd7115, PR #90) | XS, ~35k actual |
 | 45. Nightly data-integrity audit, HA Repairs and a diagnostics download | Planned, not built | M |
 | 46. HA service actions and actionable notifications | Planned, not built | M |
 | 47. KPI and money sensors with long-term statistics | Planned, not built | S |
@@ -59,7 +59,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 49. PV string health monitor (MPPT0 vs MPPT1) | Planned, not built | S |
 | 50. Battery and PV upgrade advisor | Planned, not built | M |
 | 51. Free events: DST-safe timers, a watch_from guard and sold-energy split | Planned, not built | S |
-| 52. Self-sufficiency KPI that excludes battery grid-charging and free import | Planned, not built | XS |
+| 52. Self-sufficiency KPI that excludes battery grid-charging and free import | In progress (PR open) | XS |
 | 53. Measure overnight drain from the 05:00 snapshot SOC, not target_soc | Planned, not built | S |
 | 54. Charge outcome record: reached vs target, likely cause and alert | Planned, not built | S |
 | 55. Evening reserve from learned 16:00-22:00 load (shadow first) | Planned, not built | M |
