@@ -219,6 +219,7 @@ from .planning import (
     net_cost_gbp,
     peak_cover_plan,
     peak_export_plan,
+    peak_export_recheck,
     peak_export_skip_reason,
     event_report,
     free_event_result,
@@ -427,6 +428,8 @@ class SunsynkOptimizer:
             (5, 0, self._async_meter_snapshot),
             (16, 0, self._async_meter_snapshot),
             (16, 0, self._async_peak_export),
+            (17, 0, self._async_peak_export_recheck),
+            (18, 0, self._async_peak_export_recheck),
             (19, 0, self._async_meter_snapshot),
         )
         for hour, minute, callback in daily:
@@ -2227,6 +2230,69 @@ class SunsynkOptimizer:
         self.coordinator.update_state(touch=False, peak_export=record)
         await self.data_logger.async_log_peak_export(**{k: v for k, v in record.items() if k != "type"})
         await self._async_log_multi_day_shadow("peak_export", peak_target_soc=plan["target_soc"], reserve=reserve)
+
+    async def _async_peak_export_recheck(self, _now) -> None:
+        await self._guarded(self.async_run_peak_export_recheck, "Peak export re-check")
+
+    async def async_run_peak_export_recheck(self) -> None:
+        """17:00 and 18:00: re-size today's peak export from the load seen since 16:00 (phase 66).
+
+        Builds on the 16:00 decision (the stored peak_export record). Always logs
+        a peak_export_recheck record; pushes Flux 2 now->19:00 only when live
+        (CONF_PEAK_EXPORT_LIVE), not in monitor mode, no free event holds the
+        slots and the export-disable has not fired.
+        """
+        now = dt_util.now()
+        today = now.date().isoformat()
+        prior = record_for_date(self.coordinator.state.peak_export, today)
+        if self._slots_held() or self.coordinator.state.evening_export_disabled or prior.get("target_soc") is None:
+            return
+        soc = self._essential_state(self.battery_soc_entity)
+        snapshots = await self.data_logger.async_load_meter_snapshots(today)
+        load_16 = (snapshots.get("16:00") or {}).get("load_kwh")
+        load_now = self._essential_state(self.day_load_entity)
+        observed = round(load_now - load_16, 3) if load_now is not None and load_16 is not None else None
+        elapsed = now.hour * 60 + now.minute - 16 * 60
+        cfg = self.cfg
+        reserve = self._evening_reserve_soc()
+        prices, sources = self._tariff_prices(now.date())
+        result = peak_export_recheck(
+            soc, reserve, self._capacity_kwh(cfg), elapsed, 19 * 60 - (16 * 60 + elapsed), observed,
+            prior.get("target_soc"), prior.get("api_ok") is True,
+            prices["export_peak"], prices["offpeak"], wear_pence=self._wear_pence(),
+        )
+        live = bool(cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)) and self.operation_mode != "monitor"
+        api_ok = None
+        if live and result["action"]:
+            api_ok = await self._async_push_flux2_action(
+                "peak_export",
+                {"startTime": now.strftime("%H:%M"), "endTime": "19:00", "targetSoc": result["target_soc"]},
+                {"soc": soc, "source": "automatic", "evening_reserve_soc": reserve},
+                f"recheck_{result['action']}_to_{result['target_soc']}%",
+            )
+            title = "🔋 Sunsynk: peak export adjusted" if api_ok else "⚠️ Sunsynk: peak export adjustment NOT applied"
+            await self.async_notify(
+                title,
+                f"Load since 16:00 is {observed} kWh, so the peak export target moves from "
+                f"{prior.get('target_soc')}% to {result['target_soc']}% until 19:00.{_api_note(api_ok)}",
+            )
+            if api_ok:
+                # Keep the 16:00 record in step so the window stays owned until 19:00 and reports match.
+                self.coordinator.update_state(
+                    touch=False,
+                    peak_export={**prior, "api_ok": True, "target_soc": result["target_soc"], "rechecked_at": now.strftime("%H:%M")},
+                )
+        record = {
+            "date": today,
+            "checked_at": now.strftime("%H:%M"),
+            "soc": soc,
+            "evening_reserve_soc": reserve,
+            **result,
+            "price_source": price_source(sources, "export_peak", "offpeak"),
+            "live": live,
+            "api_ok": api_ok,
+        }
+        await self.data_logger.async_log_peak_export_recheck(**record)
 
     async def _async_multi_day_outlook(self, cfg: dict[str, Any]) -> tuple[int, float | None]:
         """(low-solar run length from today, tomorrow's pessimistic forecast kWh) — phase 39."""
