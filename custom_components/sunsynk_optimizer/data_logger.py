@@ -246,6 +246,10 @@ class DataLogger:
         """Log the nightly charge watchdog outcome (phase 22): one record per night."""
         await self._async_append(_record("charge_watchdog", **fields))
 
+    async def async_log_charge_outcome(self, **fields: Any) -> None:
+        """Log the overnight charge result (phase 54): one record per night."""
+        await self._async_append(_record("charge_outcome", **fields))
+
     async def async_log_multi_day_plan(self, **fields: Any) -> None:
         """Log a multi-day low-solar shadow decision (phase 39): per stage, inside a low run only."""
         await self._async_append(_record("multi_day_plan", **fields))
@@ -796,7 +800,7 @@ class DataLogger:
 
     # daily_cost is not deduped here — it merges via async_merge_daily_cost.
     _DEDUP_TYPES = (
-        "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog",
+        "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog", "charge_outcome",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load",
         "half_hourly_import", "half_hourly_export", "capacity_estimate",
         "meter_reconciliation_import", "meter_reconciliation_export",

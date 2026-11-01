@@ -88,3 +88,7 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## Charge-shortfall nights excluded from drain (01/11/2026, phase 53)
 
 `target - SOC@05:00` is drain only if the charge reached target. `planning.charge_shortfall_suspect` flags a gap above 3 points + 5 points per hour between Flux 1 end and 05:00; `_pair_records` stores `charge_short` and `drain_source`, and `compute_overnight_drain_adjustment` skips flagged nights (`_DRAIN_EXCLUDE_SHORT`) while at least 5 clean nights remain. Heuristic thresholds; tune from live `charge_short` counts.
+
+## Charge outcome record (01/11/2026, phase 54)
+
+`charge_outcome` (one per night, deduped) is written after the 05:00 meter snapshot: target, reached SOC (the snapshot), `shortfall_pct`, `likely_cause`, `alert`, and `achievable_max_soc` (14-day median on target >= 95 nights, logged only). A shortfall above 5 points notifies. Cause is a heuristic label.

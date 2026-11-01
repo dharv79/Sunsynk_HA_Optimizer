@@ -117,6 +117,8 @@ from .flux_helpers import (
 )
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    achievable_max_soc,
+    charge_outcome,
     TARIFF_IMPORT_BANDS,
     TARIFF_LABELS,
     TARIFF_RATES_AS_OF,
@@ -1952,9 +1954,35 @@ class SunsynkOptimizer:
         await self._guarded(lambda: self.async_capture_meter_snapshot(time), "Meter snapshot")
         if time == "05:00":
             await self._guarded(self._async_overnight_load_check, "Overnight baseload check")
+            await self._guarded(self.async_run_charge_outcome, "Charge outcome")
         # Until a first estimate exists, re-measure after each sample-closing snapshot.
         if time in ("05:00", "22:00") and capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
             await self._guarded(lambda: self.async_run_capacity_estimate(notify=False), "Battery capacity estimate")
+
+    async def async_run_charge_outcome(self) -> None:
+        """Log reached-vs-target for tonight's charge from the 05:00 snapshot (phase 54); read-only."""
+        now = dt_util.now()
+        plan = self._charge_watchdog_plan(now)
+        if plan is None:
+            return
+        date = now.date().isoformat()
+        snap = (await self.data_logger.async_load_meter_snapshots(date)).get("05:00") or {}
+        outcome = charge_outcome(plan.get("target_soc"), snap.get("soc"), plan.get("battery_temp_c"))
+        if outcome is None:
+            return
+        history = [
+            r for r in await self.data_logger.async_load_records(14) if r.get("type") == "charge_outcome"
+        ]
+        await self.data_logger.async_log_charge_outcome(
+            date=date, flux1_end=plan.get("flux1_end"),
+            achievable_max_soc=achievable_max_soc(history + [outcome]), **outcome,
+        )
+        if outcome["alert"]:
+            await self.async_notify(
+                "🔋 Sunsynk: overnight charge stopped short",
+                f"Target {outcome['target_soc']:.0f}%, reached {outcome['reached_soc']:.0f}% "
+                f"({outcome['shortfall_pct']:.0f} points short). Likely cause: {outcome['likely_cause']}.",
+            )
 
     async def _async_auto_away(self) -> None:
         """Set away mode from person/calendar signals (phase 27); no config = no-op."""
