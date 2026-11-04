@@ -1,6 +1,6 @@
 # Phase 67 — Cache config and tariff parsing on the SOC-change path
 
-**Status:** Done (04/11/2026). Design and verification: `docs/architecture/code-map.md` (SOC-path caching). Vetted: no do-not-break rule affected; the cache is keyed on entry data/options identity, not a per-slot key, and the price cache is keyed on the rates entity's `last_updated`. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, merged (2eeaebf, PR #109), 04/11/2026. Design and verification: `docs/architecture/code-map.md` (SOC-path caching). Vetted: no do-not-break rule affected; the cache is keyed on entry data/options identity, not a per-slot key, and the price cache is keyed on the rates entity's `last_updated`. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
