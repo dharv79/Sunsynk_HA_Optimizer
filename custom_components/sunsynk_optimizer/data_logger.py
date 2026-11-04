@@ -289,6 +289,10 @@ class DataLogger:
         """Log a cloud grid lost/restored notice (phase 43 follow-up): deduped by the caller on notice id."""
         await self._async_append(_record("grid_notice", **fields))
 
+    async def async_log_battery_health(self, **fields: Any) -> None:
+        """Log the daily BMS state-of-health snapshot (phase 75): one per date (deduped)."""
+        await self._async_append(_record("battery_health", **fields))
+
     async def async_log_meter_snapshot(self, **fields: Any) -> None:
         """Log a cumulative daily-meter snapshot (phase 14): one per date+time."""
         await self._async_append(_record("meter_snapshot", **fields))
@@ -897,7 +901,7 @@ class DataLogger:
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog", "charge_outcome",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load", "import_causes",
         "half_hourly_import", "half_hourly_export", "capacity_estimate", "pv_strings",
-        "meter_reconciliation_import", "meter_reconciliation_export",
+        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:

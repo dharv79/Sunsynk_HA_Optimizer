@@ -192,6 +192,19 @@ class SunsynkApiClient:
         records = infos.get("records") if isinstance(infos, dict) else None
         return records if isinstance(records, list) else None
 
+    async def async_read_latest_workdata(self, inverter_sn: str, date: str) -> dict[str, Any] | None:
+        """Newest register snapshot for `date` (YYYY-MM-DD) from the portal's Operation data (phase 75).
+
+        One record of ~690 named registers (BMS SOH, cycles, cells, fault words); None if unreadable."""
+        data = await self._authorized_json(
+            "GET",
+            f"{BASE_API}/api/v1/workdata/dynamic?page=1&limit=1&sn={inverter_sn}"
+            f"&dateRange={date},{date}&type=1&lan=en",
+        )
+        body = data.get("data") if isinstance(data, dict) else None
+        records = body.get("record") if isinstance(body, dict) else None
+        return records[0] if isinstance(records, list) and records and isinstance(records[0], dict) else None
+
     async def async_read_settings(self, inverter_sn: str) -> dict[str, Any]:
         """Read the inverter's settings (keyed by the inverter serial, not plant_id)."""
         data = await self._authorized_json("GET", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/read")

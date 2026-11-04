@@ -3756,11 +3756,12 @@ def normalise_inverter_counts(data) -> dict | None:
     return counts if any(v is not None for v in counts.values()) else None
 
 
-def inverter_fault_flag(active_events, counts) -> bool | None:
-    """True when the realtime list has events or the cloud counts a fault/protect state.
+def inverter_fault_flag(active_events, counts, health_faults=None) -> bool | None:
+    """True when the realtime list has events, the cloud counts a fault/protect state, or a register
+    fault word is set (health_faults: bool | None from health_fault_flag).
 
-    False only when at least one source was read and shows nothing; None when neither was read."""
-    signals = []
+    False only when at least one source was read and shows nothing; None when none was read."""
+    signals = [] if health_faults is None else [bool(health_faults)]
     if active_events is not None:
         signals.append(bool(active_events))
     if counts:
@@ -3768,4 +3769,225 @@ def inverter_fault_flag(active_events, counts) -> bool | None:
         if known:
             signals.append(any(v > 0 for v in known))
     return any(signals) if signals else None
+
+
+# ---- Phase 75: battery state of health from the cloud register snapshot ----------------------------
+# Source: GET /api/v1/workdata/dynamic?...&type=1 (portal "Operation data", captured 04/11/2026). Each
+# record is {"<Name>(<unit>)/<register>": "<value>"}; names are matched without the unit/register suffix
+# so a register renumbering does not break the parse.
+
+NOMINAL_PACK_VOLTAGE = 51.2
+_FAULT_WORD_NAMES = (
+    "WarningMessageWord1", "WarningMessageWord2",
+    "FaultInformationWord1", "FaultInformationWord2", "FaultInformationWord3", "FaultInformationWord4",
+    "DeyeBatBatteryFault1", "DeyeBatBatteryFault2", "DeyeBatBatteryAlarm1", "DeyeBatBatteryAlarm2",
+)
+_PACK_FAULT_SUFFIXES = ("Fault1", "Fault2", "Warming1", "Warming2")
+_MAX_PACKS = 32
+
+
+def _workdata_index(record: dict) -> dict[str, Any]:
+    index = {}
+    for key, value in record.items():
+        name = str(key).split("(")[0].split("/")[0].strip()
+        index.setdefault(name, value)
+    return index
+
+
+def _workdata_float(index: dict, name: str) -> float | None:
+    value = index.get(name)
+    if value in (None, "", "--"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _nonzero_word(value) -> bool:
+    if value in (None, "", "--"):
+        return False
+    try:
+        return float(value) != 0
+    except (TypeError, ValueError):
+        return True  # unknown non-numeric text in a fault word counts as a fault
+
+
+def parse_battery_health(record) -> dict | None:
+    """Battery health and fault words from one register snapshot; None when it carries neither SOH nor a pack.
+
+    Packs with a blank serial are empty slots. Every missing value stays None (rule 11). Cell spread is
+    max-min cell voltage in mV across all packs; health_kwh is sum(pack Ah x pack SOH) at 51.2 V."""
+    if not isinstance(record, dict):
+        return None
+    index = _workdata_index(record)
+    packs = []
+    for i in range(1, _MAX_PACKS + 1):
+        sn = index.get(f"Pack{i}Sn")
+        if sn in (None, "", "--"):
+            continue
+        cell_max = _workdata_float(index, f"Pack{i}MaxCell")
+        cell_min = _workdata_float(index, f"Pack{i}MinCell")
+        packs.append({
+            "pack": i,
+            "soh_pct": _workdata_float(index, f"Pack{i}Soh"),
+            "cycles": _workdata_float(index, f"Pack{i}CycleNumber"),
+            "total_ah": _workdata_float(index, f"Pack{i}TotalCapacity"),
+            "soc_pct": _workdata_float(index, f"Pack{i}Soc"),
+            "cell_max_v": cell_max,
+            "cell_min_v": cell_min,
+            "cell_spread_mv": round((cell_max - cell_min) * 1000, 1)
+            if cell_max is not None and cell_min is not None else None,
+            "temp_c": _workdata_float(index, f"Pack{i}TemperateAve"),
+            "faults": {
+                f"Pack{i}{suffix}": index.get(f"Pack{i}{suffix}")
+                for suffix in _PACK_FAULT_SUFFIXES if _nonzero_word(index.get(f"Pack{i}{suffix}"))
+            },
+        })
+    soh = _workdata_float(index, "DeyeBatBatterySoh")
+    if soh is None and not packs:
+        return None
+    faults = {name: index.get(name) for name in _FAULT_WORD_NAMES if _nonzero_word(index.get(name))}
+    for pack in packs:
+        faults.update(pack.pop("faults"))
+
+    def _known(key):
+        return [p[key] for p in packs if p[key] is not None]
+
+    pack_ah = [p["total_ah"] for p in packs]
+    nameplate_ah = sum(pack_ah) if pack_ah and None not in pack_ah else None
+    health_ah = (
+        sum(p["total_ah"] * p["soh_pct"] / 100 for p in packs)
+        if packs and all(p["total_ah"] is not None and p["soh_pct"] is not None for p in packs) else None
+    )
+    cells_max, cells_min = _known("cell_max_v"), _known("cell_min_v")
+    return {
+        "sample_time": index.get("Time"),
+        "soh_pct": soh if soh is not None else (min(_known("soh_pct")) if _known("soh_pct") else None),
+        "pack_count": len(packs),
+        "cycles_max": max(_known("cycles")) if _known("cycles") else None,
+        "nameplate_kwh": round(nameplate_ah * NOMINAL_PACK_VOLTAGE / 1000, 2) if nameplate_ah else None,
+        "health_kwh": round(health_ah * NOMINAL_PACK_VOLTAGE / 1000, 2) if health_ah else None,
+        "cell_spread_mv": round((max(cells_max) - min(cells_min)) * 1000, 1) if cells_max and cells_min else None,
+        "cell_temp_c": _workdata_float(index, "DeyeBatBatteryTemp"),
+        "bms_charge_limit_a": _workdata_float(index, "DeyeBatChargeLimitCurrent"),
+        "bms_discharge_limit_a": _workdata_float(index, "DeyeBatDischargeLimitCurrent"),
+        "charge_total_kwh": _workdata_float(index, "BatChargeTotal"),
+        "discharge_total_kwh": _workdata_float(index, "BatDischargeTotal"),
+        "inverter_temp_c": _workdata_float(index, "DcTemp"),
+        "fault_words": faults,
+        "packs": packs,
+    }
+
+
+def health_fault_flag(health) -> bool | None:
+    """True when any inverter/BMS fault or warning word is non-zero; None without a snapshot."""
+    if not isinstance(health, dict):
+        return None
+    return bool(health.get("fault_words"))
+
+
+# Thresholds for the charge-stall hints: LFP charge acceptance falls off below ~10 C; a >50 mV cell
+# spread near full triggers BMS top-balancing stops; a BMS limit under ~50 A caps a 5 kW charger.
+STALL_COLD_CELL_C = 10.0
+STALL_CELL_SPREAD_MV = 50.0
+STALL_BMS_LIMIT_A = 50.0
+
+
+def bms_stall_hints(health) -> list[str]:
+    """Plain reasons the BMS may have held the charge back, from one snapshot (empty when none apply)."""
+    if not isinstance(health, dict):
+        return []
+    hints = []
+    temp = health.get("cell_temp_c")
+    if temp is not None and temp < STALL_COLD_CELL_C:
+        hints.append(f"cold cells ({temp:.0f} \u00b0C)")
+    spread = health.get("cell_spread_mv")
+    if spread is not None and spread >= STALL_CELL_SPREAD_MV:
+        hints.append(f"cell imbalance ({spread:.0f} mV)")
+    limit = health.get("bms_charge_limit_a")
+    if limit is not None and limit < STALL_BMS_LIMIT_A:
+        hints.append(f"BMS charge limit {limit:.0f} A")
+    if health.get("fault_words"):
+        hints.append("BMS/inverter fault word set")
+    return hints
+
+
+def bms_summary_line(health) -> str | None:
+    """One-line BMS context for an alert, e.g. 'BMS: SOH 97%, cells 12 C, spread 3 mV, limit 128 A.'"""
+    if not isinstance(health, dict):
+        return None
+    parts = []
+    if health.get("soh_pct") is not None:
+        parts.append(f"SOH {health['soh_pct']:.0f}%")
+    if health.get("cell_temp_c") is not None:
+        parts.append(f"cells {health['cell_temp_c']:.0f} \u00b0C")
+    if health.get("cell_spread_mv") is not None:
+        parts.append(f"spread {health['cell_spread_mv']:.0f} mV")
+    if health.get("bms_charge_limit_a") is not None:
+        parts.append(f"limit {health['bms_charge_limit_a']:.0f} A")
+    if not parts:
+        return None
+    hints = bms_stall_hints(health)
+    return "BMS: " + ", ".join(parts) + "." + (f" Possible cause: {'; '.join(hints)}." if hints else "")
+
+
+HEALTH_TREND_MIN_DAYS = 30
+
+
+def battery_health_trend(history: list[dict], battery_cost_gbp=None, lifetime_kwh=None) -> dict:
+    """SOH fade and measured wear cost from daily ledger points (date, soh_pct, cycles_max, discharge_total_kwh).
+
+    Rates need >= 30 days between the first and last usable points, else None. measured_wear_p_per_kwh =
+    cost x SOH lost / kWh discharged; configured_wear_p_per_kwh = cost / lifetime kWh, for comparison.
+    Shadow only: nothing feeds the wear term yet."""
+    def _parse(point):
+        try:
+            return datetime.fromisoformat(str(point.get("date"))).date()
+        except (TypeError, ValueError):
+            return None
+
+    points = sorted(
+        (p for p in history or [] if _parse(p) is not None and p.get("soh_pct") is not None), key=_parse
+    )
+    configured = (
+        round(float(battery_cost_gbp) * 100 / float(lifetime_kwh), 2)
+        if battery_cost_gbp and lifetime_kwh else None
+    )
+    out = {
+        "points": len(points), "days": None, "soh_change_pct": None, "cycles_added": None,
+        "discharged_kwh": None, "fade_pct_per_1000_cycles": None, "fade_pct_per_year": None,
+        "measured_wear_p_per_kwh": None, "configured_wear_p_per_kwh": configured,
+    }
+    if len(points) < 2:
+        return out
+    first, last = points[0], points[-1]
+    days = (_parse(last) - _parse(first)).days
+    out["days"] = days
+    if days < HEALTH_TREND_MIN_DAYS:
+        return out
+    soh_lost = float(first["soh_pct"]) - float(last["soh_pct"])
+    out["soh_change_pct"] = round(-soh_lost, 2)
+    out["fade_pct_per_year"] = round(soh_lost * 365 / days, 2)
+    if first.get("cycles_max") is not None and last.get("cycles_max") is not None:
+        cycles = float(last["cycles_max"]) - float(first["cycles_max"])
+        out["cycles_added"] = cycles
+        if cycles > 0:
+            out["fade_pct_per_1000_cycles"] = round(soh_lost * 1000 / cycles, 2)
+    if first.get("discharge_total_kwh") is not None and last.get("discharge_total_kwh") is not None:
+        discharged = float(last["discharge_total_kwh"]) - float(first["discharge_total_kwh"])
+        out["discharged_kwh"] = round(discharged, 1)
+        if discharged > 0 and battery_cost_gbp:
+            out["measured_wear_p_per_kwh"] = round(float(battery_cost_gbp) * 100 * (soh_lost / 100) / discharged, 2)
+    return out
+
+
+def ledger_point(date: str, health) -> dict | None:
+    """The compact per-day history entry kept in state for the trend."""
+    if not isinstance(health, dict) or health.get("soh_pct") is None:
+        return None
+    return {
+        "date": date, "soh_pct": health["soh_pct"], "cycles_max": health.get("cycles_max"),
+        "discharge_total_kwh": health.get("discharge_total_kwh"),
+    }
 
