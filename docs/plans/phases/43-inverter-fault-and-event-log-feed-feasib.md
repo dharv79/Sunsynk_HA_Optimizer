@@ -1,6 +1,6 @@
 # Phase 43 — Inverter fault and event log feed (feasibility-gated)
 
-**Status:** On hold (probe built, awaiting live response). **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Shelved (no readable endpoint, 04/11/2026). **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -46,3 +46,7 @@ Feasibility step only: service `probe_inverter_events` GETs six candidate alarm/
 ## Probe round 2 result (04/11/2026)
 
 All six `plant/{id}/events?...&lan=en` variants (type, sn, status) return `{"code":500,"msg":"Internal Server Error"}`: `lan` is accepted but another required parameter is missing. Round 3 (b39) adds a 30-day date range (`startTime/endTime`, `startDate/endDate`, `beginTime`, `date`) and `plantId`. If this also fails, shelve phase 43 as no readable endpoint (as phases 23 and 28 did) and keep the manual Sunsynk Event log check.
+
+## Probe round 3 result and decision (04/11/2026)
+
+All six round-3 variants (date range under `startTime/endTime`, `startDate/endDate`, `beginTime`, `date`, plus `sn`, `type`, `status`, `plantId`) again returned `{"code":500,"msg":"Internal Server Error"}`. Inverter routes are `No Permissions` for this token, and the only live route (`plant/{id}/events`) rejects every parameter set tried. Shelved, as phases 23 and 28 were: keep checking the Sunsynk Event log by hand. The `probe_inverter_events` service stays (read-only) so it can be re-tried if the cloud API changes; reopen only with a known-good request from the Sunsynk app's network traffic.
