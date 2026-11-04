@@ -23,6 +23,7 @@ from typing import Any, Callable, Mapping
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import (
     async_call_later,
@@ -33,6 +34,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    DOMAIN,
     INTEGRATION_VERSION,
     CONF_AVG_CONSUMPTION_KW,
     CONF_WEEKEND_AVG_CONSUMPTION_KW,
@@ -128,6 +130,9 @@ from .flux_helpers import (
 )
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    AUDIT_DAYS,
+    audit_days,
+    audit_summary,
     monthly_report_due,
     achievable_max_soc,
     charge_outcome,
@@ -457,6 +462,7 @@ class SunsynkOptimizer:
             (6, 0, self._async_capture_morning_state),
             (6, 5, self._async_spare_solar_morning),
             (6, 10, self._async_tariff_price_check),
+            (6, 20, self._async_data_audit),  # phase 45
             (22, 0, self._async_capture_day_actuals),  # also takes the 22:00 meter snapshot
             # Phase 14 KPI snapshots at the Flux band edges.
             (2, 0, self._async_meter_snapshot),
@@ -2516,6 +2522,38 @@ class SunsynkOptimizer:
             self._band_price_cache.clear()
         self._band_price_cache[cache_key] = dict(octopus)
         return octopus
+
+    async def _async_data_audit(self, _now) -> None:
+        await self._guarded(self.async_run_data_audit, "Data audit")
+
+    async def async_run_data_audit(self) -> None:
+        """06:20: audit the last 14 days of records (phase 45); raise or clear HA Repairs issues.
+
+        Read-only apart from the fill-only Octopus cost backfill (rule 12) when a settled
+        daily_cost is missing. Issues are one Repairs entry per class (missing / duplicate /
+        contradiction), deleted as soon as the class clears. Never rewrites a record.
+        """
+        today = dt_util.now().date()
+        expect_cost = bool(self._cfg_str(CONF_OCTOPUS_IMPORT_COST_SENSOR))
+        records = await self.data_logger.async_load_records(AUDIT_DAYS + 3)
+        issues = audit_days(records, today, AUDIT_DAYS, expect_cost)
+        if expect_cost and any(i["type"] == "daily_cost" for i in issues):
+            await self._async_capture_daily_cost()
+            records = await self.data_logger.async_load_records(AUDIT_DAYS + 3)
+            issues = audit_days(records, today, AUDIT_DAYS, expect_cost)
+        summary = audit_summary(issues)
+        self.coordinator.update_state(touch=False, data_health=summary)
+        for kind in ("missing", "duplicate", "contradiction"):
+            issue_id = f"data_{kind}"
+            dates = summary["classes"].get(kind)
+            if dates:
+                ir.async_create_issue(
+                    self.hass, DOMAIN, issue_id, is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING, translation_key=issue_id,
+                    translation_placeholders={"count": str(len(dates)), "items": ", ".join(dates[:6])},
+                )
+            else:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     async def _async_tariff_price_check(self, _now) -> None:
         await self._guarded(self.async_run_tariff_price_check, "Tariff price check")
