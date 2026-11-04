@@ -63,7 +63,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 53. Measure overnight drain from the 05:00 snapshot SOC, not target_soc | Done, merged (5b70e67, PR #94) | S |
 | 54. Charge outcome record: reached vs target, likely cause and alert | Done, merged (9d14d5d, PR #95) | S |
 | 55. Evening reserve from learned 16:00-22:00 load (shadow first) | Done, merged (aae95db, PR #113), shadow only | M, ~35k actual |
-| 56. Intraday solar re-scaling from PV produced so far | Planned, not built | M |
+| 56. Intraday solar re-scaling from PV produced so far | Done, merged (aff091d, PR #115), shadow + advisory | M, ~25k actual |
 | 57. API request timeout and catch-up for missed monthly reports | Done, merged (69eb281, PR #97) | XS |
 | 58. Plain-English plan explanation on the notification and sensor | Done, merged (eaf3d45, PR #103) | S |
 | 59. Peak cover: hold the battery early instead of recharging it at 13:45 | Done, merged (cbec4d4, PR #101; peak cover live option off) | M |

@@ -1,6 +1,6 @@
 # Phase 56 — Intraday solar re-scaling from PV produced so far
 
-**Status:** Planned, not built. **Size:** M. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done, merged (aff091d, PR #115), shadow + advisory. **Size:** M. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Confirmed. There is no intraday or pv_etoday use in planning.py or in the optimi
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+`planning.intraday_forecast_scale` (none before 10:00, damped to 1.0 until 11:00, clamp 0.5-2.0, needs >=1 kWh forecast so far) and `scaled_solar_kwh`. Peak cover logs `intraday_scale`, `solar_kwh_to_16_scaled` and `intraday_decision` (its decision on min(raw, scaled)); the live decision is unchanged. The spare-solar refresh multiplies its correction by the scale (advisory, no writes). Peak export has no solar term, so it is untouched. To go live later, compare `intraday_decision` with the actual 16:00 SOC; the min() rule means scaling can only add top-ups, never remove them.

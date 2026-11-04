@@ -233,3 +233,7 @@ Phase 31. `_async_post_with_status` stores the pushed `fluxProducts` in `state.l
 `evening_reserve_soc` used the overnight plan rate, but the 16:00-22:00 load is higher in winter. `planning.learned_evening_load_kw` takes the median of (22:00 - 16:00 `load_kwh`) / 6 h over 28 days from the meter snapshots, needing 7 home days (a missing or backwards meter skips the day, away days are skipped, weekday/weekend split when 7 matching days exist). The 01:55 plan refreshes it (`_refresh_evening_load`).
 
 `planning.evening_reserve_choice` clamps it 0.5x-2x the plan rate (like phase 12) and returns (reserve in force, learned reserve). The learned reserve only drives trims, peak export and the peak-cover floor when `evening_load_live` is on (default off). Either way `evening_load_kw_learned` and `evening_reserve_soc_learned` are logged on the 22:00 `day_kpis` record, and `evening_reserve_soc_learned` on the trim action. Compare against `grid_import_evening_kwh` before going live. Unpersisted until the next 01:55 plan after a restart. Tests: `tests/test_evening_load.py`.
+
+## Intraday solar scale, shadow (04/11/2026, phase 56)
+
+`planning.intraday_forecast_scale` compares `pv_etoday` with the hourly forecast summed to now. Peak cover logs the scale, the scaled solar to 16:00 and the decision on min(raw, scaled) beside the unchanged live decision; the spare-solar estimate uses the scale (advisory). Low-solar protection never uses a scale above 1.
