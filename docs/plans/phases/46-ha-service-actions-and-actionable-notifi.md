@@ -1,6 +1,6 @@
 # Phase 46 — HA service actions and actionable notifications
 
-**Status:** Planned, not built. **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (04/11/2026). **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Two candidates merged (services plus actionable notifications, and services for 
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+Services `set_tonight_target`, `skip_tonight`, `schedule_free_event`, `cancel_free_event`, `get_plan` (response only, dry run, rule 17). `planning.next_plan_date` / `apply_user_override` apply after the free-event cap; override nights carry `user_override` in `import_plan` and are excluded from drain and nudge learning. Writes refuse in monitor mode and while slots are held. Not built: `pause_export_until` (clashes with the automatic re-enable) and notification action buttons.

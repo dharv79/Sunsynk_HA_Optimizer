@@ -1,6 +1,6 @@
 # Phase 43 — Inverter fault and event log feed (feasibility-gated)
 
-**Status:** Planned, not built. **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** On hold (probe built, awaiting live response). **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Two candidates merged (alarm reader and event log feed). Confirmed that api.py h
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+Feasibility step only: service `probe_inverter_events` GETs six candidate alarm/event routes and returns status plus a truncated body (and posts it to the debug stream). Call it from Developer tools, record the working route and shape here, then build `async_read_events`, `classify_inverter_events`, the `inverter_event` record and the binary sensor. On hold until then.

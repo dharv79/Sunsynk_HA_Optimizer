@@ -1,6 +1,6 @@
 # Phase 49 — PV string health monitor (MPPT0 vs MPPT1)
 
-**Status:** Planned, not built. **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (04/11/2026). **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Two candidates merged. Confirmed the MPPT entities are read and only summed. The
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+`planning.string_share`, `string_ratio_anomaly` (median + scaled MAD, 8-point floor, 7-day minimum), `string_streak`. The 30-min tick samples both strings 10:00-15:00 above 1 kW, skipping a full battery. 22:00 logs a `pv_strings` record, updates `sensor.pv_string_share` and notifies after 3 consecutive anomalous days on the same string.

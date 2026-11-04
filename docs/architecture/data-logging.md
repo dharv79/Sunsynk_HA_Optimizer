@@ -96,3 +96,10 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## Import causes (04/11/2026, phase 42)
 
 `import_causes` (22:00, one per day, in `_DEDUP_TYPES`): kWh per cause plus `attributed_kwh` against the day's `grid_import_kwh`; the gap is import never sampled. Causes come from `planning.import_cause_step`; 'unknown' is explicit, never guessed. `sensor.import_causes_today` shows the running tally.
+
+## Data audit, outage log and PV strings (04/11/2026, phases 45, 48, 49)
+
+- **Audit (45).** 06:20 `async_run_data_audit` runs `planning.audit_days` over the last 14 complete days (from the first logged day): missing `import_plan`/`morning_state`/`day_actuals`/`day_kpis`, `daily_cost` (only with an Octopus import cost sensor, after a 2-day settle), duplicates, and contradictions (0% self-sufficiency or 0 kWh load against 5+ kWh solar). One HA Repairs issue per class, deleted when it clears. The only write is the fill-only `daily_cost` backfill (rule 12). `diagnostics.py` is the redacted download.
+- **`outage` (48).** One record per closed grid outage (start, end, minutes, SOC start/low/end, battery kWh served). Not deduped. While an outage is open, plan, Flux 2, peak cover/export and retry pushes return early.
+- **`pv_strings` (49).** One per day, deduped: MPPT0/MPPT1 kWh sampled 10:00-15:00 above 1 kW (battery not full), MPPT0 share, rolling median, anomaly flag.
+- **`user_override` (46).** Tag on `import_plan` (in `_IMPORT_PLAN_FIELDS`); such nights are excluded from drain and evening-nudge learning.

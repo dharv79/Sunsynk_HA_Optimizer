@@ -1,6 +1,6 @@
 # Phase 48 — Grid outage detection, runtime sensor and outage log
 
-**Status:** Planned, not built. **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (04/11/2026). **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Merged the outage-logger half of 'Grid outage logger and storm reserve' into thi
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+`planning.grid_online` (tolerant parser), `outage_runtime_hours`, `outage_track`, `outage_record`. A `grid_status` listener opens and closes an outage (persisted `grid_outage`), notifies, and logs an `outage` record. While active, the import plan, Flux 2 check, peak cover, peak export and plan retry return early; a skipped plan re-runs on restore. `binary_sensor.grid_outage`, `sensor.battery_runtime`. Confirm the live `grid_status` format; an unrecognised value is never treated as an outage.

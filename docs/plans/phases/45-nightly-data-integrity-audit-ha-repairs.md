@@ -1,6 +1,6 @@
 # Phase 45 — Nightly data-integrity audit, HA Repairs and a diagnostics download
 
-**Status:** Planned, not built. **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (04/11/2026). **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Grep found no issue_registry or diagnostics module. The evidence is concrete. It
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+`planning.audit_days` (missing daily records from the first logged day, duplicates, zero self-sufficiency or zero load against 5+ kWh solar), `audit_summary`, `redact_config`. A 06:20 job (`async_run_data_audit`) raises or clears one HA Repairs issue per class (`data_missing`, `data_duplicate`, `data_contradiction`), backfills missing `daily_cost` fill-only (rule 12) and sets `sensor.data_health`. `diagnostics.py` returns the redacted config, state and last 7 paired days. The `battery_cycled_kwh` contradiction is not audited (it is computed, not stored).
