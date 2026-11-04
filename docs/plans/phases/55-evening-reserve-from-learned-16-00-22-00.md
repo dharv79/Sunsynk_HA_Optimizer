@@ -1,6 +1,6 @@
 # Phase 55 — Evening reserve from learned 16:00-22:00 load (shadow first)
 
-**Status:** Planned, not built. **Size:** M. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done, merged (aae95db, PR #113), shadow only. **Size:** M, ~35k actual. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Confirmed. _evening_reserve_soc uses _plan_load_kw, which comes from overnight l
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built
+
+`planning.learned_evening_load_kw` and `evening_reserve_choice`; optimizer `_refresh_evening_load` (01:55 plan) and `_evening_reserve_pair`. Option `evening_load_live` (default off). Logged: `evening_load_kw_learned`, `evening_reserve_soc_learned` on `day_kpis`, and `evening_reserve_soc_learned` on the trim action. Details: `docs/architecture/export-control.md`. The backtest comparison is not built.
