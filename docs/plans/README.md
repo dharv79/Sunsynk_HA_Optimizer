@@ -74,7 +74,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 64. Pick the bridge target from the forecast-error distribution (newsvendor rule) | Planned, not built | M |
 | 65. Move trims into the peak window when the solar left today can wait | Planned, not built | M |
 | 66. Re-check the peak export plan at 17:00 and 18:00 using the observed peak load | Done, merged (27b831a, PR #102; peak export live option off) | S |
-| 67. Cache config and tariff parsing on the SOC-change path | Planned, not built | S |
+| 67. Cache config and tariff parsing on the SOC-change path | Done, merged (2eeaebf, PR #109) | S, ~40k actual |
 | 68. Replace the weekly full-charge day with 'days since the last 100%' | Planned, not built | S |
 | 69. Receding-horizon MPC planner (48 h, half-hourly) in shadow | Planned, not built | XL |
 | 70. Self-learned probabilistic solar forecast (own P10/P50/P90) | Planned, not built | L |
