@@ -62,6 +62,7 @@ from .const import (
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
     CONF_TRIM_DEFER_LIVE,
+    CONF_FULL_CHARGE_SKIP_LIVE,
     CONF_BASELOAD_ALERT,
     DEFAULT_BASELOAD_ALERT,
     CONF_BATTERY_VOLTAGE,
@@ -105,6 +106,7 @@ from .const import (
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
     DEFAULT_TRIM_DEFER_LIVE,
+    DEFAULT_FULL_CHARGE_SKIP_LIVE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
@@ -262,6 +264,8 @@ from .planning import (
     sum_field,
     synthetic_hourly_profile,
     trailing_week,
+    days_since_full,
+    full_charge_due,
     trim_defer_kwh,
     trim_target_soc,
     DEFAULT_FLUX2_SLOT,
@@ -1034,6 +1038,13 @@ class SunsynkOptimizer:
             solar_start_time = solar_start_dt.strftime("%H:%M")
             hours_to_solar = max(0.0, solar_start_dt.hour + solar_start_dt.minute / 60.0 - 5.0)
 
+        # Phase 68: the forced weekly 100% is redundant when the battery reached 99% in the last 7 days.
+        # Shadow-logged every night; only skipped when full_charge_skip_live is on.
+        since_full = days_since_full(await self.data_logger.async_load_snapshot_days(30), now.date())
+        full_due, _full_reason = full_charge_due(since_full)
+        skip_would = is_full_day and not full_due
+        if skip_would and cfg.get(CONF_FULL_CHARGE_SKIP_LIVE, DEFAULT_FULL_CHARGE_SKIP_LIVE) and self.operation_mode != "monitor":
+            is_full_day = False
         decision = select_target_soc(
             is_full_day=is_full_day,
             low_solar_forecast_kwh=low_solar_forecast_kwh,
@@ -1163,6 +1174,9 @@ class SunsynkOptimizer:
             "forecast_correction_weighted": weighted_correction,
             "forecast_correction_weighted_basis": weighted_basis,
             **nv,
+            "days_since_full": since_full,
+            "full_charge_due": full_due,
+            "full_charge_skip_would": skip_would,
             "solar_forecast_kwh": solar_forecast_kwh,
             "low_solar_forecast_kwh": round(low_solar_forecast_kwh, 2),
             "forecast_band": band,

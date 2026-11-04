@@ -1331,6 +1331,36 @@ def trim_target_soc(
     return target if target < soc else None
 
 
+FULL_CHARGE_REACHED_SOC = 99.0
+FULL_CHARGE_MAX_GAP_DAYS = 7
+FULL_CHARGE_HARD_MAX_GAP_DAYS = 14  # cell balancing: never skip beyond this
+
+
+def days_since_full(snapshot_days: dict[str, dict[str, dict]], today, reached_soc: float = FULL_CHARGE_REACHED_SOC) -> int | None:
+    """Days since any meter snapshot (02/05/16/19/22:00) read >= 99% SOC; None when none in the history (phase 68)."""
+    latest = None
+    for day, snaps in snapshot_days.items():
+        try:
+            d = date.fromisoformat(day)
+        except (TypeError, ValueError):
+            continue
+        if d > today:
+            continue
+        if any(isinstance(sn.get("soc"), (int, float)) and sn["soc"] >= reached_soc for sn in (snaps or {}).values()):
+            latest = d if latest is None or d > latest else latest
+    return None if latest is None else (today - latest).days
+
+
+def full_charge_due(days_since: int | None, max_gap_days: int = FULL_CHARGE_MAX_GAP_DAYS) -> tuple[bool, str]:
+    """Is the weekly forced 100% still needed? Unknown history -> due. Gap capped at 14 days (phase 68)."""
+    gap = min(max_gap_days, FULL_CHARGE_HARD_MAX_GAP_DAYS)
+    if days_since is None:
+        return True, "no_history"
+    if days_since < gap:
+        return False, "recent_full_skip"
+    return True, "gap_reached"
+
+
 TRIM_DEFER_MIN_KWH = 0.3  # a deferral smaller than this isn't worth changing the push
 
 
