@@ -1331,6 +1331,41 @@ def trim_target_soc(
     return target if target < soc else None
 
 
+TRIM_DEFER_MIN_KWH = 0.3  # a deferral smaller than this isn't worth changing the push
+
+
+def trim_defer_kwh(
+    soc: float,
+    trim_target_soc_: int,
+    capacity_kwh: float,
+    remaining_pv_kwh: float | None,
+    load_kw: float,
+    hours_to_peak: float,
+    clipped_today: bool = False,
+) -> dict[str, Any]:
+    """Split a trim into the kWh that must go now and the kWh that can wait for the peak (phase 65).
+
+    Only the PV left until 16:00 minus the house load, beyond the battery's headroom, would overflow
+    (be clipped). Trim just that now; hold the rest to sell 16:00-19:00 at the peak export rate.
+    No forecast (None) or solar already clipped today -> defer nothing (trim in full, as before).
+    ``needed_soc`` is the target to trim to now (never above ``soc``, never below the full-trim target).
+    """
+    full_kwh = max(0.0, (soc - trim_target_soc_) / 100.0 * capacity_kwh)
+    if remaining_pv_kwh is None or clipped_today or capacity_kwh <= 0:
+        return {"full_trim_kwh": round(full_kwh, 2), "needed_kwh": round(full_kwh, 2), "defer_kwh": 0.0,
+                "needed_soc": trim_target_soc_, "reason": "no_forecast" if remaining_pv_kwh is None else "clipped_today"}
+    surplus = remaining_pv_kwh - max(0.0, load_kw) * max(0.0, hours_to_peak)
+    headroom = (100.0 - soc) / 100.0 * capacity_kwh
+    overflow = max(0.0, surplus - headroom)
+    needed = min(full_kwh, overflow)
+    defer = full_kwh - needed
+    if defer < TRIM_DEFER_MIN_KWH:
+        needed, defer = full_kwh, 0.0
+    needed_soc = trim_target_soc_ if defer == 0 else min(100, math.ceil(soc - needed / capacity_kwh * 100.0))
+    return {"full_trim_kwh": round(full_kwh, 2), "needed_kwh": round(needed, 2), "defer_kwh": round(defer, 2),
+            "needed_soc": max(trim_target_soc_, needed_soc), "reason": "deferred" if defer else "overflow_needs_trim"}
+
+
 # Phase 17: sell the surplus above the evening reserve 16:00-19:00 (shadow first).
 PEAK_EXPORT_MARGIN_SOC = 5
 PEAK_EXPORT_MIN_KWH = 0.5  # below this it isn't worth an API write
