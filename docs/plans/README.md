@@ -95,6 +95,8 @@ Phases 41–78 come from the idea sweep of 01/11/2026: new features 41–50, imp
 
 Phase 30 is a user request (13/10/2026). Phases 22–29 come from the second improvement list (06/10/2026; items 26 hot-water diversion and 31 EV battery hold were declined). 22 is independent and recommended early; 23 needs 22 (safety net) and an API check; 24 before 17; 26 shares phase 12's missing-meter guard; 28 and 23 start with a feasibility check and go "On hold" if it fails.
 
+Build order (set 04/11/2026, user request): 51 → 67 → 64 → 55 → 56 → 65 → 68 → 42 → 45 → 47 → 48 → 49 → 46 → 43 → 10 (Octopus auto-detect, on hold) → 75 → 50 → 70 → 71 → 69 → 76 → 73 → 77 → 78 → 72 → 74. Rationale: safety/cheap fixes first (51, 67), then planner accuracy (64, 55, 56, 65, 68), then observability (42, 45, 47-49), then integrations (46, 43, 10), then data foundations for the blue-sky work (75 before 50; 70 and 71 before 69; 69 before 76 and 72; 73 before 74). Optimisation and blue-sky phases (64-78) must be re-vetted against the code before building.
+
 Token actuals were not metered before this index existed; record them from phase 8 on.
 
 ## Decisions locked in with the user (do not re-litigate)
