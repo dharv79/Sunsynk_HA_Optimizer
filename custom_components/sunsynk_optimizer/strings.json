@@ -156,5 +156,19 @@
       "invalid_service": "Service must be in domain.service format.",
       "service_not_found": "Service was not found."
     }
+  },
+  "issues": {
+    "data_missing": {
+      "title": "Sunsynk Optimizer: missing daily records",
+      "description": "{count} daily records are missing from the last 14 days: {items}. Learned corrections skip these days. This clears itself once the gaps age out or are filled."
+    },
+    "data_duplicate": {
+      "title": "Sunsynk Optimizer: duplicate daily records",
+      "description": "{count} per-day records were logged twice: {items}. Check the data folder for a restart that crossed a scheduled capture."
+    },
+    "data_contradiction": {
+      "title": "Sunsynk Optimizer: inconsistent daily figures",
+      "description": "{count} days have figures that contradict each other: {items}. The learned corrections may be using a bad input."
+    }
   }
 }

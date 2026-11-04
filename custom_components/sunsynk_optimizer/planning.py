@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -3341,3 +3342,99 @@ def scorecard_summary(card: dict[str, dict[str, Any]]) -> str:
         delta = "" if s.get("delta_gbp") is None else f", £{s['delta_gbp']:+.2f}"
         lines.append(f"{name}: {s['verdict'].replace('_', ' ')} ({s['changed']}/{s['days']} days{delta})")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# Phase 45: nightly data-integrity audit                                       #
+# --------------------------------------------------------------------------- #
+
+AUDIT_DAYS = 14
+AUDIT_DAILY_TYPES = ("import_plan", "morning_state", "day_actuals", "day_kpis")
+AUDIT_COST_SETTLE_DAYS = 2  # daily_cost can lag Octopus by a day or two; younger dates are not flagged
+AUDIT_DEDUP_TYPES = AUDIT_DAILY_TYPES + ("charge_outcome", "peak_export", "peak_cover", "meter_snapshot")
+AUDIT_SOLAR_MIN_KWH = 5.0  # a zero KPI against this much solar is a contradiction
+_AUDIT_REDACT_PARTS = ("password", "username", "token", "secret", "key", "email", "plant_id", "serial", "account")
+
+
+def audit_days(
+    records: list[dict[str, Any]],
+    today: date,
+    days: int = AUDIT_DAYS,
+    expect_cost: bool = False,
+) -> list[dict[str, str]]:
+    """Self-audit of the last `days` complete days of JSONL records. Pure; never rewrites anything.
+
+    Returns issue dicts {kind, type, date, detail}, sorted by date then kind:
+    - missing: a daily record type absent for a date (only dates from the first day with
+      any record, so a fresh install is not flagged for history it never had; `daily_cost`
+      only when `expect_cost` and the date is past the settle lag);
+    - duplicate: a per-day record type logged twice for the same date (and time);
+    - contradiction: self_sufficiency 0.0 against meaningful solar, or a 22:00 load of 0
+      with solar produced (the zero-actuals guard should have kept it out).
+    Today is excluded: its 22:00 records do not exist yet.
+    """
+    window = {(today - timedelta(days=n)).isoformat() for n in range(1, days + 1)}
+    by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    first_seen: str | None = None
+    for rec in records:
+        rtype, rdate = rec.get("type"), rec.get("date")
+        if not rtype or not isinstance(rdate, str):
+            continue
+        by_key.setdefault((rtype, rdate), []).append(rec)
+        if first_seen is None or rdate < first_seen:
+            first_seen = rdate
+    issues: list[dict[str, str]] = []
+    if first_seen is None:
+        return issues
+    for d in sorted(window):
+        if d < first_seen:
+            continue
+        for rtype in AUDIT_DAILY_TYPES:
+            if (rtype, d) not in by_key:
+                issues.append({"kind": "missing", "type": rtype, "date": d, "detail": f"no {rtype} record"})
+        if expect_cost and d <= (today - timedelta(days=AUDIT_COST_SETTLE_DAYS)).isoformat():
+            cost = by_key.get(("daily_cost", d))
+            if not cost or not any(c.get("actual_import_cost_gbp") is not None for c in cost):
+                issues.append({"kind": "missing", "type": "daily_cost", "date": d, "detail": "no settled import cost"})
+        for rtype in AUDIT_DEDUP_TYPES:
+            recs = by_key.get((rtype, d), [])
+            times = [r.get("time") for r in recs]
+            if len(times) != len(set(times)):
+                issues.append({"kind": "duplicate", "type": rtype, "date": d, "detail": f"{len(recs)} records"})
+        actuals = (by_key.get(("day_actuals", d)) or [{}])[0]
+        kpis = (by_key.get(("day_kpis", d)) or [{}])[0]
+        solar, load = _num(actuals.get("actual_solar_kwh")), _num(actuals.get("day_load_kwh"))
+        if solar is not None and solar >= AUDIT_SOLAR_MIN_KWH:
+            if _num(kpis.get("self_sufficiency_pct")) == 0:
+                issues.append({
+                    "kind": "contradiction", "type": "day_kpis", "date": d,
+                    "detail": f"self-sufficiency 0% with {solar:g} kWh of solar",
+                })
+            if load == 0:
+                issues.append({
+                    "kind": "contradiction", "type": "day_actuals", "date": d,
+                    "detail": f"day load 0 kWh with {solar:g} kWh of solar",
+                })
+    return sorted(issues, key=lambda i: (i["date"], i["kind"], i["type"]))
+
+
+def audit_summary(issues: list[dict[str, str]]) -> dict[str, Any]:
+    """Counts and per-class date lists for the sensor and Repairs issues."""
+    classes: dict[str, list[str]] = {}
+    for issue in issues:
+        classes.setdefault(issue["kind"], []).append(f"{issue['date']} {issue['type']}")
+    return {"count": len(issues), "classes": classes}
+
+
+def redact_config(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy of a config mapping with credentials and identifiers masked, for the diagnostics download."""
+    out: dict[str, Any] = {}
+    for key, value in data.items():
+        lowered = str(key).lower()
+        if any(part in lowered for part in _AUDIT_REDACT_PARTS):
+            out[key] = "**REDACTED**"
+        elif isinstance(value, Mapping):
+            out[key] = redact_config(value)
+        else:
+            out[key] = value
+    return out
