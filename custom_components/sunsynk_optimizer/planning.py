@@ -3438,3 +3438,27 @@ def redact_config(data: Mapping[str, Any]) -> dict[str, Any]:
         else:
             out[key] = value
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Phase 47: KPI sensors                                                        #
+# --------------------------------------------------------------------------- #
+
+# sensor key → (day_kpis field, name, unit, kind); kind "money" is a daily £ total, else a measurement.
+KPI_SENSORS = (
+    ("kpi_avoidable_import", "avoidable_import_gbp", "Avoidable import today", "GBP", "money"),
+    ("kpi_export_peak", "export_peak_gbp", "Peak export income today", "GBP", "money"),
+    ("kpi_self_sufficiency", "self_sufficiency_pct", "Self-sufficiency today", "%", "measurement"),
+    ("kpi_unused_charge", "unused_charge_kwh", "Unused charge today", "kWh", "measurement"),
+    ("kpi_over_limit_import", "over_limit_import_kwh", "Over-limit import today", "kWh", "measurement"),
+)
+
+
+def kpi_sensor_values(record: dict[str, Any] | None) -> dict[str, float | None]:
+    """Latest 22:00 day_kpis record → {sensor key: value}. Missing or non-numeric is None, never 0."""
+    rec = record if isinstance(record, dict) else {}
+    out: dict[str, float | None] = {}
+    for key, field_name, _name, _unit, _kind in KPI_SENSORS:
+        value = rec.get(field_name)
+        out[key] = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return out

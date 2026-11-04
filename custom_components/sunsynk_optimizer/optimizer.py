@@ -2317,6 +2317,7 @@ class SunsynkOptimizer:
             unknown=round((causes.get("kwh") or {}).get("unknown", 0.0), 2), attributed_kwh=total,
             grid_import_kwh=(snapshots.get("22:00") or {}).get("grid_import_kwh"),
         )
+        self.coordinator.update_state(touch=False, last_day_kpis=record)
         return {"type": "day_kpis", **record}
 
     async def _async_peak_export(self, _now) -> None:

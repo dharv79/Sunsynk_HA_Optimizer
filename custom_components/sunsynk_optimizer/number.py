@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .entity import optimizer_device_info
 from .const import DOMAIN
 from .planning import bill_attributes
 
@@ -49,6 +50,7 @@ class BilledAmountEntity(CoordinatorEntity, NumberEntity):
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_billed_last_month"
+        self._attr_device_info = optimizer_device_info(entry)
         self.entity_id = "number.billed_last_month"  # the dashboard references this id
 
     @property
