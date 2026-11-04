@@ -73,4 +73,5 @@ The dashboard's "Bill check and battery health" card (Consumption column, after 
 - **Device (47).** `entity.optimizer_device_info` (identifiers = inverter serial, rule 2) is set on every platform's entities. New entities set an explicit `entity_id`; existing ones keep their registry ids.
 - **KPI sensors (47).** `sensor.kpi_*` from the latest `day_kpis` (`last_day_kpis`): daily £ are MONETARY/TOTAL with `last_reset`, the rest MEASUREMENT. Unknown, never 0.
 - **Others.** `sensor.data_health` (45), `binary_sensor.grid_outage` and `sensor.battery_runtime` (48), `sensor.pv_string_share` (49).
+- **Inverter fault (43).** `binary_sensor.inverter_fault` is on while the Sunsynk realtime event list is non-empty; attributes carry the events. Read from the 2-hour drift check and the charge-watchdog recheck.
 - **Services (46, 43).** `set_tonight_target`, `skip_tonight`, `schedule_free_event`, `cancel_free_event`, `get_plan` (response only), `probe_inverter_events` (response only, read-only). `services.yaml` + `strings.json`. Overrides apply at the next 01:55 plan; writes refuse in monitor mode and while a free event holds the slots.

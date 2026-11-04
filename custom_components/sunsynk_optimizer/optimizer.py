@@ -132,6 +132,8 @@ from .flux_helpers import (
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
     event_probe_paths,
+    new_inverter_events,
+    normalise_inverter_events,
     apply_user_override,
     next_plan_date,
     STRING_ALERT_STREAK,
@@ -1967,6 +1969,7 @@ class SunsynkOptimizer:
 
     async def async_run_charge_watchdog_recheck(self, retry: dict[str, Any]) -> None:
         """Judge the charge again after the one retry; notify if still stalled."""
+        await self.async_check_inverter_events()
         now = dt_util.now()
         plan = self._charge_watchdog_plan(now)
         if plan is None:
@@ -3912,12 +3915,43 @@ class SunsynkOptimizer:
             return []
         return grid_current_drift(expected, settings.get(GENTLE_CHARGE_SETTING))
 
+    async def async_check_inverter_events(self) -> None:
+        """Read the inverter's realtime fault list (phase 43); read-only, so also runs in monitor mode.
+
+        Unreadable reply keeps the last state (never treated as 'no faults'). New events are logged once
+        and quoted in one notification; the active list drives binary_sensor.inverter_fault."""
+        try:
+            raw = await self.coordinator.api.async_read_inverter_events(self.inverter_serial)
+        except Exception as exc:  # pragma: no cover - network
+            _LOGGER.debug("Inverter events read failed: %s", exc)
+            return
+        events = normalise_inverter_events(raw)
+        if events is None:
+            return
+        previous = self.coordinator.state.inverter_events or {}
+        fresh = new_inverter_events(events, previous.get("seen") or [])
+        seen = ((previous.get("seen") or []) + [e["key"] for e in fresh])[-100:]
+        active = [{k: e[k] for k in ("text", "code", "time", "category")} for e in events]
+        now_iso = dt_util.now().isoformat()
+        self.coordinator.update_state(
+            touch=False, inverter_events={"active": active, "seen": seen, "checked": now_iso}
+        )
+        for event in fresh:
+            await self.data_logger.async_log_inverter_event(
+                text=event["text"], code=event["code"], event_time=event["time"],
+                category=event["category"], raw=event["raw"],
+            )
+        if fresh:
+            lines = [f"• {e['text'] or e['code'] or 'unknown event'} ({e['category']})" for e in fresh[:5]]
+            await self.async_notify("🔋 Sunsynk: inverter event", "Inverter reported:\n" + "\n".join(lines))
+
     async def async_run_drift_check(self) -> None:
         """Read back what the inverter holds and alert once per drift episode.
 
         Read-only: never re-pushes. Skipped in monitor mode (nothing pushed is
         authoritative there).
         """
+        await self.async_check_inverter_events()
         if self.operation_mode == "monitor":
             return
         now = dt_util.now()

@@ -1,6 +1,6 @@
 # Phase 43 — Inverter fault and event log feed (feasibility-gated)
 
-**Status:** Shelved (no readable endpoint, 04/11/2026). **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (realtime reader, 04/11/2026). **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -50,3 +50,7 @@ All six `plant/{id}/events?...&lan=en` variants (type, sn, status) return `{"cod
 ## Probe round 3 result and decision (04/11/2026)
 
 All six round-3 variants (date range under `startTime/endTime`, `startDate/endDate`, `beginTime`, `date`, plus `sn`, `type`, `status`, `plantId`) again returned `{"code":500,"msg":"Internal Server Error"}`. Inverter routes are `No Permissions` for this token, and the only live route (`plant/{id}/events`) rejects every parameter set tried. Shelved, as phases 23 and 28 were: keep checking the Sunsynk Event log by hand. The `probe_inverter_events` service stays (read-only) so it can be re-tried if the cloud API changes; reopen only with a known-good request from the Sunsynk app's network traffic.
+
+## As built, reopened (04/11/2026)
+
+The user captured the portal's Event tab: `GET /api/v1/event/{sn}/realtime?lan=en` works with the normal token and returns `{"code":0,"data":[]}` when healthy ("The device is running well"). The `/logger` maintenance log is a different, empty feature. The shape of a live fault is unknown, so the parser is tolerant (`planning.normalise_inverter_events`: text, code, time, keyword category, raw kept; None if not a list). `SunsynkApi.async_read_inverter_events`, `optimizer.async_check_inverter_events` (run at the top of the 2-hour drift check and the charge-watchdog recheck, read-only so also in monitor mode) logs each new event once as `inverter_event` (dedup on code|text|time in `state.inverter_events["seen"]`), sends one "inverter event" notification, and drives `binary_sensor.inverter_fault`. Unreadable replies leave state untouched. Realtime shows current events only; history route is unknown. Categories are keyword guesses to be refined from the first real `inverter_event` record.
