@@ -1,6 +1,6 @@
 # Phase 65 — Move trims into the peak window when the solar left today can wait
 
-**Status:** Planned, not built. **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, merged (634ea94, PR #117), shadow. **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+`planning.trim_defer_kwh` splits a trim into the overflow to trim now and the kWh that can wait for the peak (PV to 16:00 minus load, beyond headroom; no forecast or clipped solar today defers nothing; deferrals under 0.3 kWh ignored). Every pre-16:00 trim logs a `trim_shadow` record. `trim_defer_live` (default off, also needs `peak_export_live`) trims to the smaller target or skips the push (`trim_deferred`). Solar uses the higher of raw and intraday-scaled so a surprise sunny day still trims. Not built: a backtest of the logged records.

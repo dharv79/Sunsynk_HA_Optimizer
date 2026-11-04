@@ -49,7 +49,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 39. Multi-day low-solar planning | Done, merged (1935017, PR #61), shadow | S, ~30k |
 | 40. Daytime load spike alert | Done, merged (33fb1fd, PR #63) | XS, ~20k |
 | 41. Shadow go-live scorecard | Done, merged (9eb643f, PR #93) | M, ~40k actual |
-| 42. Import cause ledger ("why did I import?") | Planned, not built | M |
+| 42. Import cause ledger ("why did I import?") | Done, merged (7a23093, PR #119), shadow; weekly digest breakdown not built | M, ~40k actual |
 | 43. Inverter fault and event log feed (feasibility-gated) | Planned, not built | S |
 | 44. CT clamp vs smart-meter reconciliation (1.0.12b31) | Done, merged (9fd7115, PR #90) | XS, ~35k actual |
 | 45. Nightly data-integrity audit, HA Repairs and a diagnostics download | Planned, not built | M |
@@ -72,10 +72,10 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 62. Run Flux 1 to 05:00 every night, capped by the target | Done, merged (9680c00, PR #96; option off) | S |
 | 63. Remove the 05:00-06:00 double count in drain and bridge | Done, merged (b9e8e85, PR #92); median switch deferred pending backtest | S, ~25k actual |
 | 64. Pick the bridge target from the forecast-error distribution (newsvendor rule) | Done, merged (976f1b4, PR #111), shadow only | M, ~45k actual |
-| 65. Move trims into the peak window when the solar left today can wait | Planned, not built | M |
+| 65. Move trims into the peak window when the solar left today can wait | Done, merged (634ea94, PR #117), shadow (`trim_defer_live` off) | M, ~35k actual |
 | 66. Re-check the peak export plan at 17:00 and 18:00 using the observed peak load | Done, merged (27b831a, PR #102; peak export live option off) | S |
 | 67. Cache config and tariff parsing on the SOC-change path | Done, merged (2eeaebf, PR #109) | S, ~40k actual |
-| 68. Replace the weekly full-charge day with 'days since the last 100%' | Planned, not built | S |
+| 68. Replace the weekly full-charge day with 'days since the last 100%' | Done, merged (643fd4c, PR #118), shadow (`full_charge_skip_live` off) | S, ~25k actual |
 | 69. Receding-horizon MPC planner (48 h, half-hourly) in shadow | Planned, not built | XL |
 | 70. Self-learned probabilistic solar forecast (own P10/P50/P90) | Planned, not built | L |
 | 71. Half-hourly household load forecaster (weather and calendar aware) | Planned, not built | L |

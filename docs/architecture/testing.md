@@ -54,6 +54,9 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_newsvendor.py` | Phase 64 newsvendor costs, quantile bounds, `quantile_correction` (min days, band, cap), `newsvendor_target`, scorecard entry |
 | `tests/test_evening_load.py` | Phase 55 learned 16:00-22:00 load (min days, bad meters, away skip, weekend split), shadow vs live reserve, clamp |
 | `tests/test_intraday_scale.py` | Phase 56 intraday PV scale (10-11 damping, clamp, min forecast, missing data) |
+| `tests/test_trim_defer.py` | Phase 65 trim overflow/defer split, no-forecast and clipped fallbacks |
+| `tests/test_full_charge_skip.py` | Phase 68 days since last 99% SOC, due/skip, 14-day cap |
+| `tests/test_import_causes.py` | Phase 42 import cause ordering, gaps, resets |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |

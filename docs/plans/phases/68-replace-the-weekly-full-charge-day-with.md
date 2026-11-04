@@ -1,6 +1,6 @@
 # Phase 68 — Replace the weekly full-charge day with 'days since the last 100%'
 
-**Status:** Planned, not built. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, merged (643fd4c, PR #118), shadow. **Size:** S. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+`planning.days_since_full` (any 02/05/16/19/22:00 snapshot >= 99% SOC) and `full_charge_due` (skip under 7 days, hard cap 14, no history = due). Every 01:55 plan logs `days_since_full`, `full_charge_due`, `full_charge_skip_would` in `import_plan`. `full_charge_skip_live` (default off) plans the full-charge day as a normal night. Runtime 99.5% hold-and-trim unchanged. Watch four weeks of `full_charge_skip_would` before enabling.

@@ -1,6 +1,6 @@
 # Phase 42 — Import cause ledger ("why did I import?")
 
-**Status:** Planned, not built. **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done, merged (7a23093, PR #119), shadow. **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Checked planning.py:660 and :1516. Nothing assigns import kWh to a cause. The ev
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+`planning.import_cause_step` assigns import between samples to free_event / grid_charge / load_over_limit / battery_floor / slot_hold / unknown (gaps, meter resets, unknown readings not attributed). Tallied alongside the over-limit tracker (transient, lost on restart). 22:00 `import_causes` record (deduped) and `sensor.import_causes_today`. Not built: the weekly digest breakdown.
