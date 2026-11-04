@@ -3644,3 +3644,50 @@ EVENT_PROBE_ROUTES = (
 def event_probe_paths(inverter_sn: str, plant_id: str, today: str = "2026-01-01", start: str = "2025-12-01") -> list[str]:
     """Candidate read-only GET routes for the cloud's alarm/event list, with ids and dates filled in."""
     return [r.format(sn=inverter_sn, plant_id=plant_id, today=today, start=start) for r in EVENT_PROBE_ROUTES]
+
+
+_EVENT_TEXT_KEYS = ("eventName", "name", "content", "message", "desc", "description", "alarmName", "title")
+_EVENT_CODE_KEYS = ("code", "eventCode", "alarmCode", "errorCode", "id")
+_EVENT_TIME_KEYS = ("startTime", "time", "occurTime", "createTime", "happenTime")
+_EVENT_CATEGORY_WORDS = (
+    ("battery", ("batt", "bms", "cell", "soc")),
+    ("grid", ("grid", "mains", "ac ", "utility", "fac", "vac")),
+    ("charge", ("charg", "overload", "over temp", "temperature", "fan")),
+)
+
+
+def _first_text(item: dict, keys) -> str | None:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def normalise_inverter_events(raw) -> list[dict] | None:
+    """Tolerant parse of the Sunsynk realtime event list (phase 43). The healthy reply is an empty list.
+
+    The shape of a live fault is not yet known, so each item is reduced to text/code/time/category with
+    the raw item kept; None when the reply is not a list (never 0 or []: unknown is not 'no faults')."""
+    if not isinstance(raw, list):
+        return None
+    events: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            item = {"content": str(item)}
+        text = _first_text(item, _EVENT_TEXT_KEYS)
+        code = _first_text(item, _EVENT_CODE_KEYS)
+        when = _first_text(item, _EVENT_TIME_KEYS)
+        lowered = (text or "").lower()
+        category = next((c for c, words in _EVENT_CATEGORY_WORDS if any(w in lowered for w in words)), "other")
+        events.append(
+            {"key": f"{code}|{text}|{when}", "text": text, "code": code, "time": when, "category": category, "raw": item}
+        )
+    return events
+
+
+def new_inverter_events(events: list[dict], seen: list[str]) -> list[dict]:
+    """Events whose key has not been reported before (dedup across checks)."""
+    known = set(seen or [])
+    return [e for e in events if e["key"] not in known]
+

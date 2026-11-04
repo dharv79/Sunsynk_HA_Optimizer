@@ -168,6 +168,14 @@ class SunsynkApiClient:
         products = body.get("fluxProducts") if isinstance(body, dict) else None
         return products if isinstance(products, list) else None
 
+    async def async_read_inverter_events(self, inverter_sn: str) -> list[Any] | None:
+        """Read the inverter's current (realtime) fault/event list (phase 43); [] when healthy.
+
+        Captured from the Sunsynk portal's Event tab (04/11/2026). None when the reply has no list."""
+        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/event/{inverter_sn}/realtime?lan=en")
+        body = data.get("data") if isinstance(data, dict) else None
+        return body if isinstance(body, list) else None
+
     async def async_read_settings(self, inverter_sn: str) -> dict[str, Any]:
         """Read the inverter's settings (keyed by the inverter serial, not plant_id)."""
         data = await self._authorized_json("GET", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/read")

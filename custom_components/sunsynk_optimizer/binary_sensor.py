@@ -38,6 +38,10 @@ async def async_setup_entry(
                 device_class=BinarySensorDeviceClass.PROBLEM, entity_id="binary_sensor.grid_outage",
             ),
             SunsynkOptimizerBinarySensor(
+                coordinator, entry, "inverter_fault", "Inverter fault",
+                device_class=BinarySensorDeviceClass.PROBLEM, entity_id="binary_sensor.inverter_fault",
+            ),
+            SunsynkOptimizerBinarySensor(
                 coordinator, entry, "monitor_only", "Monitor only mode",
                 icon="mdi:eye-outline",
             ),
@@ -77,12 +81,17 @@ class SunsynkOptimizerBinarySensor(CoordinatorEntity, BinarySensorEntity):
             return bool(state.evening_export_disabled)
         if self._key == "grid_outage":
             return bool((state.grid_outage or {}).get("active"))
+        if self._key == "inverter_fault":
+            return bool((state.inverter_events or {}).get("active"))
         if self._key == "monitor_only":
             return state.operation_mode == "monitor"
         return False
 
     @property
     def extra_state_attributes(self) -> dict:
+        if self._key == "inverter_fault":
+            events = self.coordinator.state.inverter_events or {}
+            return {"events": events.get("active") or [], "checked": events.get("checked")}
         if self._key != "grid_outage":
             return {}
         outage = self.coordinator.state.grid_outage or {}
