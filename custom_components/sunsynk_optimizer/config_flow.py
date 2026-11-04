@@ -49,6 +49,7 @@ from .const import (
     CONF_MEASURED_RATE_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
+    CONF_TRIM_DEFER_LIVE,
     CONF_BASELOAD_ALERT,
     DEFAULT_BASELOAD_ALERT,
     CONF_BATTERY_VOLTAGE,
@@ -97,6 +98,7 @@ from .const import (
     DEFAULT_MEASURED_RATE_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
+    DEFAULT_TRIM_DEFER_LIVE,
     DEFAULT_FULL_CHARGE_DAY,
     DEFAULT_INVEST,
     DEFAULT_NOTIFY_SERVICE,
@@ -205,6 +207,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Required(
                 CONF_PEAK_COVER_LIVE,
                 default=values.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE),
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_TRIM_DEFER_LIVE,
+                default=values.get(CONF_TRIM_DEFER_LIVE, DEFAULT_TRIM_DEFER_LIVE),
             ): selector.BooleanSelector(),
             vol.Required(
                 CONF_BASELOAD_ALERT,

@@ -289,6 +289,10 @@ class DataLogger:
         """Log the 16:00 peak surplus export decision (phase 17): one per day."""
         await self._async_append(_record("peak_export", **fields))
 
+    async def async_log_trim_shadow(self, **fields: Any) -> None:
+        """Log what a deferred trim would have done (phase 65): one per trim, not deduped."""
+        await self._async_append(_record("trim_shadow", **fields))
+
     async def async_log_peak_export_recheck(self, **fields: Any) -> None:
         """Log a 17:00/18:00 peak export re-check (phase 66): not deduped, two a day."""
         await self._async_append(_record("peak_export_recheck", **fields))

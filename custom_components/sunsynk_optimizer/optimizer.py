@@ -61,6 +61,7 @@ from .const import (
     CONF_MEASURED_RATE_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
+    CONF_TRIM_DEFER_LIVE,
     CONF_BASELOAD_ALERT,
     DEFAULT_BASELOAD_ALERT,
     CONF_BATTERY_VOLTAGE,
@@ -103,6 +104,7 @@ from .const import (
     DEFAULT_MEASURED_RATE_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
+    DEFAULT_TRIM_DEFER_LIVE,
     DEFAULT_HOURLY_FORECAST_ATTRIBUTE,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SOLAR_START_OFFSET_HOURS,
@@ -260,6 +262,7 @@ from .planning import (
     sum_field,
     synthetic_hourly_profile,
     trailing_week,
+    trim_defer_kwh,
     trim_target_soc,
     DEFAULT_FLUX2_SLOT,
     EXPORT_PAUSE_FLUX2_SLOT,
@@ -1493,6 +1496,9 @@ class SunsynkOptimizer:
             and not self._peak_export_holds_flux2(now_local) and self._cooldown_ok()
         ):
             self._mark_trim()
+            trim_target = await self._async_trim_defer(soc, trim_target, now_local, cfg, base_action)
+            if trim_target is None:
+                return
             api_ok = await self._async_push_flux2_action(
                 "trim_to_82",
                 {
@@ -1522,6 +1528,50 @@ class SunsynkOptimizer:
             evening_export_disabled=False,
             operation_mode=self.operation_mode,
         )
+
+    async def _async_trim_defer(self, soc, trim_target, now_local, cfg, base_action) -> int | None:
+        """Phase 65: size the trim to the solar that would overflow; the rest waits for the peak.
+
+        Always logs a trim_shadow record before 16:00. Live only with trim_defer_live and peak_export_live
+        (the deferred kWh is sold by the peak export). Returns the target to push, or None to skip the push.
+        """
+        minutes = now_local.hour * 60 + now_local.minute
+        if minutes >= PEAK_COVER_PEAK_START_MINUTES:
+            return trim_target
+        hour_now = minutes / 60.0
+        hourly = self._hourly_or_synthetic_forecast(cfg, now_local)
+        raw = solar_until_kwh(hourly, hour_now)
+        scale = intraday_forecast_scale(
+            self._essential_state(self.day_pv_energy_entity), solar_until_kwh(hourly, 0.0, hour_now), hour_now
+        )
+        # Overflow risk: use the higher of raw and scaled solar so a surprise sunny day still trims.
+        pv = raw if raw is None or scale is None else max(raw, scaled_solar_kwh(raw, scale))
+        clipped = (self._clipped.get("date") == now_local.date().isoformat()) and bool(self._clipped.get("periods"))
+        plan = trim_defer_kwh(
+            soc, trim_target, self._capacity_kwh(cfg), pv, self._plan_load_kw(cfg),
+            (PEAK_COVER_PEAK_START_MINUTES - minutes) / 60.0, clipped,
+        )
+        prices, _src = self._tariff_prices(now_local.date())
+        live = (
+            bool(cfg.get(CONF_TRIM_DEFER_LIVE, DEFAULT_TRIM_DEFER_LIVE))
+            and bool(cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE))
+            and self.operation_mode != "monitor"
+        )
+        await self.data_logger.async_log_trim_shadow(
+            date=now_local.date().isoformat(), time=now_local.strftime("%H:%M"), soc=soc, trim_target=trim_target,
+            remaining_pv_kwh=pv, intraday_scale=scale, clipped_today=clipped,
+            export_peak_pence=prices["export_peak"], live=live, **plan,
+        )
+        if not live or plan["defer_kwh"] <= 0:
+            return trim_target
+        if plan["needed_soc"] >= soc:
+            self.coordinator.update_state(
+                last_flux2_action={"action": "trim_deferred", **base_action, "notified": False,
+                                   "reason": f"defer_{plan['defer_kwh']}kWh_to_peak", "api_ok": True},
+                touch=False,
+            )
+            return None
+        return plan["needed_soc"]
 
     async def _async_push_flux2_action(
         self,
