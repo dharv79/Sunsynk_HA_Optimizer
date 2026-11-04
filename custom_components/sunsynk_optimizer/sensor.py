@@ -100,6 +100,10 @@ async def async_setup_entry(
                 coordinator, entry, "battery_runtime", "Battery runtime left", entity_id="sensor.battery_runtime"
             ),
             SunsynkOptimizerSensor(
+                coordinator, entry, "pv_strings", "PV string 1 share",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.pv_string_share",
+            ),
+            SunsynkOptimizerSensor(
                 coordinator, entry, "marginal_cost", "Cost of 1 kWh now", entity_id="sensor.cost_of_1_kwh_now"
             ),
         ]
@@ -166,6 +170,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return "p/kWh"
         if self._sensor_key == "battery_runtime":
             return "h"
+        if self._sensor_key == "pv_strings":
+            return "%"
         if self._sensor_key == "battery_capacity_estimate":
             return "kWh"
         return "kWh" if self._sensor_key in ("spare_solar", "import_causes") else None
@@ -212,6 +218,10 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "battery_runtime":
             return _as_dict(state.battery_runtime).get("hours")
+
+        if self._sensor_key == "pv_strings":
+            share = _as_dict(state.pv_strings).get("share")
+            return None if share is None else round(share * 100, 1)
 
         if self._sensor_key == "battery_capacity_estimate":
             return _as_dict(state.battery_capacity_estimate).get("estimate_kwh")
@@ -299,6 +309,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return _as_dict(state.battery_capacity_estimate)
         if self._sensor_key == "shadow_scorecard":
             return _as_dict(state.shadow_scorecard)
+        if self._sensor_key == "pv_strings":
+            return {k: v for k, v in _as_dict(state.pv_strings).items() if k != "share"}
         if self._sensor_key == "battery_runtime":
             return {k: v for k, v in _as_dict(state.battery_runtime).items() if k != "hours"}
         if self._sensor_key == "data_health":

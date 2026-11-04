@@ -296,6 +296,10 @@ class DataLogger:
         """Log a closed grid outage (phase 48): start, end, SOC low point, battery kWh served. Not deduped."""
         await self._async_append(_record("outage", **fields))
 
+    async def async_log_pv_strings(self, **fields: Any) -> None:
+        """Log the day's per-string PV energy and MPPT0 share (phase 49): one per day."""
+        await self._async_append(_record("pv_strings", **fields))
+
     async def async_log_peak_export(self, **fields: Any) -> None:
         """Log the 16:00 peak surplus export decision (phase 17): one per day."""
         await self._async_append(_record("peak_export", **fields))
@@ -881,7 +885,7 @@ class DataLogger:
     _DEDUP_TYPES = (
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog", "charge_outcome",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load", "import_causes",
-        "half_hourly_import", "half_hourly_export", "capacity_estimate",
+        "half_hourly_import", "half_hourly_export", "capacity_estimate", "pv_strings",
         "meter_reconciliation_import", "meter_reconciliation_export",
     )
 
