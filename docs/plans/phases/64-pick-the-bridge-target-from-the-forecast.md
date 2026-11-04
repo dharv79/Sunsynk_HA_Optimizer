@@ -1,6 +1,6 @@
 # Phase 64 — Pick the bridge target from the forecast-error distribution (newsvendor rule)
 
-**Status:** Built in shadow (PR pending). **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, merged (976f1b4, PR #111), shadow only. A live switch waits for the `newsvendor_target` scorecard to say "ready". **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
