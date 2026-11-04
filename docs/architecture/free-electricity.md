@@ -109,3 +109,11 @@ Records already logged (18/10) stay as written, because they dedup at write. The
 **Design (1.0.12b23).** `planning.FREE_EVENT_ATTRIBUTE_KEYS` lists the attributes the dashboard reads. `free_event_attributes` always includes them, as None when unknown (and with no event at all). The other estimate keys (`sell_start`, `sell_end`, `skip_sell`) stay hidden until a sell runs.
 
 **Verification.** `tests/test_dashboard.py::test_free_event_card_reads_only_always_present_attributes` checks that every `sensor.free_event` attribute on the dashboard is in the always-present list; `test_free_event_sell_status_and_attributes` covers the None defaults.
+
+## DST-safe timers, watch guard and sold-energy split (04/11/2026)
+
+**Root cause.** `_arm_free_event_timers` subtracted two datetimes that share the HA local tzinfo. Python treats that as wall-clock arithmetic, so across a clock change every delay was 1 h out (on 25 Oct selling began at 08:50, before `watch_from` 09:00). `free_event_sell_decision` had no time guard, and the 10.7 kWh sold against 6.0 kWh expected could not be split into battery and solar.
+
+**Design.** `planning.elapsed_seconds(later, earlier)` compares aware datetimes in UTC; `shift_hours` moves a datetime by real hours; `free_event_watch_from` uses it. The optimizer uses `elapsed_seconds` for the three free-event timers, the gentle-charge restore, the SOC trend samples and the hours left to the free start. `free_event_in_watch(now, free_start, watch_from)` is checked first in `_async_do_free_event_watch`, so no sell can start before `watch_from` or after the free start. `free_event_result` gains `sold_from_battery_kwh` ((SOC at sell start − SOC at free start) × capacity, never below 0) and `sold_from_solar_kwh` (sold − battery part, never below 0); each is None when SOC, capacity or the meters are missing. Slot-holding rules (do-not-break 7) are untouched.
+
+**Verification.** `tests/test_free_event_dst.py` (25 Oct and 29 Mar clock changes, the guard, the split). Not live-tested: the next real DST change is 28 Mar 2027.

@@ -19,7 +19,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 # Below this (pessimistic) daily forecast the plan switches to max import:
@@ -1633,9 +1633,31 @@ def plan_free_event(
     )
 
 
+def elapsed_seconds(later: datetime, earlier: datetime) -> float:
+    """Real seconds from ``earlier`` to ``later``. Aware datetimes are compared in UTC: Python
+    subtracts two datetimes that share a tzinfo as wall-clock time, which is 1 h out across a
+    clock change. Naive values fall back to plain subtraction."""
+    if later.tzinfo is None or earlier.tzinfo is None:
+        return (later - earlier).total_seconds()
+    return (later.astimezone(timezone.utc) - earlier.astimezone(timezone.utc)).total_seconds()
+
+
+def shift_hours(moment: datetime, hours: float) -> datetime:
+    """``moment`` moved by ``hours`` of real time (negative = earlier), DST-safe, same tzinfo."""
+    if moment.tzinfo is None:
+        return moment + timedelta(hours=hours)
+    return (moment.astimezone(timezone.utc) + timedelta(hours=hours)).astimezone(moment.tzinfo)
+
+
 def free_event_watch_from(free_start: datetime) -> datetime:
     """When the live sell-start watch begins (the longest sell window before the free start)."""
-    return free_start - timedelta(hours=FREE_EVENT_MAX_SELL_HOURS)
+    return shift_hours(free_start, -FREE_EVENT_MAX_SELL_HOURS)
+
+
+def free_event_in_watch(now: datetime, free_start: datetime, watch_from: datetime | None = None) -> bool:
+    """True only from ``watch_from`` until the free start; no sell may begin outside it."""
+    start = watch_from or free_event_watch_from(free_start)
+    return elapsed_seconds(now, start) >= 0 and elapsed_seconds(free_start, now) > 0
 
 
 # Scheduling-time sell estimates; only meaningful once the live watch has started a sell.
@@ -1686,11 +1708,11 @@ def free_event_attributes(event: dict) -> dict:
 def soc_trend_kw(samples: list[tuple[datetime, float]], capacity_kwh: float, now: datetime) -> float | None:
     """Battery charge rate (kW, negative = discharging) from SOC samples in the last
     FREE_EVENT_TREND_MINUTES; None until they span FREE_EVENT_TREND_MIN_MINUTES."""
-    recent = [(ts, soc) for ts, soc in samples if (now - ts).total_seconds() <= FREE_EVENT_TREND_MINUTES * 60]
+    recent = [(ts, soc) for ts, soc in samples if elapsed_seconds(now, ts) <= FREE_EVENT_TREND_MINUTES * 60]
     if len(recent) < 2:
         return None
     (t0, s0), (t1, s1) = recent[0], recent[-1]
-    hours = (t1 - t0).total_seconds() / 3600
+    hours = elapsed_seconds(t1, t0) / 3600
     if hours * 60 < FREE_EVENT_TREND_MIN_MINUTES or capacity_kwh <= 0:
         return None
     return round((s1 - s0) / 100 * capacity_kwh / hours, 2)
@@ -2273,20 +2295,33 @@ def _gbp(kwh: float | None, pence: float | None) -> float | None:
 
 
 def free_event_result(event: dict[str, Any], meters_end: dict[str, Any] | None, soc_end: float | None,
-                      import_pence: float | None) -> dict[str, Any]:
+                      import_pence: float | None, capacity_kwh: float | None = None) -> dict[str, Any]:
     """Measured outcome of a finished free-electricity event (debug report).
 
     `sold_kwh` is grid export from the sell start to the free start; `free_import_kwh`
     is grid import during the free period, valued at what it would normally have
     cost (`import_pence`). No sell ran → `sold_kwh` 0.0. Missing inputs → None.
+    `sold_from_battery_kwh` is the SOC fall over the sell (needs `capacity_kwh`);
+    `sold_from_solar_kwh` is the rest of `sold_kwh` (never below 0).
     """
     free_import = meter_delta(event.get("meters_at_free_start"), meters_end, "grid_import")
     sold = (
         meter_delta(event.get("meters_at_sell_start"), event.get("meters_at_free_start"), "grid_export")
         if free_event_sold(event) else 0.0
     )
+    from_battery = from_solar = None
+    if free_event_sold(event):
+        s0, s1 = event.get("soc_at_sell_start"), event.get("soc_at_free_start")
+        if s0 is not None and s1 is not None and capacity_kwh:
+            from_battery = round(max(0.0, (s0 - s1) / 100 * capacity_kwh), 2)
+            if sold is not None:
+                from_solar = round(max(0.0, sold - from_battery), 2)
+    else:
+        from_battery = from_solar = 0.0
     return {
         "sold_kwh": sold,
+        "sold_from_battery_kwh": from_battery,
+        "sold_from_solar_kwh": from_solar,
         "free_import_kwh": free_import,
         "free_import_value_gbp": _gbp(free_import, import_pence),
         "soc_at_end": soc_end,
