@@ -637,7 +637,7 @@ def test_free_event_result_and_report(planning):
         "free_start": "2026-10-20T12:00:00+01:00",
     }
     r = planning.free_event_result(event, {"grid_import": 8.2}, 100.0, 27.77)
-    assert r == {"sold_kwh": 2.5, "free_import_kwh": 5.0, "free_import_value_gbp": 1.39, "soc_at_end": 100.0}
+    assert r == {"sold_kwh": 2.5, "sold_from_battery_kwh": None, "sold_from_solar_kwh": None, "free_import_kwh": 5.0, "free_import_value_gbp": 1.39, "soc_at_end": 100.0}
     line = planning.event_report("free_event", "done", {**event, **r})
     assert line["type"] == "free_event" and line["phase"] == "done" and line["sold_kwh"] == 2.5
     assert line["sell_start"] == event["sell_start"]

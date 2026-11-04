@@ -1,6 +1,6 @@
 # Phase 51 — Free events: DST-safe timers, a watch_from guard and sold-energy split
 
-**Status:** Planned, not built. **Size:** S. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (04/11/2026), merged (see plan index). Design and verification: `docs/architecture/free-electricity.md`. **Size:** S. **Category:** improvement. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 

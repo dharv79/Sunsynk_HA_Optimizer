@@ -231,6 +231,8 @@ from .planning import (
     plan_free_event,
     FREE_EVENT_WATCH_MINUTES,
     free_event_sell_decision,
+    elapsed_seconds,
+    free_event_in_watch,
     free_event_watch_from,
     soc_trend_kw,
     free_event_kpi_credit,
@@ -3063,15 +3065,15 @@ class SunsynkOptimizer:
             # The sell start is decided live from the SOC and its trend (_async_do_free_event_watch).
             watch_from = free_event_watch_from(free_start)
             self._free_event_unsubs.append(
-                async_call_later(self.hass, max(0, (watch_from - now).total_seconds()), self._async_free_event_watch_start)
+                async_call_later(self.hass, max(0, elapsed_seconds(watch_from, now)), self._async_free_event_watch_start)
             )
         if phase in ("scheduled", "selling"):
             self._free_event_unsubs.append(
-                async_call_later(self.hass, max(0, (free_start - now).total_seconds()), self._async_free_event_free_start)
+                async_call_later(self.hass, max(0, elapsed_seconds(free_start, now)), self._async_free_event_free_start)
             )
         if phase in ("scheduled", "selling", "charging"):
             self._free_event_unsubs.append(
-                async_call_later(self.hass, max(0, (free_end - now).total_seconds()), self._async_free_event_free_end)
+                async_call_later(self.hass, max(0, elapsed_seconds(free_end, now)), self._async_free_event_free_end)
             )
 
     async def async_try_schedule_manual_free_event(self, changed: str = "end") -> None:
@@ -3169,13 +3171,16 @@ class SunsynkOptimizer:
             return
         now = dt_util.now()
         free_start = dt_util.as_local(dt_util.parse_datetime(event["free_start"]))
+        watch_from = dt_util.parse_datetime(event.get("watch_from") or "")
+        if not free_event_in_watch(now, free_start, dt_util.as_local(watch_from) if watch_from else None):
+            return
         capacity = self._capacity_kwh()
         self._free_event_soc_samples = [
-            *[s for s in self._free_event_soc_samples if (now - s[0]).total_seconds() <= 3600], (now, soc)
+            *[s for s in self._free_event_soc_samples if elapsed_seconds(now, s[0]) <= 3600], (now, soc)
         ]
         decision = free_event_sell_decision(
             soc, event["sell_floor_soc"], capacity, soc_trend_kw(self._free_event_soc_samples, capacity, now),
-            event["export_rate_kw"], max(0.0, (free_start - now).total_seconds() / 3600),
+            event["export_rate_kw"], max(0.0, elapsed_seconds(free_start, now) / 3600),
         )
         if not decision["sell_now"]:
             return
@@ -3250,7 +3255,8 @@ class SunsynkOptimizer:
             self.cfg.get(CONF_CHARGES, []), free_start.strftime("%H:%M"), free_end.strftime("%H:%M"), "import"
         )
         event.update(free_event_result(
-            event, self._read_daily_meters(), self._essential_state(self.battery_soc_entity), normal_pence
+            event, self._read_daily_meters(), self._essential_state(self.battery_soc_entity), normal_pence,
+            self._capacity_kwh(),
         ))
         event["phase"] = "done"
         self._clear_free_event_timers()
@@ -3389,7 +3395,7 @@ class SunsynkOptimizer:
         if self._gentle_restore_unsub:
             self._gentle_restore_unsub()
         restore_at = dt_util.as_local(dt_util.parse_datetime(self.coordinator.state.gentle_charge["restore_at"]))
-        delay = max(0, (restore_at - dt_util.now()).total_seconds())
+        delay = max(0, elapsed_seconds(restore_at, dt_util.now()))
         self._gentle_restore_unsub = async_call_later(self.hass, delay, self._async_gentle_restore)
 
     async def _async_gentle_restore(self, _now) -> None:
