@@ -20,3 +20,4 @@ schedule_free_event:
         datetime:
 cancel_free_event:
 get_plan:
+probe_inverter_events:

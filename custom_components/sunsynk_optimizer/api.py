@@ -181,3 +181,22 @@ class SunsynkApiClient:
         changed key altered — the portal posts the whole form, so a partial
         body risks blanking the fields it leaves out."""
         return await self._authorized_json("POST", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/set", settings)
+
+    async def async_probe_events(self, paths: list[str]) -> list[dict[str, Any]]:
+        """Phase 43 feasibility probe: read-only GETs of candidate alarm/event routes.
+
+        Returns one {path, status, body} per route (body truncated); never raises, so the
+        caller can show which routes exist and what shape they return."""
+        await self._ensure_login()
+        results: list[dict[str, Any]] = []
+        for path in paths:
+            try:
+                async with self._session.get(
+                    f"{BASE_API}{path}",
+                    headers={**_JSON_HEADERS, "Authorization": f"Bearer {self._token}"},
+                    timeout=_TIMEOUT,
+                ) as response:
+                    results.append({"path": path, "status": response.status, "body": (await response.text())[:600]})
+            except Exception as exc:  # noqa: BLE001 - a probe reports, it does not fail
+                results.append({"path": path, "status": None, "body": f"{type(exc).__name__}: {exc}"[:200]})
+        return results
