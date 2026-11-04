@@ -1244,6 +1244,66 @@ def evening_reserve_soc(
     return min(100, math.ceil(floor_soc + load_kw * hours / battery_capacity_kwh * 100))
 
 
+# Phase 55: evening load learned from the 16:00 -> 22:00 meter snapshots.
+EVENING_LOAD_HOURS = 6.0
+EVENING_LOAD_WINDOW_DAYS = 28
+EVENING_LOAD_MIN_DAYS = 7
+
+
+def learned_evening_load_kw(
+    snapshot_days: dict[str, dict[str, dict[str, Any]]],
+    today: date,
+    weekend: bool | None = None,
+    skip_dates: set[str] | frozenset[str] = frozenset(),
+    window_days: int = EVENING_LOAD_WINDOW_DAYS,
+    min_days: int = EVENING_LOAD_MIN_DAYS,
+) -> tuple[float | None, int]:
+    """(median 16:00-22:00 kW, days used), or (None, n) below ``min_days``.
+
+    Needs both the 16:00 and 22:00 load snapshots (a missing or backwards meter
+    skips the day, never counts as 0). ``skip_dates`` drops away days. With
+    ``weekend`` set, uses matching days when there are ``min_days`` of them.
+    """
+    rates: list[tuple[float, bool]] = []
+    for day_str, snapshots in snapshot_days.items():
+        if day_str in skip_dates:
+            continue
+        delta = _snap_delta(snapshots, "16:00", "22:00", "load_kwh")
+        if not delta or delta <= 0:
+            continue
+        try:
+            day = date.fromisoformat(day_str)
+        except (TypeError, ValueError):
+            continue
+        if not 0 < (today - day).days <= window_days:
+            continue
+        rates.append((delta / EVENING_LOAD_HOURS, day.weekday() >= 5))
+    if weekend is not None:
+        matching = [r for r in rates if r[1] == weekend]
+        if len(matching) >= min_days:
+            rates = matching
+    if len(rates) < min_days:
+        return None, len(rates)
+    return round(_median([r for r, _ in rates]), 3), len(rates)
+
+
+def evening_reserve_choice(
+    plan_load_kw: float, learned_kw: float | None, battery_capacity_kwh: float,
+    live: bool, hours: float = EVENING_RESERVE_HOURS,
+) -> tuple[int, int | None]:
+    """(reserve in force, learned-load reserve or None).
+
+    The learned load is clamped to 0.5x-2x the plan rate like phase 12. The
+    learned reserve is only in force when ``live``; otherwise it is logged.
+    """
+    base = evening_reserve_soc(plan_load_kw, battery_capacity_kwh, hours)
+    if learned_kw is None:
+        return base, None
+    load, _src = resolve_load_kw(plan_load_kw, learned_kw)
+    learned = evening_reserve_soc(load, battery_capacity_kwh, hours)
+    return (learned if live else base), learned
+
+
 TRIM_FROM_MINUTES = 5 * 60  # end of the cheap import window
 
 

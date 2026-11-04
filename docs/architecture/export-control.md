@@ -227,3 +227,9 @@ Phase 31. `_async_post_with_status` stores the pushed `fluxProducts` in `state.l
 `planning.flux_drift` compares start/end as minutes and targetSoc as a number. It skips any field missing or unparseable on either side. `grid_current_drift` uses a 1 A tolerance. Each new drift signature (stored in `state.inverter_drift`) sends a notification, "⚠️ Sunsynk: inverter settings differ from plan", and logs an `inverter_drift` record. A repeat of the same drift is silent, and a clean read clears the episode. Nothing is re-pushed. Tests: `test_flux_drift_*`, `test_expected_grid_current`, `test_grid_current_drift`.
 
 **Live check needed:** confirm the plant income GET returns `data.fluxProducts`. If the log shows "Plant income read returned no fluxProducts", the Flux half goes On hold.
+
+## Evening reserve from the learned evening load, shadow (04/11/2026, phase 55)
+
+`evening_reserve_soc` used the overnight plan rate, but the 16:00-22:00 load is higher in winter. `planning.learned_evening_load_kw` takes the median of (22:00 - 16:00 `load_kwh`) / 6 h over 28 days from the meter snapshots, needing 7 home days (a missing or backwards meter skips the day, away days are skipped, weekday/weekend split when 7 matching days exist). The 01:55 plan refreshes it (`_refresh_evening_load`).
+
+`planning.evening_reserve_choice` clamps it 0.5x-2x the plan rate (like phase 12) and returns (reserve in force, learned reserve). The learned reserve only drives trims, peak export and the peak-cover floor when `evening_load_live` is on (default off). Either way `evening_load_kw_learned` and `evening_reserve_soc_learned` are logged on the 22:00 `day_kpis` record, and `evening_reserve_soc_learned` on the trim action. Compare against `grid_import_evening_kwh` before going live. Unpersisted until the next 01:55 plan after a restart. Tests: `tests/test_evening_load.py`.
