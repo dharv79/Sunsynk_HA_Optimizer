@@ -292,6 +292,10 @@ class DataLogger:
         """Log the day's grid import by cause (phase 42): one per day."""
         await self._async_append(_record("import_causes", **fields))
 
+    async def async_log_outage(self, **fields: Any) -> None:
+        """Log a closed grid outage (phase 48): start, end, SOC low point, battery kWh served. Not deduped."""
+        await self._async_append(_record("outage", **fields))
+
     async def async_log_peak_export(self, **fields: Any) -> None:
         """Log the 16:00 peak surplus export decision (phase 17): one per day."""
         await self._async_append(_record("peak_export", **fields))

@@ -97,6 +97,9 @@ async def async_setup_entry(
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.data_health",
             ),
             SunsynkOptimizerSensor(
+                coordinator, entry, "battery_runtime", "Battery runtime left", entity_id="sensor.battery_runtime"
+            ),
+            SunsynkOptimizerSensor(
                 coordinator, entry, "marginal_cost", "Cost of 1 kWh now", entity_id="sensor.cost_of_1_kwh_now"
             ),
         ]
@@ -161,6 +164,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
     def native_unit_of_measurement(self) -> str | None:
         if self._sensor_key == "marginal_cost":
             return "p/kWh"
+        if self._sensor_key == "battery_runtime":
+            return "h"
         if self._sensor_key == "battery_capacity_estimate":
             return "kWh"
         return "kWh" if self._sensor_key in ("spare_solar", "import_causes") else None
@@ -204,6 +209,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "data_health":
             return _as_dict(state.data_health).get("count")
+
+        if self._sensor_key == "battery_runtime":
+            return _as_dict(state.battery_runtime).get("hours")
 
         if self._sensor_key == "battery_capacity_estimate":
             return _as_dict(state.battery_capacity_estimate).get("estimate_kwh")
@@ -291,6 +299,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return _as_dict(state.battery_capacity_estimate)
         if self._sensor_key == "shadow_scorecard":
             return _as_dict(state.shadow_scorecard)
+        if self._sensor_key == "battery_runtime":
+            return {k: v for k, v in _as_dict(state.battery_runtime).items() if k != "hours"}
         if self._sensor_key == "data_health":
             return _as_dict(_as_dict(state.data_health).get("classes"))
         if self._sensor_key == "import_causes":

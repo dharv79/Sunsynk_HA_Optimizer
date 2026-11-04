@@ -117,6 +117,10 @@ class OptimizerState:
     data_health: dict[str, Any] = field(default_factory=dict)
     # Latest 22:00 day_kpis record (phase 47), the source of the KPI statistics sensors.
     last_day_kpis: dict[str, Any] = field(default_factory=dict)
+    # Grid outage (phase 48): {active, start, soc_start, soc_low, plan_skipped} or {active: False, last}.
+    grid_outage: dict[str, Any] = field(default_factory=dict)
+    # Battery runtime left at the live load (phase 48): {hours, soc, load_kw}.
+    battery_runtime: dict[str, Any] = field(default_factory=dict)
     # Battery capacity tracking (phase 34): date, estimate_kwh, samples,
     # configured_kwh, pct_of_configured. Shadow: never changes battery_capacity.
     battery_capacity_estimate: dict[str, Any] = field(default_factory=dict)

@@ -3462,3 +3462,60 @@ def kpi_sensor_values(record: dict[str, Any] | None) -> dict[str, float | None]:
         value = rec.get(field_name)
         out[key] = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Phase 48: grid outage detection                                              #
+# --------------------------------------------------------------------------- #
+
+OUTAGE_MIN_LOAD_KW = 0.05  # below this the runtime estimate is meaningless (battery idle)
+
+
+def grid_online(value: Any) -> bool | None:
+    """SolarSynkV3 `grid_status` → True (grid present), False (outage) or None (unknown).
+
+    The exact format needs a live sample, so this is deliberately tolerant: words and 0/1.
+    Anything unrecognised or unavailable is None, which is never treated as an outage.
+    """
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in ("", "unknown", "unavailable", "none"):
+        return None
+    if text in ("0", "false", "off", "no") or any(w in text for w in ("disconnect", "offline", "off-grid", "off grid", "outage", "lost", "fail")):
+        return False
+    if text in ("1", "true", "on", "yes", "ok") or any(w in text for w in ("connect", "online", "normal", "present")):
+        return True
+    return None
+
+
+def outage_runtime_hours(soc: float | None, shutdown_soc: float, capacity_kwh: float, load_kw: float | None) -> float | None:
+    """Hours the battery can carry `load_kw` down to `shutdown_soc`; None when an input is missing or the load is ~0."""
+    if soc is None or load_kw is None or capacity_kwh <= 0 or load_kw < OUTAGE_MIN_LOAD_KW:
+        return None
+    return round(max(0.0, soc - shutdown_soc) / 100 * capacity_kwh / load_kw, 1)
+
+
+def outage_track(outage: dict[str, Any], soc: float | None) -> dict[str, Any]:
+    """Active outage dict with the SOC low point updated (unchanged when SOC is unknown)."""
+    if soc is None:
+        return outage
+    low = outage.get("soc_low")
+    return {**outage, "soc_low": soc if low is None else min(low, soc)}
+
+
+def outage_record(outage: dict[str, Any], end_iso: str, soc_end: float | None, capacity_kwh: float) -> dict[str, Any]:
+    """Closed-outage log fields. kWh served = start SOC less the low point, as battery energy; None if unknown."""
+    start_soc, low = outage.get("soc_start"), outage.get("soc_low")
+    served = None
+    if isinstance(start_soc, (int, float)) and isinstance(low, (int, float)):
+        served = round(max(0.0, start_soc - low) / 100 * capacity_kwh, 2)
+    minutes = None
+    try:
+        minutes = round((datetime.fromisoformat(end_iso) - datetime.fromisoformat(outage["start"])).total_seconds() / 60)
+    except (KeyError, TypeError, ValueError):
+        pass
+    return {
+        "start": outage.get("start"), "end": end_iso, "minutes": minutes,
+        "soc_start": start_soc, "soc_low": low, "soc_end": soc_end, "battery_kwh_served": served,
+    }
