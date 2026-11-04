@@ -62,7 +62,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_grid_outage.py` | Phase 48 grid voltage parser, runtime, outage record |
 | `tests/test_pv_strings.py` | Phase 49 string share, anomaly, streak |
 | `tests/test_user_override.py` | Phase 46 next plan date and override application |
-| `tests/test_event_probe.py` | Phase 43 probe route list, tolerant realtime-event parser and dedup |
+| `tests/test_event_probe.py` | Phase 43 probe route list, tolerant realtime-event parser and dedup, cloud grid notices, fault counts |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |

@@ -176,6 +176,22 @@ class SunsynkApiClient:
         body = data.get("data") if isinstance(data, dict) else None
         return body if isinstance(body, list) else None
 
+    async def async_read_inverter_counts(self) -> dict[str, Any] | None:
+        """Account-wide inverter status counts (normal/warning/fault/offline/protect); None if unreadable."""
+        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/inverters/count")
+        body = data.get("data") if isinstance(data, dict) else None
+        return body if isinstance(body, dict) else None
+
+    async def async_read_notices(self) -> list[Any] | None:
+        """Latest cloud notices (portal Notifications page), newest first; None if unreadable."""
+        data = await self._authorized_json(
+            "GET", f"{BASE_API}/api/v1/messageTd/messages?pageSize=10&pageNumber=0&status=&lan=en"
+        )
+        body = data.get("data") if isinstance(data, dict) else None
+        infos = body.get("infos") if isinstance(body, dict) else None
+        records = infos.get("records") if isinstance(infos, dict) else None
+        return records if isinstance(records, list) else None
+
     async def async_read_settings(self, inverter_sn: str) -> dict[str, Any]:
         """Read the inverter's settings (keyed by the inverter serial, not plant_id)."""
         data = await self._authorized_json("GET", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/read")
