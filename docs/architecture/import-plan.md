@@ -232,3 +232,12 @@ The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.me
 ## Plain-English plan explanation (01/11/2026, phase 58)
 
 `planning.explain_plan(plan_state, shadow=None)` turns the plan's reason code and adjustment fields into short sentences. It feeds the `explanation` attribute on the import-plan sensor, the "Why:" line of the plan notification and the dry-run notification. It reads only fields already in `plan_state`, so it cannot drift from the decision; `tests/test_explain_plan.py` covers each reason code.
+
+## Newsvendor bridge target, shadow (04/11/2026, phase 64)
+
+**Design.** On `solar_bridge_hourly` nights the live bridge scales the hourly forecast by the 30-day median correction. The shadow re-runs the same walk at the recency-weighted quantile of logged actual/forecast ratios that balances the two errors: under-buy `day - offpeak/0.92` (import the shortfall at the day rate) against over-buy `offpeak/0.92 - export_peak + wear` (floored at 0.1p). More solar means a smaller bridge, so the quantile is `1 - CR` with `CR = under/(under+over)`, bounded 0.2-0.8 (`planning.newsvendor_costs/quantile/quantile_correction/newsvendor_target`). Drain and evening nudge are added as for the live target.
+
+**Guards.** Needs 20 days (in-band when the band has 20, else all); a missing price, a thin history, no hourly forecast or a forecast fallback leaves every field `None` (never 0). Low-solar and full-day branches are untouched (do-not-break 8). Nothing is pushed.
+
+**Logged.** `target_soc_newsvendor`, `newsvendor_ratio`, `newsvendor_quantile`, `newsvendor_under_p`, `newsvendor_over_p` in `_IMPORT_PLAN_FIELDS`; the shadow scorecard entry `newsvendor_target` compares asymmetric p-cost of the ratio error against the live factor. A live switch is a follow-up once the scorecard says "ready".
+

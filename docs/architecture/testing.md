@@ -51,6 +51,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_peak_export_recheck.py` | Phase 66 `peak_export_recheck` (lower/raise, 0.5 kWh gate, reserve floor, missing inputs) |
 | `tests/test_free_event_dst.py` | Phase 51 DST-safe `elapsed_seconds`/`shift_hours`/`free_event_watch_from`, `free_event_in_watch` guard, sold battery/solar split |
 | `tests/test_state_update_skip.py` | Phase 67 `state_fields_changed` (equal values skip the write, same object counts as changed); `test_code_integrity` also bars mutating `self.cfg` |
+| `tests/test_newsvendor.py` | Phase 64 newsvendor costs, quantile bounds, `quantile_correction` (min days, band, cap), `newsvendor_target`, scorecard entry |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |
