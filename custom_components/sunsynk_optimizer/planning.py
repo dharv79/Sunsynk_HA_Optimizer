@@ -1633,6 +1633,20 @@ def plan_free_event(
     )
 
 
+def state_fields_changed(current: Any, updates: dict[str, Any]) -> bool:
+    """True when applying ``updates`` to ``current`` would change anything (phase 67).
+
+    A dict/list/set that is the very same object counts as changed: it may have been mutated
+    in place before being passed back. An unknown field is ignored, as update_state does."""
+    for key, value in updates.items():
+        if not hasattr(current, key):
+            continue
+        old = getattr(current, key)
+        if old != value or (old is value and isinstance(value, (dict, list, set))):
+            return True
+    return False
+
+
 def elapsed_seconds(later: datetime, earlier: datetime) -> float:
     """Real seconds from ``earlier`` to ``later``. Aware datetimes are compared in UTC: Python
     subtracts two datetimes that share a tzinfo as wall-clock time, which is 1 h out across a

@@ -18,7 +18,8 @@ import os
 from copy import deepcopy
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Any, Callable
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant
@@ -374,11 +375,20 @@ class SunsynkOptimizer:
         # is re-allowed, harmless — the slot is idempotent).
         self._peak_cover: dict[str, Any] | None = None
         self.data_logger = DataLogger(hass)
+        self._cfg_cache: tuple | None = None  # (id key, read-only config, data, options): refs keep ids valid
+        self._band_price_cache: dict[tuple, dict[str, float | None]] = {}
 
     @property
-    def cfg(self) -> dict[str, Any]:
-        """Return merged config (entry.data + entry.options, options win)."""
-        return merge_entry_data(dict(self.entry.data), dict(self.entry.options))
+    def cfg(self) -> Mapping[str, Any]:
+        """Merged config (entry.data + entry.options, options win), read-only and cached (phase 67).
+
+        Rebuilt only when the entry's data/options objects are replaced; an options change
+        reloads the entry anyway. Read-only, so callers cannot mutate the shared copy."""
+        key = (id(self.entry.data), id(self.entry.options))
+        if self._cfg_cache is None or self._cfg_cache[0] != key:
+            merged = merge_entry_data(dict(self.entry.data), dict(self.entry.options))
+            self._cfg_cache = (key, MappingProxyType(merged), self.entry.data, self.entry.options)
+        return self._cfg_cache[1]
 
     @property
     def plant_id(self) -> str:
@@ -2345,13 +2355,22 @@ class SunsynkOptimizer:
             "import": self._cfg_str(CONF_OCTOPUS_IMPORT_RATES_ENTITY, cfg),
             "export": self._cfg_str(CONF_OCTOPUS_EXPORT_RATES_ENTITY, cfg),
         }
+        states = {status: self.hass.states.get(eid) if eid else None for status, eid in entities.items()}
+        # The parse is the SOC-path cost (hundreds of ISO dates), so reuse it until a rates entity updates (phase 67).
+        cache_key = (on_date, *((eid, getattr(states[status], "last_updated", None)) for status, eid in entities.items()))
+        cached = self._band_price_cache.get(cache_key)
+        if cached is not None:
+            return dict(cached)
         octopus: dict[str, float | None] = {}
         for key, (start, end, status) in TARIFF_BANDS.items():
-            state = self.hass.states.get(entities[status]) if entities[status] else None
+            state = states[status]
             if state is not None:
                 octopus[key] = octopus_rate_pence_per_kwh(
                     state.state, dict(state.attributes), start, end, on_date, dt_util.DEFAULT_TIME_ZONE
                 )
+        if len(self._band_price_cache) >= 8:
+            self._band_price_cache.clear()
+        self._band_price_cache[cache_key] = dict(octopus)
         return octopus
 
     async def _async_tariff_price_check(self, _now) -> None:
