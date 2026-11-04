@@ -130,6 +130,11 @@ from .flux_helpers import (
 )
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    BATTERY_BOTTOM_SOC,
+    grid_online,
+    outage_record,
+    outage_runtime_hours,
+    outage_track,
     AUDIT_DAYS,
     audit_days,
     audit_summary,
@@ -436,6 +441,8 @@ class SunsynkOptimizer:
     pv_mppt0_entity = property(lambda self: self._solarsynk_entity("pv_mppt0_power"))
     pv_mppt1_entity = property(lambda self: self._solarsynk_entity("pv_mppt1_power"))
     battery_temp_entity = property(lambda self: self._solarsynk_entity("battery_temperature"))
+    grid_status_entity = property(lambda self: self._solarsynk_entity("grid_status"))
+    load_power_entity = property(lambda self: self._solarsynk_entity("load_total_power"))
     day_load_entity = property(lambda self: self._solarsynk_entity("load_daily_used"))
     day_grid_import_entity = property(lambda self: self._solarsynk_entity("grid_etoday_from"))
     day_grid_export_entity = property(lambda self: self._solarsynk_entity("grid_etoday_to"))
@@ -487,6 +494,10 @@ class SunsynkOptimizer:
         )
         self.unsubs.append(
             async_track_state_change_event(self.hass, [self.battery_soc_entity], self._async_battery_soc_changed)
+        )
+        # Phase 48: grid outage start/restore. Missing entity just never fires.
+        self.unsubs.append(
+            async_track_state_change_event(self.hass, [self.grid_status_entity], self._async_grid_status_changed)
         )
 
         if self.coordinator.state.selected_full_charge_day is None:
@@ -964,6 +975,10 @@ class SunsynkOptimizer:
                 last_import_plan={"logic_branch": "monitor_only", "source": source},
             )
             return
+        if not dry_run and self._outage_active():
+            # Phase 48: no push can land during an outage; re-plan when the grid returns.
+            self.coordinator.update_state(touch=False, grid_outage={**self.coordinator.state.grid_outage, "plan_skipped": True})
+            return
         if not dry_run:
             self._cancel_plan_retry()  # a fresh plan supersedes any pending retry
 
@@ -1301,7 +1316,7 @@ class SunsynkOptimizer:
 
     async def async_run_plan_retry(self, payload: dict[str, Any], source: str, attempt: int) -> None:
         """Re-push a failed overnight plan; stop on success, held slots or monitor mode."""
-        if self.operation_mode == "monitor" or self._slots_held():
+        if self.operation_mode == "monitor" or self._slots_held() or self._outage_active():
             return
         now = dt_util.now()
         if await self.async_push_flux_override(payload):
@@ -1394,6 +1409,8 @@ class SunsynkOptimizer:
 
     async def async_run_flux2_check(self, source: str = "automatic") -> None:
         """Run Flux 2 evening export / trim logic."""
+        if self._outage_active():
+            return  # Phase 48: a push cannot reach the inverter during an outage.
         if self.operation_mode == "monitor":
             self.coordinator.update_state(
                 operation_mode="monitor",
@@ -2332,6 +2349,8 @@ class SunsynkOptimizer:
         holds the slots; never pushes in monitor mode; the export-disable (watt
         trigger) wins — if it already fired, or fires later, it holds 100%.
         """
+        if self._outage_active():
+            return  # Phase 48
         now = dt_util.now()
         slots_held = self._slots_held()
         if not slots_held:
@@ -2524,6 +2543,60 @@ class SunsynkOptimizer:
         self._band_price_cache[cache_key] = dict(octopus)
         return octopus
 
+    def _outage_active(self) -> bool:
+        """True while a grid outage is open (phase 48): plan, trim, export and retry pushes are held."""
+        return bool((self.coordinator.state.grid_outage or {}).get("active"))
+
+    def _refresh_battery_runtime(self) -> None:
+        """Battery runtime left at the live load (phase 48); unknown when SOC or load is unavailable."""
+        soc = self._essential_state(self.battery_soc_entity)
+        load_w = self._essential_state(self.load_power_entity)
+        hours = outage_runtime_hours(
+            soc, BATTERY_BOTTOM_SOC, self._capacity_kwh(), None if load_w is None else load_w / 1000
+        )
+        self.coordinator.update_state(
+            touch=False,
+            battery_runtime={"hours": hours, "soc": soc, "load_kw": None if load_w is None else round(load_w / 1000, 2)},
+        )
+
+    async def _async_grid_status_changed(self, event: Event) -> None:
+        """Open an outage when grid_status goes off, close it (and log it) when it returns."""
+        new_state = event.data.get("new_state")
+        online = grid_online(None if new_state is None else new_state.state)
+        if online is None:
+            return
+        state = self.coordinator.state
+        now_iso = dt_util.now().isoformat()
+        soc = self._essential_state(self.battery_soc_entity)
+        if online is False and not self._outage_active():
+            self.coordinator.update_state(
+                grid_outage={"active": True, "start": now_iso, "soc_start": soc, "soc_low": soc}
+            )
+            self._refresh_battery_runtime()
+            runtime = (state.battery_runtime or {}).get("hours")
+            await self.async_notify(
+                "🔋 Sunsynk: grid outage",
+                f"Grid power lost. Battery {'' if soc is None else f'{soc:.0f}% '}"
+                + (f"should last about {runtime:g} h at the current load." if runtime is not None else "runtime unknown.")
+                + " Plan and export pushes are paused until it returns.",
+            )
+        elif online is True and self._outage_active():
+            outage = outage_track(dict(state.grid_outage), soc)
+            record = outage_record(outage, now_iso, soc, self._capacity_kwh())
+            await self.data_logger.async_log_outage(**record)
+            skipped = bool(state.grid_outage.get("plan_skipped"))
+            self.coordinator.update_state(grid_outage={"active": False, "last": record})
+            self._refresh_battery_runtime()
+            minutes = record.get("minutes")
+            await self.async_notify(
+                "🔋 Sunsynk: grid restored",
+                "Grid power is back" + (f" after {minutes} min" if minutes is not None else "")
+                + (f"; the battery went down to {record['soc_low']:.0f}%." if record.get("soc_low") is not None else ".")
+                + " Normal planning resumes.",
+            )
+            if skipped:
+                await self._guarded(lambda: self.async_run_import_plan(source="grid_restored"), "Post-outage plan")
+
     async def _async_data_audit(self, _now) -> None:
         await self._guarded(self.async_run_data_audit, "Data audit")
 
@@ -2647,6 +2720,15 @@ class SunsynkOptimizer:
         if new_state is None:
             return
         self._read_soc()
+        self._refresh_battery_runtime()
+        if self._outage_active():
+            try:
+                self.coordinator.update_state(
+                    touch=False, grid_outage=outage_track(dict(self.coordinator.state.grid_outage), float(new_state.state))
+                )
+            except (ValueError, TypeError):
+                pass
+            return
         await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
         await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         if self._slots_held():
@@ -3739,7 +3821,7 @@ class SunsynkOptimizer:
         """
         now = dt_util.now()
         minutes = now.hour * 60 + now.minute
-        if not PEAK_COVER_HOLD_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES or self._slots_held():
+        if not PEAK_COVER_HOLD_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES or self._slots_held() or self._outage_active():
             return
         today = now.date().isoformat()
         if (self._peak_cover or {}).get("date") != today:
