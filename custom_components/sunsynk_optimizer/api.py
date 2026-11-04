@@ -196,7 +196,7 @@ class SunsynkApiClient:
                     headers={**_JSON_HEADERS, "Authorization": f"Bearer {self._token}"},
                     timeout=_TIMEOUT,
                 ) as response:
-                    results.append({"path": path, "status": response.status, "body": (await response.text())[:600]})
+                    results.append({"path": path, "status": response.status, "body": (await response.text())[:1500]})
             except Exception as exc:  # noqa: BLE001 - a probe reports, it does not fail
                 results.append({"path": path, "status": None, "body": f"{type(exc).__name__}: {exc}"[:200]})
         return results
