@@ -142,8 +142,7 @@ from .planning import (
     string_share,
     string_streak,
     BATTERY_BOTTOM_SOC,
-    grid_online,
-    grid_restored_fallback,
+    grid_online_from_voltage,
     outage_record,
     outage_runtime_hours,
     outage_track,
@@ -456,7 +455,7 @@ class SunsynkOptimizer:
     pv_mppt0_entity = property(lambda self: self._solarsynk_entity("pv_mppt0_power"))
     pv_mppt1_entity = property(lambda self: self._solarsynk_entity("pv_mppt1_power"))
     battery_temp_entity = property(lambda self: self._solarsynk_entity("battery_temperature"))
-    grid_status_entity = property(lambda self: self._solarsynk_entity("grid_status"))
+    grid_voltage_entity = property(lambda self: self._solarsynk_entity("grid_phase0_voltage"))
     load_power_entity = property(lambda self: self._solarsynk_entity("load_total_power"))
     day_load_entity = property(lambda self: self._solarsynk_entity("load_daily_used"))
     day_grid_import_entity = property(lambda self: self._solarsynk_entity("grid_etoday_from"))
@@ -510,10 +509,11 @@ class SunsynkOptimizer:
         self.unsubs.append(
             async_track_state_change_event(self.hass, [self.battery_soc_entity], self._async_battery_soc_changed)
         )
-        # Phase 48: grid outage start/restore. Missing entity just never fires.
+        # Phase 48: grid outage start/restore from the grid voltage. Missing entity just never fires.
         self.unsubs.append(
-            async_track_state_change_event(self.hass, [self.grid_status_entity], self._async_grid_status_changed)
+            async_track_state_change_event(self.hass, [self.grid_voltage_entity], self._async_grid_status_changed)
         )
+        self.hass.async_create_task(self._async_grid_reconcile())
 
         if self.coordinator.state.selected_full_charge_day is None:
             self.coordinator.update_state(
@@ -2680,13 +2680,18 @@ class SunsynkOptimizer:
         )
 
     async def _async_grid_status_changed(self, event: Event) -> None:
-        """Open an outage when grid_status goes off, close it (and log it) when it returns."""
+        """Voltage event → outage open/close."""
         new_state = event.data.get("new_state")
-        raw = None if new_state is None else new_state.state
-        online = grid_online(raw)
-        if online is None and self._outage_active() and grid_restored_fallback(raw, (self.coordinator.state.grid_outage or {}).get("raw")):
-            _LOGGER.warning("grid_status value %r not recognised; treating as grid restored", raw)
-            online = True
+        await self._async_apply_grid_online(grid_online_from_voltage(None if new_state is None else new_state.state))
+
+    async def _async_grid_reconcile(self) -> None:
+        """At startup, close a persisted outage that the live voltage says is over (or never was)."""
+        await self._guarded(
+            lambda: self._async_apply_grid_online(grid_online_from_voltage(getattr(self._available_state(self.grid_voltage_entity), "state", None))),
+            "Grid reconcile",
+        )
+
+    async def _async_apply_grid_online(self, online: bool | None) -> None:
         if online is None:
             return
         state = self.coordinator.state
@@ -2694,7 +2699,7 @@ class SunsynkOptimizer:
         soc = self._essential_state(self.battery_soc_entity)
         if online is False and not self._outage_active():
             self.coordinator.update_state(
-                grid_outage={"active": True, "start": now_iso, "soc_start": soc, "soc_low": soc, "raw": str(raw)}
+                grid_outage={"active": True, "start": now_iso, "soc_start": soc, "soc_low": soc}
             )
             self._refresh_battery_runtime()
             runtime = (state.battery_runtime or {}).get("hours")

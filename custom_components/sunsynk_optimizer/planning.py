@@ -3489,17 +3489,24 @@ def grid_online(value: Any) -> bool | None:
     return None
 
 
-def grid_restored_fallback(value: Any, outage_raw: Any) -> bool:
-    """While an outage is open, an unrecognised value that differs from the outage value counts as restored.
+GRID_ONLINE_MIN_V = 180.0  # at or above: mains present
+GRID_OFFLINE_MAX_V = 100.0  # below: mains lost (between the two: unknown, no change)
 
-    Protects against a grid-present label the parser has not seen: the outage would otherwise never close.
+
+def grid_online_from_voltage(voltage: Any) -> bool | None:
+    """Grid present from the live grid phase voltage (live sample: `grid_status` reads 0 with 240 V, so it is unusable).
+
+    None for missing/unparseable or the 100-180 V dead band, which never opens or closes an outage.
     """
-    if value is None:
+    try:
+        v = float(voltage)
+    except (TypeError, ValueError):
+        return None
+    if v >= GRID_ONLINE_MIN_V:
+        return True
+    if v < GRID_OFFLINE_MAX_V:
         return False
-    text = str(value).strip().lower()
-    if text in ("", "unknown", "unavailable", "none"):
-        return False
-    return grid_online(value) is None and text != str(outage_raw).strip().lower()
+    return None
 
 
 def outage_runtime_hours(soc: float | None, shutdown_soc: float, capacity_kwh: float, load_kw: float | None) -> float | None:

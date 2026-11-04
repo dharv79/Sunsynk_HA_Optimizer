@@ -35,3 +35,6 @@ Merged the outage-logger half of 'Grid outage logger and storm reserve' into thi
 ## As built (04/11/2026)
 
 `planning.grid_online` (tolerant parser), `outage_runtime_hours`, `outage_track`, `outage_record`. A `grid_status` listener opens and closes an outage (persisted `grid_outage`), notifies, and logs an `outage` record. While active, the import plan, Flux 2 check, peak cover, peak export and plan retry return early; a skipped plan re-runs on restore. `binary_sensor.grid_outage`, `sensor.battery_runtime`. Confirm the live `grid_status` format; an unrecognised value is never treated as an outage.
+
+## Correction (04/11/2026)
+Live sample: `grid_status` reads `0` while the grid is present (240 V, 50.11 Hz, `exists_grid` True, AC relay 1), so it cannot signal an outage and the first outage notice was a false positive that never closed. Detection now uses `grid_phase0_voltage` (`planning.grid_online_from_voltage`: >=180 V present, <100 V lost, between = no change). On startup a persisted outage is reconciled against the live voltage. `grid_online` (old parser) is unused.
