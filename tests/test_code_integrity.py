@@ -53,3 +53,24 @@ def test_startup_plan_is_followed_by_peak_cover():
     calls = _awaited_calls(fn)
     assert "async_run_import_plan" in calls and "async_run_peak_cover" in calls
     assert calls.index("async_run_peak_cover") > calls.index("async_run_import_plan")
+
+
+_MUTATORS = {"append", "extend", "insert", "pop", "popitem", "remove", "clear", "update", "setdefault", "sort"}
+
+
+def test_nothing_mutates_the_cached_config():
+    """Phase 67: self.cfg is a shared read-only copy; assigning into it or calling a mutator on it must fail CI."""
+    cls = _class(ast.parse(OPTIMIZER.read_text()), "SunsynkOptimizer")
+
+    def is_cfg(node: ast.AST) -> bool:
+        return isinstance(node, ast.Attribute) and node.attr == "cfg" and isinstance(node.value, ast.Name) and node.value.id == "self"
+
+    bad = []
+    for node in ast.walk(cls):
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.Delete)):
+            targets = node.targets if hasattr(node, "targets") else [node.target]
+            bad += [node.lineno for t in targets if isinstance(t, ast.Subscript) and is_cfg(t.value)]
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in _MUTATORS and is_cfg(node.func.value):
+                bad.append(node.lineno)
+    assert bad == []

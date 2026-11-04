@@ -24,6 +24,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .api import SunsynkApiClient
 from .const import STORAGE_KEY, STORAGE_VERSION, CONF_PASSWORD, CONF_USERNAME
 from .flux_helpers import merge_entry_data
+from .planning import state_fields_changed
 from .optimizer import SunsynkOptimizer
 
 _SAVE_DELAY_SECONDS = 1
@@ -162,6 +163,8 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
         Pass touch=False to skip updating updated_at (used when setting operational
         metadata that shouldn't be surfaced as a user-visible state change).
         """
+        if kwargs and not state_fields_changed(self.state, kwargs):
+            return  # Nothing differs: no touch, recorder write, storage save or listener notify (phase 67).
         for key, value in kwargs.items():
             if hasattr(self.state, key):
                 setattr(self.state, key, value)
