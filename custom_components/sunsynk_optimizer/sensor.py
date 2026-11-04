@@ -87,6 +87,9 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
             SunsynkOptimizerSensor(coordinator, entry, "spare_solar", "Spare solar today"),
             SunsynkOptimizerSensor(
+                coordinator, entry, "import_causes", "Import causes today", entity_id="sensor.import_causes_today"
+            ),
+            SunsynkOptimizerSensor(
                 coordinator, entry, "marginal_cost", "Cost of 1 kWh now", entity_id="sensor.cost_of_1_kwh_now"
             ),
         ]
@@ -119,7 +122,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return "p/kWh"
         if self._sensor_key == "battery_capacity_estimate":
             return "kWh"
-        return "kWh" if self._sensor_key == "spare_solar" else None
+        return "kWh" if self._sensor_key in ("spare_solar", "import_causes") else None
 
     @property
     def native_value(self) -> str | int | None:
@@ -154,6 +157,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "marginal_cost":
             return _as_dict(state.marginal_cost).get("pence")
+
+        if self._sensor_key == "import_causes":
+            return _as_dict(state.import_causes).get("total_kwh")
 
         if self._sensor_key == "battery_capacity_estimate":
             return _as_dict(state.battery_capacity_estimate).get("estimate_kwh")
@@ -241,6 +247,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return _as_dict(state.battery_capacity_estimate)
         if self._sensor_key == "shadow_scorecard":
             return _as_dict(state.shadow_scorecard)
+        if self._sensor_key == "import_causes":
+            return {k: v for k, v in _as_dict(state.import_causes).items() if k != "total_kwh"}
         if self._sensor_key == "marginal_cost":
             cost = _as_dict(state.marginal_cost)
             cheapest = _as_dict(cost.get("cheapest_hour_today"))
