@@ -3570,3 +3570,36 @@ def string_streak(prev_streak: int, prev_weaker: str | None, result: dict[str, A
     if weaker is None:
         return 0, None
     return (prev_streak + 1 if weaker == prev_weaker else 1), weaker
+
+
+# --------------------------------------------------------------------------- #
+# Phase 46: one-night user overrides (service actions)                         #
+# --------------------------------------------------------------------------- #
+
+PLAN_RUN_MINUTES = 1 * 60 + 55  # the nightly plan runs at 01:55
+
+
+def next_plan_date(now: datetime) -> date:
+    """Date stamped on the next 01:55 plan: today before 01:55, else tomorrow."""
+    return now.date() if now.hour * 60 + now.minute < PLAN_RUN_MINUTES else now.date() + timedelta(days=1)
+
+
+def apply_user_override(
+    target_soc: int, override: dict[str, Any] | None, plan_date: str, soc: float | None
+) -> tuple[int, str | None]:
+    """Apply a one-night override after every other cap. Returns (target, "set"/"skip"/None).
+
+    Only an override dated for this plan applies. "set" clamps to the discharge floor..100.
+    "skip" holds the battery where it is (no overnight grid charge); it needs a known SOC,
+    otherwise the plan is left alone rather than guessing.
+    """
+    if not isinstance(override, dict) or override.get("date") != plan_date:
+        return target_soc, None
+    if override.get("skip"):
+        if soc is None:
+            return target_soc, None
+        return max(BATTERY_BOTTOM_SOC, min(target_soc, int(soc))), "skip"
+    wanted = override.get("soc")
+    if isinstance(wanted, (int, float)) and not isinstance(wanted, bool):
+        return max(BATTERY_BOTTOM_SOC, min(100, int(round(wanted)))), "set"
+    return target_soc, None

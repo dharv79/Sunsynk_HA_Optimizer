@@ -23,6 +23,7 @@ from typing import Any, Callable, Mapping
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import (
@@ -130,6 +131,8 @@ from .flux_helpers import (
 )
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    apply_user_override,
+    next_plan_date,
     STRING_ALERT_STREAK,
     STRING_MIN_TOTAL_KW,
     STRING_SAMPLE_FROM_HOUR,
@@ -971,7 +974,9 @@ class SunsynkOptimizer:
             by_date.setdefault(reported.isoformat(), {})[field_name] = value
         return by_date
 
-    async def async_run_import_plan(self, source: str = "automatic", dry_run: bool = False) -> None:
+    async def async_run_import_plan(
+        self, source: str = "automatic", dry_run: bool = False, notify: bool = True
+    ) -> dict[str, Any] | None:
         """Calculate and push overnight import plan.
 
         When ``dry_run`` is True the full plan is computed but nothing is pushed
@@ -1124,6 +1129,11 @@ class SunsynkOptimizer:
             avg_consumption_kw, battery_capacity_kwh,
         )
 
+        # Phase 46: a one-night user override (service) wins over every other cap.
+        target_soc, user_override = apply_user_override(
+            target_soc, self.coordinator.state.user_override, now.date().isoformat(), soc
+        )
+
         computed_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
             paired_days, battery_capacity_kwh, overnight_drain_adjustment
         )
@@ -1245,7 +1255,8 @@ class SunsynkOptimizer:
             "api_ok": api_ok,
             "retrying": retrying,
             "held_by_free_event": held_by == "free_event",
-            "free_event_capped": target_soc < uncapped_target_soc,
+            "free_event_capped": target_soc < uncapped_target_soc and user_override is None,
+            "user_override": user_override,
             "battery_voltage": battery_voltage,
             "gentle_current_a": gentle_current_a,
             "gentle_max_current_a": round(gentle_max_a, 1),
@@ -1271,11 +1282,12 @@ class SunsynkOptimizer:
         }
 
         if dry_run:
-            await self.async_notify(
-                f"🧪 Sunsynk: test plan (dry run) — {plan_state['date']}",
-                "\n".join(explain_plan(plan_state)) + "\n\n" + json.dumps(plan_state),
-            )
-            return
+            if notify:
+                await self.async_notify(
+                    f"🧪 Sunsynk: test plan (dry run) — {plan_state['date']}",
+                    "\n".join(explain_plan(plan_state)) + "\n\n" + json.dumps(plan_state),
+                )
+            return plan_state
 
         if should_log_import_plan(source, now):
             await self.data_logger.async_log_import_plan(plan_state)
@@ -2607,6 +2619,37 @@ class SunsynkOptimizer:
             self._band_price_cache.clear()
         self._band_price_cache[cache_key] = dict(octopus)
         return octopus
+
+    def _service_guard(self, write: bool = True) -> None:
+        """Refuse a service write in monitor mode or while an event holds the slots (rules 7 and 16)."""
+        if not write:
+            return
+        if self.operation_mode == "monitor":
+            raise HomeAssistantError("Monitor mode: the optimizer makes no changes to the inverter")
+        if self._slots_held():
+            raise HomeAssistantError("A free event is holding the inverter slots")
+
+    async def async_service_override(self, soc: int | None = None, skip: bool = False) -> dict[str, Any]:
+        """Service: set or skip the next 01:55 plan's overnight target (phase 46). Nothing is pushed now."""
+        self._service_guard()
+        if not skip and soc is None:
+            raise HomeAssistantError("Give a target SOC or skip")
+        plan_date = next_plan_date(dt_util.now()).isoformat()
+        override = {"date": plan_date, **({"skip": True} if skip else {"soc": int(soc)})}
+        self.coordinator.update_state(user_override=override)
+        return override
+
+    async def async_service_schedule_free_event(self, start: datetime, end: datetime) -> bool:
+        self._service_guard()
+        return await self.async_schedule_free_event(dt_util.as_local(start), dt_util.as_local(end), "service")
+
+    async def async_service_cancel_free_event(self) -> None:
+        await self.async_cancel_free_event()
+
+    async def async_service_get_plan(self) -> dict[str, Any]:
+        """Service: the dry-run plan as a response (rule 17: no push, log or state, no notification)."""
+        plan = await self.async_run_import_plan(source="service", dry_run=True, notify=False)
+        return {"plan": plan or {}}
 
     def _outage_active(self) -> bool:
         """True while a grid outage is open (phase 48): plan, trim, export and retry pushes are held."""

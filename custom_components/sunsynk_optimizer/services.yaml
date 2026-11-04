@@ -1,0 +1,22 @@
+set_tonight_target:
+  fields:
+    soc:
+      required: true
+      selector:
+        number:
+          min: 20
+          max: 100
+          unit_of_measurement: "%"
+skip_tonight:
+schedule_free_event:
+  fields:
+    start:
+      required: true
+      selector:
+        datetime:
+    end:
+      required: true
+      selector:
+        datetime:
+cancel_free_event:
+get_plan:

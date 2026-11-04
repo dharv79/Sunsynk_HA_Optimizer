@@ -81,6 +81,7 @@ _IMPORT_PLAN_FIELDS = (
     "battery_temp_c",
     "measured_charge_rate_kw",
     "measured_charge_rate_live",
+    "user_override",
 )
 
 
@@ -598,6 +599,7 @@ class DataLogger:
             if d["forecast_band"] == forecast_band
             and not d["is_full_day"]
             and not d.get("full_window")  # phase 62: no gap after the charge, so no drain to measure
+            and not d.get("user_override")  # phase 46
             and not d["evening_export_disabled"]
             and d.get("evening_soc") is not None
             and d.get("actual_solar_kwh") is not None
@@ -672,6 +674,7 @@ class DataLogger:
             and d["overnight_drain_pct"] >= 0
             and d.get("morning_pv_power", 0) < 200  # <200 W means net battery drain still dominates at 06:00
             and not d["is_full_day"]
+            and not d.get("user_override")  # phase 46: a manual target is not a model-chosen one
             and initial is not None
             and target is not None
             and initial < target
