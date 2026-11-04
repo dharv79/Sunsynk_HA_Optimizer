@@ -132,7 +132,12 @@ from .flux_helpers import (
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
     event_probe_paths,
+    battery_health_trend,
+    bms_summary_line,
+    health_fault_flag,
     inverter_fault_flag,
+    ledger_point,
+    parse_battery_health,
     new_grid_notices,
     new_inverter_events,
     normalise_grid_notices,
@@ -2007,7 +2012,7 @@ class SunsynkOptimizer:
             "⚠️ Sunsynk: overnight charge not running",
             f"{pushed} SOC {plan['soc']}% at 01:55 → {soc_now}% now (target {plan['target_soc']}%, "
             f"window {plan.get('next_import_window')}). Grid import {round(grid_import_w)} W. "
-            "Check the inverter's time-of-use settings.",
+            "Check the inverter's time-of-use settings." + (f" {bms}" if (bms := await self._async_bms_line()) else ""),
         )
 
     async def _async_periodic_flux2_check(self, _now) -> None:
@@ -2252,7 +2257,8 @@ class SunsynkOptimizer:
             await self.async_notify(
                 "🔋 Sunsynk: overnight charge stopped short",
                 f"Target {outcome['target_soc']:.0f}%, reached {outcome['reached_soc']:.0f}% "
-                f"({outcome['shortfall_pct']:.0f} points short). Likely cause: {outcome['likely_cause']}.",
+                f"({outcome['shortfall_pct']:.0f} points short). Likely cause: {outcome['likely_cause']}."
+                + (f" {bms}" if (bms := await self._async_bms_line()) else ""),
             )
 
     async def _async_auto_away(self) -> None:
@@ -3939,19 +3945,20 @@ class SunsynkOptimizer:
             await self._async_api_read("Inverter events", api.async_read_inverter_events, self.inverter_serial)
         )
         counts = normalise_inverter_counts(await self._async_api_read("Inverter counts", api.async_read_inverter_counts))
+        health = await self.async_refresh_battery_health()
         fresh = new_inverter_events(events, previous.get("seen") or []) if events is not None else []
         active = (
             [{k: e[k] for k in ("text", "code", "time", "category")} for e in events]
             if events is not None else previous.get("active")
         )
         counts = counts if counts is not None else previous.get("counts")
-        if events is not None or counts is not None:
+        if events is not None or counts is not None or health is not None:
             self.coordinator.update_state(
                 touch=False,
                 inverter_events={
                     "active": active,
                     "counts": counts,
-                    "fault": inverter_fault_flag(active, counts),
+                    "fault": inverter_fault_flag(active, counts, health_fault_flag(health)),
                     "seen": ((previous.get("seen") or []) + [e["key"] for e in fresh])[-100:],
                     "checked": dt_util.now().isoformat(),
                 },
@@ -3965,6 +3972,49 @@ class SunsynkOptimizer:
             lines = [f"• {e['text'] or e['code'] or 'unknown event'} ({e['category']})" for e in fresh[:5]]
             await self.async_notify("🔋 Sunsynk: inverter event", "Inverter reported:\n" + "\n".join(lines))
         await self._async_log_cloud_grid_notices()
+
+    async def async_refresh_battery_health(self) -> dict[str, Any] | None:
+        """Read the newest BMS register snapshot (phase 75); read-only, so also in monitor mode.
+
+        Updates state.battery_health (latest snapshot, a compact per-day ledger and the trend) and logs one
+        battery_health record per day. Returns the parsed snapshot, or None when unreadable (state kept)."""
+        now = dt_util.now()
+        today = now.date().isoformat()
+        health = parse_battery_health(
+            await self._async_api_read(
+                "Battery health", self.coordinator.api.async_read_latest_workdata, self.inverter_serial, today
+            )
+        )
+        if health is None:
+            return None
+        previous = self.coordinator.state.battery_health or {}
+        ledger = list(previous.get("ledger") or [])
+        point = ledger_point(today, health)
+        new_day = point is not None and (not ledger or ledger[-1].get("date") != today)
+        if point is not None:
+            ledger = (ledger if new_day else ledger[:-1]) + [point]
+        ledger = ledger[-800:]
+        cfg = self.cfg
+        trend = battery_health_trend(ledger, cfg.get(CONF_BATTERY_COST_GBP), cfg.get(CONF_BATTERY_LIFETIME_KWH))
+        self.coordinator.update_state(
+            touch=False,
+            battery_health={"latest": health, "ledger": ledger, "trend": trend, "checked": now.isoformat()},
+        )
+        if new_day:
+            await self.data_logger.async_log_battery_health(
+                date=today, **{k: v for k, v in health.items() if k != "fault_words"},
+                fault_words=health.get("fault_words") or {}, trend=trend,
+            )
+        return health
+
+    async def _async_bms_line(self) -> str | None:
+        """BMS context for a charge alert: the snapshot if read in the last 15 min, else a fresh read
+        (falling back to the last snapshot when that read fails)."""
+        stored = self.coordinator.state.battery_health or {}
+        checked = dt_util.parse_datetime(stored.get("checked") or "")
+        fresh = checked is not None and (dt_util.now() - checked).total_seconds() < 900
+        health = stored.get("latest") if fresh else (await self.async_refresh_battery_health() or stored.get("latest"))
+        return bms_summary_line(health)
 
     async def _async_log_cloud_grid_notices(self) -> None:
         notices = normalise_grid_notices(

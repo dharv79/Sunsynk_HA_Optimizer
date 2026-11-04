@@ -83,6 +83,10 @@ async def async_setup_entry(
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.battery_capacity_estimate",
             ),
             SunsynkOptimizerSensor(
+                coordinator, entry, "battery_soh", "Battery state of health",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.battery_soh",
+            ),
+            SunsynkOptimizerSensor(
                 coordinator, entry, "shadow_scorecard", "Shadow scorecard",
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.shadow_scorecard",
             ),
@@ -170,7 +174,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return "p/kWh"
         if self._sensor_key == "battery_runtime":
             return "h"
-        if self._sensor_key == "pv_strings":
+        if self._sensor_key in ("pv_strings", "battery_soh"):
             return "%"
         if self._sensor_key == "battery_capacity_estimate":
             return "kWh"
@@ -225,6 +229,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "battery_capacity_estimate":
             return _as_dict(state.battery_capacity_estimate).get("estimate_kwh")
+
+        if self._sensor_key == "battery_soh":
+            return _as_dict(_as_dict(state.battery_health).get("latest")).get("soh_pct")
 
         if self._sensor_key == "shadow_scorecard":
             card = _as_dict(state.shadow_scorecard)
@@ -307,6 +314,10 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             }
         if self._sensor_key == "battery_capacity_estimate":
             return _as_dict(state.battery_capacity_estimate)
+        if self._sensor_key == "battery_soh":
+            health = _as_dict(state.battery_health)
+            latest = {k: v for k, v in _as_dict(health.get("latest")).items() if k != "soh_pct"}
+            return {**latest, "trend": _as_dict(health.get("trend")), "checked": health.get("checked")}
         if self._sensor_key == "shadow_scorecard":
             return _as_dict(state.shadow_scorecard)
         if self._sensor_key == "pv_strings":

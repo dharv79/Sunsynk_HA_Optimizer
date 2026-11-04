@@ -82,7 +82,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 72. Full digital twin: replay every subsystem on half-hourly history | Planned, not built | XL |
 | 73. Native inverter time-of-use programming via the six system-mode slots | Planned, not built | L |
 | 74. Local Modbus/RS485 control path as a cloud-outage fallback | Planned, not built | XL |
-| 75. Battery state-of-health and degradation ledger | Planned, not built | L |
+| 75. Battery state-of-health and degradation ledger | Done, merged (BMS register ledger; PR pending) | M, ~70k actual |
 | 76. Dynamic-tariff native mode (Agile / half-hourly prices in the loop) | Planned, not built | XL |
 | 77. Flexibility-market export bidding (non-Saving-Sessions VPP) | Planned, not built | L |
 | 78. Household electrification and system-sizing advisor | Planned, not built | L |
