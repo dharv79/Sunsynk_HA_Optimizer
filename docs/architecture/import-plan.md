@@ -241,3 +241,6 @@ The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.me
 
 **Logged.** `target_soc_newsvendor`, `newsvendor_ratio`, `newsvendor_quantile`, `newsvendor_under_p`, `newsvendor_over_p` in `_IMPORT_PLAN_FIELDS`; the shadow scorecard entry `newsvendor_target` compares asymmetric p-cost of the ratio error against the live factor. A live switch is a follow-up once the scorecard says "ready".
 
+## Trim deferral and full-charge skip, shadow (04/11/2026, phases 65 and 68)
+
+`trim_defer_kwh` (planning.py) sizes a pre-16:00 trim to the PV overflow and logs a `trim_shadow` record; `trim_defer_live` plus `peak_export_live` makes it act. `days_since_full` / `full_charge_due` log whether the weekly 100% could be skipped (`full_charge_skip_would` in `import_plan`); `full_charge_skip_live` makes the plan treat the day as normal. Both default off.

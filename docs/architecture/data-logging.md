@@ -92,3 +92,7 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## Charge outcome record (01/11/2026, phase 54)
 
 `charge_outcome` (one per night, deduped) is written after the 05:00 meter snapshot: target, reached SOC (the snapshot), `shortfall_pct`, `likely_cause`, `alert`, and `achievable_max_soc` (14-day median on target >= 95 nights, logged only). A shortfall above 5 points notifies. Cause is a heuristic label.
+
+## Import causes (04/11/2026, phase 42)
+
+`import_causes` (22:00, one per day, in `_DEDUP_TYPES`): kWh per cause plus `attributed_kwh` against the day's `grid_import_kwh`; the gap is import never sampled. Causes come from `planning.import_cause_step`; 'unknown' is explicit, never guessed. `sensor.import_causes_today` shows the running tally.
