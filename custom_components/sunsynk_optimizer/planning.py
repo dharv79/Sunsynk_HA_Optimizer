@@ -3630,12 +3630,13 @@ def apply_user_override(
 # --------------------------------------------------------------------------- #
 
 EVENT_PROBE_ROUTES = (
-    "/api/v1/inverter/{sn}/alarms?page=1&limit=20",
-    "/api/v1/inverter/{sn}/events?page=1&limit=20",
-    "/api/v1/inverter/{sn}/event/list?page=1&limit=20",
-    "/api/v1/plant/{plant_id}/alarms?page=1&limit=20",
-    "/api/v1/plant/{plant_id}/events?page=1&limit=20",
-    "/api/v1/event/inverter/{sn}?page=1&limit=20",
+    # Round 1 (04/11/2026): inverter routes answer "No Permissions"; plant/{id}/events exists but needs `lan`.
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&type=1",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&type=2",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&sn={sn}",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&status=0",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&status=1",
 )
 
 

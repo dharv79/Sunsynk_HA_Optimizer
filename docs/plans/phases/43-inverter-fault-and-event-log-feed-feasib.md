@@ -35,3 +35,10 @@ Two candidates merged (alarm reader and event log feed). Confirmed that api.py h
 ## As built (04/11/2026)
 
 Feasibility step only: service `probe_inverter_events` GETs six candidate alarm/event routes and returns status plus a truncated body (and posts it to the debug stream). Call it from Developer tools, record the working route and shape here, then build `async_read_events`, `classify_inverter_events`, the `inverter_event` record and the binary sensor. On hold until then.
+
+## Probe round 1 result (04/11/2026)
+
+- `/api/v1/inverter/{sn}/alarms|events|event/list`: HTTP 200 but `{"code":2,"msg":"No Permissions"}` (route exists, token not allowed).
+- `/api/v1/plant/{plant_id}/alarms` and `/api/v1/event/inverter/{sn}`: 404.
+- `/api/v1/plant/{plant_id}/events`: exists; 400 `plantEventsDTO.lan must be not null`. So this is the viable route and needs `lan` (language, e.g. `en`).
+- Round 2 (b38): probe now sends `lan=en` plus type/sn/status variants and returns up to 1500 chars of body. Awaiting that response to fix the shape.
