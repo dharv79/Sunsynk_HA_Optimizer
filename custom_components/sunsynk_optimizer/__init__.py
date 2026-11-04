@@ -57,6 +57,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DOMAIN, "schedule_free_event", _schedule,
         schema=vol.Schema({vol.Required("start"): cv.datetime, vol.Required("end"): cv.datetime}),
     )
+    async def _probe(call: ServiceCall) -> dict:
+        return await _optimizer(hass).async_service_probe_events()
+
+    hass.services.async_register(
+        DOMAIN, "probe_inverter_events", _probe, schema=vol.Schema({}), supports_response=SupportsResponse.ONLY
+    )
     hass.services.async_register(DOMAIN, "cancel_free_event", _cancel, schema=vol.Schema({}))
     hass.services.async_register(
         DOMAIN, "get_plan", _get_plan, schema=vol.Schema({}), supports_response=SupportsResponse.ONLY

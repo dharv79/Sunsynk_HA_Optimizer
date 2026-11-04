@@ -3603,3 +3603,22 @@ def apply_user_override(
     if isinstance(wanted, (int, float)) and not isinstance(wanted, bool):
         return max(BATTERY_BOTTOM_SOC, min(100, int(round(wanted)))), "set"
     return target_soc, None
+
+
+# --------------------------------------------------------------------------- #
+# Phase 43: inverter alarm/event feed feasibility probe                        #
+# --------------------------------------------------------------------------- #
+
+EVENT_PROBE_ROUTES = (
+    "/api/v1/inverter/{sn}/alarms?page=1&limit=20",
+    "/api/v1/inverter/{sn}/events?page=1&limit=20",
+    "/api/v1/inverter/{sn}/event/list?page=1&limit=20",
+    "/api/v1/plant/{plant_id}/alarms?page=1&limit=20",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20",
+    "/api/v1/event/inverter/{sn}?page=1&limit=20",
+)
+
+
+def event_probe_paths(inverter_sn: str, plant_id: str) -> list[str]:
+    """Candidate read-only GET routes for the cloud's alarm/event list, with ids filled in."""
+    return [r.format(sn=inverter_sn, plant_id=plant_id) for r in EVENT_PROBE_ROUTES]

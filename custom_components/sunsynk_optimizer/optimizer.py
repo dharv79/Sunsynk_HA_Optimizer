@@ -131,6 +131,7 @@ from .flux_helpers import (
 )
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    event_probe_paths,
     apply_user_override,
     next_plan_date,
     STRING_ALERT_STREAK,
@@ -2645,6 +2646,16 @@ class SunsynkOptimizer:
 
     async def async_service_cancel_free_event(self) -> None:
         await self.async_cancel_free_event()
+
+    async def async_service_probe_events(self) -> dict[str, Any]:
+        """Service: probe the Sunsynk cloud's alarm/event routes (phase 43), read-only. Reply and debug stream."""
+        results = await self.coordinator.api.async_probe_events(event_probe_paths(self.inverter_serial, self.plant_id))
+        target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if target:
+            await self.async_notify(
+                "🔋 Sunsynk: events probe", json.dumps({"type": "events_probe", "results": results}), target=target
+            )
+        return {"results": results}
 
     async def async_service_get_plan(self) -> dict[str, Any]:
         """Service: the dry-run plan as a response (rule 17: no push, log or state, no notification)."""

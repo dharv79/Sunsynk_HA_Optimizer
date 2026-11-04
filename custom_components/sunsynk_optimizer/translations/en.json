@@ -210,6 +210,11 @@
       "name": "Get the plan",
       "description": "Dry-run tonight's plan and return it. Pushes, logs and stores nothing.",
       "fields": {}
+    },
+    "probe_inverter_events": {
+      "name": "Probe inverter events",
+      "description": "Read-only check of which Sunsynk cloud alarm/event routes respond, and what they return.",
+      "fields": {}
     }
   }
 }
