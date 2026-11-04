@@ -3519,3 +3519,54 @@ def outage_record(outage: dict[str, Any], end_iso: str, soc_end: float | None, c
         "start": outage.get("start"), "end": end_iso, "minutes": minutes,
         "soc_start": start_soc, "soc_low": low, "soc_end": soc_end, "battery_kwh_served": served,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Phase 49: PV string health (MPPT0 vs MPPT1 share)                            #
+# --------------------------------------------------------------------------- #
+
+STRING_SAMPLE_FROM_HOUR = 10   # like-for-like hours: the string split drifts with the sun's angle
+STRING_SAMPLE_TO_HOUR = 15
+STRING_MIN_TOTAL_KW = 1.0      # below this a "share" is noise
+STRING_MIN_DAY_KWH = 1.0       # sampled kWh needed for a day to count
+STRING_MIN_HISTORY = 7         # prior days needed before judging
+STRING_MIN_DELTA = 0.08        # share must move at least this much (8 points) to count
+STRING_MAD_K = 3.0
+STRING_ALERT_STREAK = 3        # consecutive anomalous days before a notification
+
+
+def string_share(mppt0_kwh: float | None, mppt1_kwh: float | None) -> float | None:
+    """MPPT0 share of the sampled PV energy (0-1); None when either is unknown or the day was too thin."""
+    if mppt0_kwh is None or mppt1_kwh is None:
+        return None
+    total = mppt0_kwh + mppt1_kwh
+    return round(mppt0_kwh / total, 4) if total >= STRING_MIN_DAY_KWH else None
+
+
+def string_ratio_anomaly(history: list[float], today: float | None) -> dict[str, Any] | None:
+    """Compare today's MPPT0 share with the prior days' median; None until enough history.
+
+    Anomalous when the move exceeds both STRING_MIN_DELTA and STRING_MAD_K scaled MADs
+    (so a naturally steady split is judged tightly and a noisy one loosely).
+    """
+    vals = sorted(v for v in history if isinstance(v, (int, float)))
+    if today is None or len(vals) < STRING_MIN_HISTORY:
+        return None
+    median = _median(vals)
+    mad = _median(sorted(abs(v - median) for v in vals)) * 1.4826
+    delta = today - median
+    anomalous = abs(delta) >= max(STRING_MIN_DELTA, STRING_MAD_K * mad)
+    return {
+        "share": today, "median": round(median, 4), "delta": round(delta, 4), "anomalous": anomalous,
+        "weaker": None if not anomalous else ("mppt0" if delta < 0 else "mppt1"),
+    }
+
+
+def string_streak(prev_streak: int, prev_weaker: str | None, result: dict[str, Any] | None) -> tuple[int, str | None]:
+    """Consecutive anomalous days on the same weak string. A normal day resets; an unknown day holds."""
+    if result is None:
+        return prev_streak, prev_weaker
+    weaker = result.get("weaker")
+    if weaker is None:
+        return 0, None
+    return (prev_streak + 1 if weaker == prev_weaker else 1), weaker

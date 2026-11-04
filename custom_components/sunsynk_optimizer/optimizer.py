@@ -130,6 +130,13 @@ from .flux_helpers import (
 )
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    STRING_ALERT_STREAK,
+    STRING_MIN_TOTAL_KW,
+    STRING_SAMPLE_FROM_HOUR,
+    STRING_SAMPLE_TO_HOUR,
+    string_ratio_anomaly,
+    string_share,
+    string_streak,
     BATTERY_BOTTOM_SOC,
     grid_online,
     outage_record,
@@ -363,6 +370,9 @@ class SunsynkOptimizer:
         self._peak_window_start: dict[str, Any] | None = None
         # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
         self._clipped: dict[str, Any] = {}
+        # Phase 49 per-string PV energy sampled 10:00-15:00 (date, m0, m1 kWh). Unpersisted:
+        # a restart only thins the day's sample; the share is a ratio so it stays valid.
+        self._strings: dict[str, Any] = {}
         self._over_limit: dict[str, Any] = {}
         self._import_causes: dict[str, Any] = {}
         # Phase 55: learned 16:00-22:00 load (kW), refreshed by the 01:55 plan; unpersisted.
@@ -1986,9 +1996,64 @@ class SunsynkOptimizer:
         await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
         await self._guarded(self.async_run_peak_cover, "Peak cover")
         await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
+        await self._guarded(self._async_track_pv_strings, "PV string tracking")
         await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         await self._guarded(self._async_daytime_import_check, "Daytime import check")
         await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
+
+    async def _async_track_pv_strings(self) -> None:
+        """Tally each MPPT string's energy over bright mid-day hours (phase 49); no writes.
+
+        Skipped when the battery is full (clipping curtails strings unevenly), below
+        1 kW total, outside 10:00-15:00, or when either string is unavailable
+        (a single-MPPT system is a no-op).
+        """
+        now = dt_util.now()
+        if not STRING_SAMPLE_FROM_HOUR <= now.hour < STRING_SAMPLE_TO_HOUR:
+            return
+        today = now.date().isoformat()
+        if self._strings.get("date") != today:
+            self._strings = {"date": today, "m0": 0.0, "m1": 0.0}
+        p0, p1 = (self._essential_state(e) for e in (self.pv_mppt0_entity, self.pv_mppt1_entity))
+        soc = self._essential_state(self.battery_soc_entity)
+        if p0 is None or p1 is None or (soc is not None and soc >= CLIPPED_SOC_PCT):
+            return
+        if (p0 + p1) / 1000 < STRING_MIN_TOTAL_KW:
+            return
+        self._strings["m0"] += p0 / 1000 * 0.5
+        self._strings["m1"] += p1 / 1000 * 0.5
+
+    async def _async_capture_pv_strings(self, date: str) -> None:
+        """22:00: log today's string energies, judge the split against the prior days, alert on a 3-day streak."""
+        sample = self._strings if self._strings.get("date") == date else {}
+        m0, m1 = sample.get("m0"), sample.get("m1")
+        share = string_share(m0, m1)
+        if share is None:
+            return
+        records = await self.data_logger.async_load_records(24)
+        history = [
+            r["share"] for r in records
+            if r.get("type") == "pv_strings" and r.get("date") != date and isinstance(r.get("share"), (int, float))
+        ]
+        result = string_ratio_anomaly(history, share)
+        await self.data_logger.async_log_pv_strings(
+            date=date, mppt0_kwh=round(m0, 2), mppt1_kwh=round(m1, 2), share=share,
+            median=None if result is None else result["median"], anomalous=None if result is None else result["anomalous"],
+        )
+        prev = self.coordinator.state.pv_strings or {}
+        streak, weaker = string_streak(int(prev.get("streak") or 0), prev.get("weaker"), result)
+        self.coordinator.update_state(
+            touch=False,
+            pv_strings={"date": date, "share": share, "median": None if result is None else result["median"],
+                        "streak": streak, "weaker": weaker, "mppt0_kwh": round(m0, 2), "mppt1_kwh": round(m1, 2)},
+        )
+        if result is not None and streak == STRING_ALERT_STREAK and weaker:
+            await self.async_notify(
+                "🔋 Sunsynk: PV string output low",
+                f"{weaker.upper()} has produced well below its usual share for {streak} days "
+                f"(MPPT0 share {share * 100:.0f}% vs usual {result['median'] * 100:.0f}%). "
+                "Check for shading, soiling or a failed connector.",
+            )
 
     async def _async_track_clipped_solar(self) -> None:
         """Tally solar lost while the battery is full and export is at the limit (phase 29); no writes."""
@@ -3284,6 +3349,7 @@ class SunsynkOptimizer:
             "overnight_target_too_high": too_high,
         }
         kpi_rec = await self._async_capture_day_kpis(date)
+        await self._guarded(lambda: self._async_capture_pv_strings(date), "PV string capture")
         # Persisted (not just logged/notified) so the dashboard's Consumption
         # sensor has today's actuals to display, the same way last_morning_state
         # and last_peak_window_usage are kept for their own dashboard fields.
