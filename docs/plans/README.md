@@ -71,7 +71,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 61. Learn the charge rate from the 02:00/05:00 meter snapshots, and stop derating it twice | Done, merged (96e2022, PR #98; option off) | M |
 | 62. Run Flux 1 to 05:00 every night, capped by the target | Done, merged (9680c00, PR #96; option off) | S |
 | 63. Remove the 05:00-06:00 double count in drain and bridge | Done, merged (b9e8e85, PR #92); median switch deferred pending backtest | S, ~25k actual |
-| 64. Pick the bridge target from the forecast-error distribution (newsvendor rule) | Planned, not built | M |
+| 64. Pick the bridge target from the forecast-error distribution (newsvendor rule) | Done, merged (976f1b4, PR #111), shadow only | M, ~45k actual |
 | 65. Move trims into the peak window when the solar left today can wait | Planned, not built | M |
 | 66. Re-check the peak export plan at 17:00 and 18:00 using the observed peak load | Done, merged (27b831a, PR #102; peak export live option off) | S |
 | 67. Cache config and tariff parsing on the SOC-change path | Done, merged (2eeaebf, PR #109) | S, ~40k actual |
