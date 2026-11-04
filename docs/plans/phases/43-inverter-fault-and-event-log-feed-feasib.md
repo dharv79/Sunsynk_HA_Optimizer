@@ -42,3 +42,7 @@ Feasibility step only: service `probe_inverter_events` GETs six candidate alarm/
 - `/api/v1/plant/{plant_id}/alarms` and `/api/v1/event/inverter/{sn}`: 404.
 - `/api/v1/plant/{plant_id}/events`: exists; 400 `plantEventsDTO.lan must be not null`. So this is the viable route and needs `lan` (language, e.g. `en`).
 - Round 2 (b38): probe now sends `lan=en` plus type/sn/status variants and returns up to 1500 chars of body. Awaiting that response to fix the shape.
+
+## Probe round 2 result (04/11/2026)
+
+All six `plant/{id}/events?...&lan=en` variants (type, sn, status) return `{"code":500,"msg":"Internal Server Error"}`: `lan` is accepted but another required parameter is missing. Round 3 (b39) adds a 30-day date range (`startTime/endTime`, `startDate/endDate`, `beginTime`, `date`) and `plantId`. If this also fails, shelve phase 43 as no readable endpoint (as phases 23 and 28 did) and keep the manual Sunsynk Event log check.
