@@ -247,6 +247,8 @@ from .planning import (
     resolve_used_charge_rate,
     round_or_none,
     score_full_charge_day,
+    intraday_forecast_scale,
+    scaled_solar_kwh,
     solar_until_kwh,
     newsvendor_costs,
     newsvendor_quantile,
@@ -2617,6 +2619,13 @@ class SunsynkOptimizer:
         hourly = self._hourly_or_synthetic_forecast(cfg, now)
         plan = self.coordinator.state.last_import_plan or {}
         correction = float(plan.get("forecast_correction_factor") or 1.0)
+        # Phase 56: from 10:00 rescale the rest of the day by PV produced so far (advisory only).
+        hour_now = now.hour + now.minute / 60.0
+        scale = intraday_forecast_scale(
+            self._essential_state(self.day_pv_energy_entity), solar_until_kwh(hourly, 0.0, hour_now), hour_now
+        )
+        if scale is not None:
+            correction *= scale
         load_kw = self._plan_load_kw(cfg)
         headroom = capacity * (100.0 - soc) / 100.0 if soc is not None else 0.0
         result = expected_spare_solar(
@@ -3623,6 +3632,14 @@ class SunsynkOptimizer:
         hourly = self._hourly_or_synthetic_forecast(cfg, now)
         solar_kwh = solar_until_kwh(hourly, now.hour + now.minute / 60.0)
         prices, sources = self._tariff_prices(now.date())
+        # Phase 56 (shadow): PV produced so far vs the forecast for the same hours. Only the
+        # logged what-if uses it; the decision keeps the raw figure (min(raw, scaled) would be the
+        # low-solar-safe choice if it goes live).
+        hour_now = now.hour + now.minute / 60.0
+        intraday_scale = intraday_forecast_scale(
+            self._essential_state(self.day_pv_energy_entity), solar_until_kwh(hourly, 0.0, hour_now), hour_now
+        )
+        scaled_kwh = scaled_solar_kwh(solar_kwh, intraday_scale)
         if solar_kwh is None:
             solar_kwh = 0.0  # no forecast: assume none rather than guess
         plan = peak_cover_plan(
@@ -3659,6 +3676,11 @@ class SunsynkOptimizer:
             "soc": soc,
             **plan,
             "solar_kwh_to_16": solar_kwh,
+            "intraday_scale": intraday_scale,
+            "solar_kwh_to_16_scaled": scaled_kwh,
+            "intraday_decision": self._intraday_cover_decision(
+                scaled_kwh, solar_kwh, soc, capacity, minutes, load_kw, peak_load_kwh, charge_rate_kw, prices, peak_margin
+            ),
             "load_kw": load_kw,
             "load_source": load_source,
             "peak_load_kwh": peak_load_kwh,
@@ -3673,6 +3695,17 @@ class SunsynkOptimizer:
         }
         state["record"] = record
         await self.data_logger.async_log_peak_cover(**record)
+
+    def _intraday_cover_decision(
+        self, scaled_kwh, raw_kwh, soc, capacity, minutes, load_kw, peak_load_kwh, charge_rate_kw, prices, margin
+    ) -> str | None:
+        """What peak cover would decide on min(raw, scaled) solar (phase 56 shadow); None without a scale."""
+        if scaled_kwh is None or raw_kwh is None or scaled_kwh == raw_kwh:
+            return None
+        return peak_cover_plan(
+            soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, min(raw_kwh, scaled_kwh), load_kw, peak_load_kwh,
+            charge_rate_kw, prices["day"], prices["peak"], margin=margin, wear_pence=self._wear_pence(),
+        )["decision"]
 
     async def _async_peak_cover_end(self) -> None:
         """16:00: put the normal Flux plan back after a live peak-cover top-up slot."""

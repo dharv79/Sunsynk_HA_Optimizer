@@ -1507,6 +1507,34 @@ def solar_until_kwh(hourly: dict[int, float] | None, now_hour: float, end_hour: 
     return round(total, 3)
 
 
+INTRADAY_SCALE_FROM_HOUR = 10.0  # ratio ignored before this
+INTRADAY_SCALE_FULL_HOUR = 11.0  # full weight from here (damped linearly in between)
+INTRADAY_SCALE_MIN_FORECAST_KWH = 1.0
+INTRADAY_SCALE_MIN, INTRADAY_SCALE_MAX = 0.5, 2.0
+
+
+def intraday_forecast_scale(actual_so_far_kwh: float | None, forecast_so_far_kwh: float | None, hour: float) -> float | None:
+    """Ratio of PV produced so far to the forecast for the same hours (phase 56); None when not trustworthy.
+
+    Needs >= 1 kWh forecast so far and a real meter reading (missing is None, never 0). Clamped to
+    0.5-2.0 and damped towards 1.0 between 10:00 and 11:00, when a few minutes of cloud swing the ratio.
+    """
+    if actual_so_far_kwh is None or forecast_so_far_kwh is None or hour < INTRADAY_SCALE_FROM_HOUR:
+        return None
+    if forecast_so_far_kwh < INTRADAY_SCALE_MIN_FORECAST_KWH or actual_so_far_kwh < 0:
+        return None
+    ratio = min(INTRADAY_SCALE_MAX, max(INTRADAY_SCALE_MIN, actual_so_far_kwh / forecast_so_far_kwh))
+    weight = min(1.0, (hour - INTRADAY_SCALE_FROM_HOUR) / (INTRADAY_SCALE_FULL_HOUR - INTRADAY_SCALE_FROM_HOUR))
+    return round(1.0 + weight * (ratio - 1.0), 3)
+
+
+def scaled_solar_kwh(raw_kwh: float | None, scale: float | None) -> float | None:
+    """Remaining solar after the intraday scale; the raw figure when there is no scale, None without a forecast."""
+    if raw_kwh is None:
+        return None
+    return round(raw_kwh * scale, 3) if scale is not None else raw_kwh
+
+
 def daytime_load_kw(
     load_now_kwh: float | None, load_at_05_kwh: float | None, hours: float, fallback_kw: float
 ) -> tuple[float, str]:
