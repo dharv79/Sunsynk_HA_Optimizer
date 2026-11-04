@@ -3691,3 +3691,81 @@ def new_inverter_events(events: list[dict], seen: list[str]) -> list[dict]:
     known = set(seen or [])
     return [e for e in events if e["key"] not in known]
 
+
+# Cloud notices feed (messageTd/messages), captured 04/11/2026: messageType 7 = grid lost, 2 = grid restored.
+_GRID_NOTICE_TYPES = {7: "lost", 2: "restored"}
+
+
+def _grid_notice_kind(record: dict) -> str | None:
+    try:
+        kind = _GRID_NOTICE_TYPES.get(int(record.get("messageType")))
+    except (TypeError, ValueError):
+        kind = None
+    if kind:
+        return kind
+    text = str(record.get("description") or "").lower()
+    if "disconnected from the grid" in text:
+        return "lost"
+    if "grid has been restored" in text:
+        return "restored"
+    return None
+
+
+def normalise_grid_notices(records, inverter_sn: str | None = None) -> list[dict] | None:
+    """Grid lost/restored notices from the Sunsynk cloud feed, oldest first (phase 43 follow-up).
+
+    Keeps only records whose kind is known and whose `sn` matches (when both are set). None when the
+    reply is not a list, so an unreadable feed is never read as 'no outages'."""
+    if not isinstance(records, list):
+        return None
+    notices = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        kind = _grid_notice_kind(record)
+        if kind is None or record.get("id") in (None, ""):
+            continue
+        sn = record.get("sn")
+        if inverter_sn and sn and str(sn) != str(inverter_sn):
+            continue
+        notices.append({"id": str(record["id"]), "kind": kind, "time": record.get("createAt"), "sn": sn})
+    return sorted(notices, key=lambda n: str(n["time"] or ""))
+
+
+def new_grid_notices(notices: list[dict], seen: list[str]) -> list[dict]:
+    """Notices whose id has not been logged before."""
+    known = set(seen or [])
+    return [n for n in notices if n["id"] not in known]
+
+
+_COUNT_KEYS = ("fault", "warning", "offline", "protect", "normal", "total")
+
+
+def normalise_inverter_counts(data) -> dict | None:
+    """Account-wide inverter status counts (`/api/v1/inverters/count`); None if unreadable.
+
+    Missing or non-numeric keys stay None (never 0)."""
+    if not isinstance(data, dict):
+        return None
+    counts = {}
+    for key in _COUNT_KEYS:
+        try:
+            counts[key] = int(data[key]) if data.get(key) is not None else None
+        except (TypeError, ValueError):
+            counts[key] = None
+    return counts if any(v is not None for v in counts.values()) else None
+
+
+def inverter_fault_flag(active_events, counts) -> bool | None:
+    """True when the realtime list has events or the cloud counts a fault/protect state.
+
+    False only when at least one source was read and shows nothing; None when neither was read."""
+    signals = []
+    if active_events is not None:
+        signals.append(bool(active_events))
+    if counts:
+        known = [counts.get(k) for k in ("fault", "protect") if counts.get(k) is not None]
+        if known:
+            signals.append(any(v > 0 for v in known))
+    return any(signals) if signals else None
+

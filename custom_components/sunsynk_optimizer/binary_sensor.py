@@ -82,7 +82,7 @@ class SunsynkOptimizerBinarySensor(CoordinatorEntity, BinarySensorEntity):
         if self._key == "grid_outage":
             return bool((state.grid_outage or {}).get("active"))
         if self._key == "inverter_fault":
-            return bool((state.inverter_events or {}).get("active"))
+            return bool((state.inverter_events or {}).get("fault"))
         if self._key == "monitor_only":
             return state.operation_mode == "monitor"
         return False
@@ -91,7 +91,9 @@ class SunsynkOptimizerBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict:
         if self._key == "inverter_fault":
             events = self.coordinator.state.inverter_events or {}
-            return {"events": events.get("active") or [], "checked": events.get("checked")}
+            return {
+                "events": events.get("active") or [], "counts": events.get("counts"), "checked": events.get("checked")
+            }
         if self._key != "grid_outage":
             return {}
         outage = self.coordinator.state.grid_outage or {}

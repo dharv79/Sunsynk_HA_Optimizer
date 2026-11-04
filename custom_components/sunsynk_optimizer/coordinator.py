@@ -108,6 +108,7 @@ class OptimizerState:
     last_pushed_flux: list[dict[str, Any]] = field(default_factory=list)
     inverter_drift: dict[str, Any] = field(default_factory=dict)
     inverter_events: dict[str, Any] = field(default_factory=dict)
+    cloud_grid_notices: dict[str, Any] = field(default_factory=dict)
     # Tariff price-change alert (phase 33): bands whose Octopus rate differs
     # from the configured `charges`, and the signature so each set alerts once.
     tariff_price_alert: dict[str, Any] = field(default_factory=dict)
