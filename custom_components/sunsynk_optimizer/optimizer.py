@@ -143,6 +143,7 @@ from .planning import (
     string_streak,
     BATTERY_BOTTOM_SOC,
     grid_online,
+    grid_restored_fallback,
     outage_record,
     outage_runtime_hours,
     outage_track,
@@ -2681,7 +2682,11 @@ class SunsynkOptimizer:
     async def _async_grid_status_changed(self, event: Event) -> None:
         """Open an outage when grid_status goes off, close it (and log it) when it returns."""
         new_state = event.data.get("new_state")
-        online = grid_online(None if new_state is None else new_state.state)
+        raw = None if new_state is None else new_state.state
+        online = grid_online(raw)
+        if online is None and self._outage_active() and grid_restored_fallback(raw, (self.coordinator.state.grid_outage or {}).get("raw")):
+            _LOGGER.warning("grid_status value %r not recognised; treating as grid restored", raw)
+            online = True
         if online is None:
             return
         state = self.coordinator.state
@@ -2689,7 +2694,7 @@ class SunsynkOptimizer:
         soc = self._essential_state(self.battery_soc_entity)
         if online is False and not self._outage_active():
             self.coordinator.update_state(
-                grid_outage={"active": True, "start": now_iso, "soc_start": soc, "soc_low": soc}
+                grid_outage={"active": True, "start": now_iso, "soc_start": soc, "soc_low": soc, "raw": str(raw)}
             )
             self._refresh_battery_runtime()
             runtime = (state.battery_runtime or {}).get("hours")

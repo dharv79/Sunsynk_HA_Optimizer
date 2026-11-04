@@ -10,6 +10,16 @@ def test_grid_online_parsing(planning):
         assert planning.grid_online(v) is None
 
 
+def test_grid_on_grid_labels_and_fallback(planning):
+    for v in ("On-grid", "on grid", "Grid-tied"):
+        assert planning.grid_online(v) is True
+    assert planning.grid_online("Off-grid") is False
+    assert planning.grid_restored_fallback("weird", "Off-grid") is True
+    assert planning.grid_restored_fallback("Off-grid", "Off-grid") is False
+    assert planning.grid_restored_fallback("unavailable", "Off-grid") is False
+    assert planning.grid_restored_fallback(None, "x") is False
+
+
 def test_runtime(planning):
     assert planning.outage_runtime_hours(60, 20, 10.0, 0.8) == 5.0
     assert planning.outage_runtime_hours(15, 20, 10.0, 0.8) == 0.0

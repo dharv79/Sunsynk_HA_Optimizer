@@ -3484,9 +3484,22 @@ def grid_online(value: Any) -> bool | None:
         return None
     if text in ("0", "false", "off", "no") or any(w in text for w in ("disconnect", "offline", "off-grid", "off grid", "outage", "lost", "fail")):
         return False
-    if text in ("1", "true", "on", "yes", "ok") or any(w in text for w in ("connect", "online", "normal", "present")):
+    if text in ("1", "true", "on", "yes", "ok") or any(w in text for w in ("connect", "online", "normal", "present", "on-grid", "on grid", "ongrid", "grid-tied", "grid tied", "grid mode")):
         return True
     return None
+
+
+def grid_restored_fallback(value: Any, outage_raw: Any) -> bool:
+    """While an outage is open, an unrecognised value that differs from the outage value counts as restored.
+
+    Protects against a grid-present label the parser has not seen: the outage would otherwise never close.
+    """
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    if text in ("", "unknown", "unavailable", "none"):
+        return False
+    return grid_online(value) is None and text != str(outage_raw).strip().lower()
 
 
 def outage_runtime_hours(soc: float | None, shutdown_soc: float, capacity_kwh: float, load_kw: float | None) -> float | None:
