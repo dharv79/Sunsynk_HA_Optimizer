@@ -265,6 +265,8 @@ from .planning import (
     synthetic_hourly_profile,
     trailing_week,
     days_since_full,
+    IMPORT_CAUSES,
+    import_cause_step,
     full_charge_due,
     trim_defer_kwh,
     trim_target_soc,
@@ -352,6 +354,7 @@ class SunsynkOptimizer:
         # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
         self._clipped: dict[str, Any] = {}
         self._over_limit: dict[str, Any] = {}
+        self._import_causes: dict[str, Any] = {}
         # Phase 55: learned 16:00-22:00 load (kW), refreshed by the 01:55 plan; unpersisted.
         self._evening_load_kw: float | None = None
         # Phase 40: today's daytime grid_pac samples and whether it alerted; unpersisted.
@@ -2008,6 +2011,26 @@ class SunsynkOptimizer:
             if segment:
                 self._over_limit["kwh"][segment] = self._over_limit["kwh"].get(segment, 0.0) + kwh
         self._over_limit["prev"] = sample
+        self._track_import_cause(now, today, sample)
+
+    def _track_import_cause(self, now, today: str, sample: dict[str, Any]) -> None:
+        """Phase 42: assign import since the last sample to a cause (no writes); transient like _over_limit."""
+        if self._import_causes.get("date") != today:
+            self._import_causes = {"date": today, "prev": None, "kwh": {}}
+        cover = self._peak_cover or {}
+        sample = {
+            **sample,
+            "slots_held": bool(self._slots_held()),
+            "slot_hold": bool(cover.get("pushed") and cover.get("date") == today),
+        }
+        cause, kwh = import_cause_step(self._import_causes["prev"], sample)
+        if cause:
+            self._import_causes["kwh"][cause] = self._import_causes["kwh"].get(cause, 0.0) + kwh
+        self._import_causes["prev"] = sample
+        totals = {k: round(v, 2) for k, v in self._import_causes["kwh"].items()}
+        shown = {"date": today, **totals, "total_kwh": round(sum(totals.values()), 2)}
+        if shown != self.coordinator.state.import_causes:
+            self.coordinator.update_state(touch=False, import_causes=shown)
 
     async def _async_daytime_import_check(self) -> None:
         """05:00-16:00: alert once a day on sustained grid import while the battery should cover the house (phase 40).
@@ -2281,6 +2304,13 @@ class SunsynkOptimizer:
             ),
         }
         await self.data_logger.async_log_day_kpis(**record)
+        causes = self._import_causes if self._import_causes.get("date") == date else {}
+        total = round(sum((causes.get("kwh") or {}).values()), 2)
+        await self.data_logger.async_log_import_causes(
+            date=date, **{c: round((causes.get("kwh") or {}).get(c, 0.0), 2) for c in IMPORT_CAUSES if c != "unknown"},
+            unknown=round((causes.get("kwh") or {}).get("unknown", 0.0), 2), attributed_kwh=total,
+            grid_import_kwh=(snapshots.get("22:00") or {}).get("grid_import_kwh"),
+        )
         return {"type": "day_kpis", **record}
 
     async def _async_peak_export(self, _now) -> None:

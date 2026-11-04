@@ -288,6 +288,10 @@ class DataLogger:
         """Log the 22:00 efficiency KPIs (phase 14): one per day."""
         await self._async_append(_record("day_kpis", **fields))
 
+    async def async_log_import_causes(self, **fields: Any) -> None:
+        """Log the day's grid import by cause (phase 42): one per day."""
+        await self._async_append(_record("import_causes", **fields))
+
     async def async_log_peak_export(self, **fields: Any) -> None:
         """Log the 16:00 peak surplus export decision (phase 17): one per day."""
         await self._async_append(_record("peak_export", **fields))
@@ -872,7 +876,7 @@ class DataLogger:
     # daily_cost is not deduped here — it merges via async_merge_daily_cost.
     _DEDUP_TYPES = (
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog", "charge_outcome",
-        "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load",
+        "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load", "import_causes",
         "half_hourly_import", "half_hourly_export", "capacity_estimate",
         "meter_reconciliation_import", "meter_reconciliation_export",
     )

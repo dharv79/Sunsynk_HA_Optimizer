@@ -961,6 +961,45 @@ def over_limit_import_step(prev: dict[str, Any] | None, sample: dict[str, Any]) 
     return segment, (imp1 - imp0) if segment else 0.0
 
 
+IMPORT_CAUSES = ("free_event", "grid_charge", "load_over_limit", "battery_floor", "slot_hold", "unknown")
+IMPORT_CAUSE_CHARGE_WINDOW = (2 * 60, 5 * 60)
+
+
+def import_cause_step(prev: dict[str, Any] | None, sample: dict[str, Any]) -> tuple[str | None, float]:
+    """Assign the grid import between two samples to one cause (phase 42): (cause, kWh).
+
+    Samples {minute, soc, grid_import_kwh, slots_held, slot_hold}. A long gap, a meter reset
+    or any unknown reading is not attributed (None, 0.0) - never guessed. Order of evidence:
+    an event holding the slots; a rising SOC (grid charge); a falling SOC above the floor
+    (load above what the inverter can discharge, as over_limit_import_step); SOC at the floor;
+    a flat SOC while a slot target is known to hold the battery; otherwise 'unknown'.
+    """
+    if prev is None:
+        return None, 0.0
+    values = (prev.get("minute"), prev.get("soc"), prev.get("grid_import_kwh"),
+              sample.get("minute"), sample.get("soc"), sample.get("grid_import_kwh"))
+    if any(v is None for v in values):
+        return None, 0.0
+    m0, soc0, imp0, m1, soc1, imp1 = values
+    if not 0 < m1 - m0 <= OVER_LIMIT_MAX_GAP_MIN or imp1 < imp0:
+        return None, 0.0
+    kwh = imp1 - imp0
+    if kwh <= 0:
+        return None, 0.0
+    if sample.get("slots_held") or prev.get("slots_held"):
+        return "free_event", kwh
+    if soc1 > soc0:
+        return "grid_charge", kwh
+    floor = KPI_RESERVE_SOC + OVER_LIMIT_MARGIN_SOC
+    if soc1 < soc0 and min(soc0, soc1) > floor:
+        return "load_over_limit", kwh
+    if min(soc0, soc1) <= floor:
+        return "battery_floor", kwh
+    if sample.get("slot_hold") or IMPORT_CAUSE_CHARGE_WINDOW[0] <= m0 < IMPORT_CAUSE_CHARGE_WINDOW[1]:
+        return "slot_hold", kwh
+    return "unknown", kwh
+
+
 def day_kpis(
     snapshots: dict[str, dict[str, Any]],
     prices_pence: dict[str, float | None],
