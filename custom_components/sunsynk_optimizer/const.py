@@ -168,6 +168,8 @@ CONF_PEAK_COVER_LIVE = "peak_cover_live"
 DEFAULT_PEAK_COVER_LIVE = False
 CONF_TRIM_DEFER_LIVE = "trim_defer_live"
 DEFAULT_TRIM_DEFER_LIVE = False
+CONF_FULL_CHARGE_SKIP_LIVE = "full_charge_skip_live"
+DEFAULT_FULL_CHARGE_SKIP_LIVE = False
 
 # Optional HA AI Task-generated weekly insight (v1.0.11 Part 4). Off by
 # default: depends on the user having an AI Task provider configured in this
