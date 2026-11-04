@@ -3630,16 +3630,17 @@ def apply_user_override(
 # --------------------------------------------------------------------------- #
 
 EVENT_PROBE_ROUTES = (
-    # Round 1 (04/11/2026): inverter routes answer "No Permissions"; plant/{id}/events exists but needs `lan`.
-    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en",
-    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&type=1",
-    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&type=2",
-    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&sn={sn}",
-    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&status=0",
-    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&status=1",
+    # Round 2 (04/11/2026): plant/{id}/events accepts `lan` but returns code 500 with only page/limit/lan,
+    # so round 3 adds the date range and ids a typical events DTO would want.
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&startTime={start}&endTime={today}",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&startDate={start}&endDate={today}",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&beginTime={start}&endTime={today}&status=1",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&sn={sn}&startTime={start}&endTime={today}&type=1",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&date={today}",
+    "/api/v1/plant/{plant_id}/events?page=1&limit=20&lan=en&plantId={plant_id}&startTime={start}&endTime={today}",
 )
 
 
-def event_probe_paths(inverter_sn: str, plant_id: str) -> list[str]:
-    """Candidate read-only GET routes for the cloud's alarm/event list, with ids filled in."""
-    return [r.format(sn=inverter_sn, plant_id=plant_id) for r in EVENT_PROBE_ROUTES]
+def event_probe_paths(inverter_sn: str, plant_id: str, today: str = "2026-01-01", start: str = "2025-12-01") -> list[str]:
+    """Candidate read-only GET routes for the cloud's alarm/event list, with ids and dates filled in."""
+    return [r.format(sn=inverter_sn, plant_id=plant_id, today=today, start=start) for r in EVENT_PROBE_ROUTES]

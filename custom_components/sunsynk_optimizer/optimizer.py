@@ -2650,7 +2650,11 @@ class SunsynkOptimizer:
 
     async def async_service_probe_events(self) -> dict[str, Any]:
         """Service: probe the Sunsynk cloud's alarm/event routes (phase 43), read-only. Reply and debug stream."""
-        results = await self.coordinator.api.async_probe_events(event_probe_paths(self.inverter_serial, self.plant_id))
+        now = dt_util.now()
+        paths = event_probe_paths(
+            self.inverter_serial, self.plant_id, now.strftime("%Y-%m-%d"), (now - timedelta(days=30)).strftime("%Y-%m-%d")
+        )
+        results = await self.coordinator.api.async_probe_events(paths)
         target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if target:
             await self.async_notify(

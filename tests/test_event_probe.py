@@ -7,3 +7,5 @@ def test_paths_filled_and_read_only(planning):
     assert all("{" not in p and p.startswith("/api/v1/") for p in paths)
     assert any("SN123" in p for p in paths) and any("/42/" in p for p in paths)
     assert all("lan=en" in p for p in paths)
+    dated = planning.event_probe_paths("SN123", "42", "2026-11-04", "2026-10-05")
+    assert any("2026-11-04" in p and "2026-10-05" in p for p in dated)
