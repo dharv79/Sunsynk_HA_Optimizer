@@ -57,6 +57,12 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_trim_defer.py` | Phase 65 trim overflow/defer split, no-forecast and clipped fallbacks |
 | `tests/test_full_charge_skip.py` | Phase 68 days since last 99% SOC, due/skip, 14-day cap |
 | `tests/test_import_causes.py` | Phase 42 import cause ordering, gaps, resets |
+| `tests/test_data_audit.py` | Phase 45 audit rules, summary, config redaction |
+| `tests/test_kpi_sensors.py` | Phase 47 KPI sensor values (None, never 0) |
+| `tests/test_grid_outage.py` | Phase 48 grid_status parser, runtime, outage record |
+| `tests/test_pv_strings.py` | Phase 49 string share, anomaly, streak |
+| `tests/test_user_override.py` | Phase 46 next plan date and override application |
+| `tests/test_event_probe.py` | Phase 43 probe route list |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |

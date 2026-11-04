@@ -50,13 +50,13 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 40. Daytime load spike alert | Done, merged (33fb1fd, PR #63) | XS, ~20k |
 | 41. Shadow go-live scorecard | Done, merged (9eb643f, PR #93) | M, ~40k actual |
 | 42. Import cause ledger ("why did I import?") | Done, merged (7a23093, PR #119), shadow; weekly digest breakdown not built | M, ~40k actual |
-| 43. Inverter fault and event log feed (feasibility-gated) | Planned, not built | S |
+| 43. Inverter fault and event log feed (feasibility-gated) | On hold: probe service merged (d23c06d, PR #126); reader needs a live response shape | S |
 | 44. CT clamp vs smart-meter reconciliation (1.0.12b31) | Done, merged (9fd7115, PR #90) | XS, ~35k actual |
-| 45. Nightly data-integrity audit, HA Repairs and a diagnostics download | Planned, not built | M |
-| 46. HA service actions and actionable notifications | Planned, not built | M |
-| 47. KPI and money sensors with long-term statistics | Planned, not built | S |
-| 48. Grid outage detection, runtime sensor and outage log | Planned, not built | S |
-| 49. PV string health monitor (MPPT0 vs MPPT1) | Planned, not built | S |
+| 45. Nightly data-integrity audit, HA Repairs and a diagnostics download | Done, merged (77ecb00, PR #121) | M, ~35k actual |
+| 46. HA service actions and actionable notifications | Done, merged (e7c8e6b, PR #125); `pause_export_until` and notification action buttons not built | M, ~35k actual |
+| 47. KPI and money sensors with long-term statistics | Done, merged (79562e0, PR #122); weekly sensors and dashboard card not built | S, ~25k actual |
+| 48. Grid outage detection, runtime sensor and outage log | Done, merged (0f86a4a, PR #123); needs a live `grid_status` sample | S, ~30k actual |
+| 49. PV string health monitor (MPPT0 vs MPPT1) | Done, merged (d2cf87c, PR #124) | S, ~25k actual |
 | 50. Battery and PV upgrade advisor | Planned, not built | M |
 | 51. Free events: DST-safe timers, a watch_from guard and sold-energy split | Done, merged (0708689, PR #107) | S, ~45k actual |
 | 52. Self-sufficiency KPI that excludes battery grid-charging and free import | Done, merged (32376c0, PR #91) | XS, ~30k actual |

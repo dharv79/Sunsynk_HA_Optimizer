@@ -67,3 +67,10 @@ The dashboard's "Bill check and battery health" card (Consumption column, after 
 ### Billed last month (phase 36, 14/10/2026)
 
 `number.billed_last_month` (£, box entry): enter last month's billed net £ from the Octopus statement to reconcile it against the logged cost. See weekly-reports.md. Its attributes (`month` plus `planning.BILL_ATTRIBUTE_KEYS`) are always present, as `None` until a bill is reconciled. Otherwise Spook flags the dashboard's `logged_gbp`, `gap_gbp` and `days_logged` rows as unknown attributes (16/10/2026, `test_bill_attributes_always_has_every_key`).
+
+## Device, KPI sensors, services (04/11/2026, phases 46-49)
+
+- **Device (47).** `entity.optimizer_device_info` (identifiers = inverter serial, rule 2) is set on every platform's entities. New entities set an explicit `entity_id`; existing ones keep their registry ids.
+- **KPI sensors (47).** `sensor.kpi_*` from the latest `day_kpis` (`last_day_kpis`): daily £ are MONETARY/TOTAL with `last_reset`, the rest MEASUREMENT. Unknown, never 0.
+- **Others.** `sensor.data_health` (45), `binary_sensor.grid_outage` and `sensor.battery_runtime` (48), `sensor.pv_string_share` (49).
+- **Services (46, 43).** `set_tonight_target`, `skip_tonight`, `schedule_free_event`, `cancel_free_event`, `get_plan` (response only), `probe_inverter_events` (response only, read-only). `services.yaml` + `strings.json`. Overrides apply at the next 01:55 plan; writes refuse in monitor mode and while a free event holds the slots.

@@ -1,6 +1,6 @@
 # Phase 47 — KPI and money sensors with long-term statistics
 
-**Status:** Planned, not built. **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (04/11/2026). **Size:** S. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,7 @@ Confirmed: no SensorStateClass and no device_info anywhere. Low effort and high 
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (04/11/2026)
+
+`planning.KPI_SENSORS` / `kpi_sensor_values`: five 22:00 KPI sensors (`sensor.kpi_avoidable_import`, `kpi_export_peak`, `kpi_self_sufficiency`, `kpi_unused_charge`, `kpi_over_limit_import`). Daily £ are MONETARY + TOTAL with `last_reset`; others MEASUREMENT. `entity.optimizer_device_info` groups every platform under one device keyed on the inverter serial. Daily battery saving, weekly sensors and the dashboard card are not built.
