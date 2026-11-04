@@ -170,5 +170,46 @@
       "title": "Sunsynk Optimizer: inconsistent daily figures",
       "description": "{count} days have figures that contradict each other: {items}. The learned corrections may be using a bad input."
     }
+  },
+  "services": {
+    "set_tonight_target": {
+      "name": "Set tonight's target",
+      "description": "Override the next overnight charge target SOC (applies to the next 01:55 plan; learning ignores that night).",
+      "fields": {
+        "soc": {
+          "name": "Target SOC",
+          "description": "Target battery percentage, 20 to 100."
+        }
+      }
+    },
+    "skip_tonight": {
+      "name": "Skip tonight's charge",
+      "description": "Hold the battery where it is for the next overnight plan (no grid charge).",
+      "fields": {}
+    },
+    "schedule_free_event": {
+      "name": "Schedule a free event",
+      "description": "Plan a free electricity event: sell before, refill during.",
+      "fields": {
+        "start": {
+          "name": "Free start",
+          "description": "When the free electricity starts."
+        },
+        "end": {
+          "name": "Free end",
+          "description": "When it ends."
+        }
+      }
+    },
+    "cancel_free_event": {
+      "name": "Cancel the free event",
+      "description": "Cancel a scheduled or in-progress free event.",
+      "fields": {}
+    },
+    "get_plan": {
+      "name": "Get the plan",
+      "description": "Dry-run tonight's plan and return it. Pushes, logs and stores nothing.",
+      "fields": {}
+    }
   }
 }

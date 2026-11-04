@@ -123,6 +123,8 @@ class OptimizerState:
     battery_runtime: dict[str, Any] = field(default_factory=dict)
     # PV string health (phase 49): date, share, median, streak, weaker, mppt0_kwh, mppt1_kwh.
     pv_strings: dict[str, Any] = field(default_factory=dict)
+    # One-night target override from a service call (phase 46): {date, soc} or {date, skip: True}.
+    user_override: dict[str, Any] = field(default_factory=dict)
     # Battery capacity tracking (phase 34): date, estimate_kwh, samples,
     # configured_kwh, pct_of_configured. Shadow: never changes battery_capacity.
     battery_capacity_estimate: dict[str, Any] = field(default_factory=dict)

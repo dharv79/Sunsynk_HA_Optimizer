@@ -10,16 +10,57 @@
 
 from __future__ import annotations
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, PLATFORMS, REMOVED_ENTITY_KEYS
 from .coordinator import SunsynkOptimizerCoordinator
 
 
+def _optimizer(hass: HomeAssistant):
+    """The single config entry's optimizer (the integration is single_config_entry)."""
+    coordinators = [c for c in hass.data.get(DOMAIN, {}).values() if hasattr(c, "optimizer")]
+    if not coordinators:
+        raise HomeAssistantError("Sunsynk Optimizer is not set up")
+    return coordinators[0].optimizer
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
+
+    async def _set_target(call: ServiceCall) -> None:
+        await _optimizer(hass).async_service_override(soc=call.data["soc"])
+
+    async def _skip(call: ServiceCall) -> None:
+        await _optimizer(hass).async_service_override(skip=True)
+
+    async def _schedule(call: ServiceCall) -> None:
+        await _optimizer(hass).async_service_schedule_free_event(call.data["start"], call.data["end"])
+
+    async def _cancel(call: ServiceCall) -> None:
+        await _optimizer(hass).async_service_cancel_free_event()
+
+    async def _get_plan(call: ServiceCall) -> dict:
+        return await _optimizer(hass).async_service_get_plan()
+
+    hass.services.async_register(
+        DOMAIN, "set_tonight_target", _set_target,
+        schema=vol.Schema({vol.Required("soc"): vol.All(vol.Coerce(int), vol.Range(min=20, max=100))}),
+    )
+    hass.services.async_register(DOMAIN, "skip_tonight", _skip, schema=vol.Schema({}))
+    hass.services.async_register(
+        DOMAIN, "schedule_free_event", _schedule,
+        schema=vol.Schema({vol.Required("start"): cv.datetime, vol.Required("end"): cv.datetime}),
+    )
+    hass.services.async_register(DOMAIN, "cancel_free_event", _cancel, schema=vol.Schema({}))
+    hass.services.async_register(
+        DOMAIN, "get_plan", _get_plan, schema=vol.Schema({}), supports_response=SupportsResponse.ONLY
+    )
     return True
 
 
