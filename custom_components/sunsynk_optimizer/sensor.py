@@ -10,18 +10,21 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .data_logger import DataLogger
-from .planning import explain_plan, free_event_attributes
+from .entity import optimizer_device_info
+from .planning import KPI_SENSORS, explain_plan, free_event_attributes, kpi_sensor_values
 
 
 _ADAPTIVE_THRESHOLDS = {
@@ -97,7 +100,40 @@ async def async_setup_entry(
                 coordinator, entry, "marginal_cost", "Cost of 1 kWh now", entity_id="sensor.cost_of_1_kwh_now"
             ),
         ]
+        + [KpiSensor(coordinator, entry, *spec) for spec in KPI_SENSORS]
     )
+
+
+class KpiSensor(CoordinatorEntity, SensorEntity):
+    """One 22:00 KPI as a long-term-statistics sensor (phase 47). Unknown, never 0, when unavailable."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator, entry: ConfigEntry, key: str, _field: str, name: str, unit: str, kind: str) -> None:
+        super().__init__(coordinator)
+        self._key = key
+        self._attr_name = name
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self.entity_id = f"sensor.{key}"
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_info = optimizer_device_info(entry)
+        if kind == "money":
+            self._attr_device_class = SensorDeviceClass.MONETARY
+            self._attr_state_class = SensorStateClass.TOTAL
+            self._attr_suggested_display_precision = 2
+        else:
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> float | None:
+        return kpi_sensor_values(self.coordinator.state.last_day_kpis).get(self._key)
+
+    @property
+    def last_reset(self) -> datetime | None:
+        if self._attr_state_class != SensorStateClass.TOTAL:
+            return None
+        day = dt_util.parse_date(str(_as_dict(self.coordinator.state.last_day_kpis).get("date") or ""))
+        return dt_util.start_of_local_day(day) if day else None
 
 
 class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
@@ -119,6 +155,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
         self._attr_entity_category = entity_category
+        self._attr_device_info = optimizer_device_info(entry)
 
     @property
     def native_unit_of_measurement(self) -> str | None:

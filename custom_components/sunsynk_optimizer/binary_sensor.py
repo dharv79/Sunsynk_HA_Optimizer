@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .entity import optimizer_device_info
 from .const import DOMAIN
 
 
@@ -56,6 +57,7 @@ class SunsynkOptimizerBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._key = key
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_device_info = optimizer_device_info(entry)
         self._attr_device_class = device_class
         if icon:
             self._attr_icon = icon

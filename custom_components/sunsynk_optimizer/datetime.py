@@ -19,6 +19,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from .entity import optimizer_device_info
 from .const import DOMAIN
 
 
@@ -52,6 +53,7 @@ class FreeEventTimeEntity(CoordinatorEntity, DateTimeEntity):
         self._which = which
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_free_event_{which}"
+        self._attr_device_info = optimizer_device_info(entry)
 
     @property
     def _state_field(self) -> str:
