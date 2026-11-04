@@ -615,6 +615,97 @@ def weighted_forecast_correction(
     return max(0.5, min(3.0, round(factor, 3))), basis
 
 
+# Phase 64: newsvendor choice of the forecast scale for the hourly solar bridge.
+# Shadow only: logged beside the live target, never pushed.
+NEWSVENDOR_MIN_DAYS = 20
+NEWSVENDOR_CR_BOUNDS = (0.2, 0.8)   # keep the quantile off the extreme tails
+NEWSVENDOR_MIN_OVERBUY_P = 0.1      # over-buy cost floor so a free surplus can't push CR to 1
+
+
+def newsvendor_costs(
+    day_p: float | None, offpeak_p: float | None, export_p: float | None,
+    efficiency: float = CHARGE_EFFICIENCY, wear_pence: float | None = None,
+) -> tuple[float, float] | None:
+    """(under-buy, over-buy) p per battery kWh, or None when a price is missing (never 0p).
+
+    Under-buying a kWh means importing it at the day rate instead of the cheap
+    rate; over-buying means paying the cheap rate for energy that ends up
+    exported at the peak export rate (plus wear on the extra cycle).
+    """
+    if None in (day_p, offpeak_p, export_p) or efficiency <= 0:
+        return None
+    cheap = offpeak_p / efficiency
+    under = day_p - cheap
+    over = cheap - export_p + (wear_pence or 0.0)
+    if under <= 0:
+        return None
+    return round(under, 3), round(max(over, NEWSVENDOR_MIN_OVERBUY_P), 3)
+
+
+def newsvendor_quantile(under_p: float, over_p: float) -> float:
+    """Quantile of the actual/forecast ratio to plan at.
+
+    A higher ratio means more solar and a smaller bridge, so the demand-side
+    critical ratio under/(under+over) maps to the (1 - CR) ratio quantile.
+    """
+    cr = under_p / (under_p + over_p)
+    cr = max(NEWSVENDOR_CR_BOUNDS[0], min(NEWSVENDOR_CR_BOUNDS[1], cr))
+    return round(1.0 - cr, 3)
+
+
+def quantile_correction(
+    paired_days: list[dict[str, Any]],
+    today: date,
+    quantile: float,
+    band: str | None = None,
+    half_life_days: float = FORECAST_CORRECTION_HALF_LIFE_DAYS,
+    min_days: int = NEWSVENDOR_MIN_DAYS,
+) -> tuple[float | None, int]:
+    """(recency-weighted quantile of actual/forecast, days used), or (None, n) below ``min_days``.
+
+    Same ratio rules as weighted_forecast_correction (forecast <= 0.5 kWh and
+    missing actuals skipped, capped 0.5-3.0). Uses in-band days when they reach
+    ``min_days``, else all days; thin history yields None, not a guess.
+    """
+    valid = []
+    for d in paired_days:
+        forecast = d.get("solar_forecast_kwh") or 0.0
+        if forecast <= 0.5 or d.get("actual_solar_kwh") is None:
+            continue
+        try:
+            age = max(0, (today - date.fromisoformat(d["date"])).days)
+        except (KeyError, TypeError, ValueError):
+            continue
+        valid.append((d["actual_solar_kwh"] / forecast, 0.5 ** (age / half_life_days), d.get("forecast_band")))
+    in_band = [v for v in valid if band is not None and v[2] == band]
+    if len(in_band) >= min_days:
+        valid = in_band
+    if len(valid) < min_days:
+        return None, len(valid)
+    valid.sort(key=lambda v: v[0])
+    target = sum(w for _, w, _ in valid) * max(0.0, min(1.0, quantile))
+    running, ratio = 0.0, valid[-1][0]
+    for r, weight, _ in valid:
+        running += weight
+        if running >= target:
+            ratio = r
+            break
+    return max(0.5, min(3.0, round(ratio, 3))), len(valid)
+
+
+def newsvendor_target(
+    hourly_forecast_kwh: dict[int, float] | None,
+    avg_consumption_kw: float,
+    battery_capacity_kwh: float,
+    ratio: float | None,
+) -> int | None:
+    """Pre-adjustment hourly-bridge SOC at the newsvendor ``ratio``; None when it can't be computed."""
+    if not hourly_forecast_kwh or ratio is None:
+        return None
+    gap, _hour = walk_bridge_gap(hourly_forecast_kwh, avg_consumption_kw, ratio)
+    return bridge_soc(gap, battery_capacity_kwh)
+
+
 # Phase 12: overnight load rate learned from the 06:00 morning_state reading
 # (SolarSynkV3 daily load at 06:00 = 00:00-06:00 household use).
 OVERNIGHT_LOAD_HOURS = 6.0
@@ -2999,6 +3090,32 @@ def shadow_scorecard(
         score["error_ratio"] = round(ratio, 3)
         score["verdict"] = "ready" if ratio <= 1 - SCORECARD_ERROR_GAIN else "harmful" if ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
     out["weighted_correction"] = score
+    # 64 newsvendor ratio: asymmetric p-cost of the solar-scale error, live factor vs newsvendor ratio.
+    nv_live: list[float] = []
+    nv_shadow: list[float] = []
+    nv_dates: list[str] = []
+    for p in plans:
+        actual = (actuals.get(p["date"]) or {}).get("actual_solar_kwh")
+        raw, live = p.get("raw_forecast_kwh"), p.get("forecast_correction_factor")
+        ratio, under, over = p.get("newsvendor_ratio"), p.get("newsvendor_under_p"), p.get("newsvendor_over_p")
+        if None in (actual, raw, live, ratio, under, over) or raw <= 0.5:
+            continue
+        true = actual / raw
+        # A scale above the true ratio under-buys (dear); below it over-buys.
+        nv_live.append(under * max(0.0, live - true) + over * max(0.0, true - live))
+        nv_shadow.append(under * max(0.0, ratio - true) + over * max(0.0, true - ratio))
+        nv_dates.append(p["date"])
+    nv_score = _score(len(nv_dates), 0, None, nv_dates, "asymmetric solar-scale error cost vs live factor")
+    if len(nv_dates) >= SCORECARD_MIN_DAYS and sum(nv_live) > 0:
+        nv_ratio = sum(nv_shadow) / sum(nv_live)
+        nv_score["changed"] = len(nv_dates)
+        nv_score["delta_gbp"] = None
+        nv_score["error_ratio"] = round(nv_ratio, 3)
+        nv_score["verdict"] = (
+            "ready" if nv_ratio <= 1 - SCORECARD_ERROR_GAIN
+            else "harmful" if nv_ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
+        )
+    out["newsvendor_target"] = nv_score
     # 23 gentle charge: nights it was applied (no £ counterfactual).
     gentle = [p for p in plans if p.get("gentle_charge_applied")]
     out["gentle_charge"] = _score(

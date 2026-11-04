@@ -1,6 +1,6 @@
 # Phase 64 — Pick the bridge target from the forecast-error distribution (newsvendor rule)
 
-**Status:** Planned, not built. **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Built in shadow (PR pending). **Size:** M. **Category:** optimisation. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 

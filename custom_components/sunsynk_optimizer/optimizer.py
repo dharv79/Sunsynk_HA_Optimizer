@@ -244,6 +244,10 @@ from .planning import (
     round_or_none,
     score_full_charge_day,
     solar_until_kwh,
+    newsvendor_costs,
+    newsvendor_quantile,
+    newsvendor_target,
+    quantile_correction,
     select_target_soc,
     should_log_import_plan,
     solar_kwh_to_fill,
@@ -1048,6 +1052,12 @@ class SunsynkOptimizer:
             )
             nudge = feedback_adj if feedback_live else soc_adjustment
             target_soc = apply_soc_adjustments(target_soc, overnight_drain_adjustment, nudge)
+        # Phase 64 (shadow): the hourly bridge re-planned at the newsvendor quantile of
+        # the logged actual/forecast ratios. Logged only; never pushed.
+        nv = self._newsvendor_shadow(
+            decision, forecast_fallback, paired_days, now.date(), band, avg_consumption_kw, battery_capacity_kwh,
+            overnight_drain_adjustment, feedback_adj if feedback_live else soc_adjustment,
+        )
         # A free event later today should start at its floor: buy only that plus the load until then.
         uncapped_target_soc = target_soc
         free_event = self.coordinator.state.free_event
@@ -1140,6 +1150,7 @@ class SunsynkOptimizer:
             "forecast_correction_factor": forecast_correction,
             "forecast_correction_weighted": weighted_correction,
             "forecast_correction_weighted_basis": weighted_basis,
+            **nv,
             "solar_forecast_kwh": solar_forecast_kwh,
             "low_solar_forecast_kwh": round(low_solar_forecast_kwh, 2),
             "forecast_band": band,
@@ -2116,6 +2127,33 @@ class SunsynkOptimizer:
             soc=round_or_none(soc, 1),
             soc_from_cache=soc_cached,
         )
+
+    def _newsvendor_shadow(
+        self, decision, forecast_fallback: bool, paired_days: list[dict[str, Any]], today, band: str,
+        avg_consumption_kw: float, battery_capacity_kwh: float, drain_adjustment: int, nudge: int,
+    ) -> dict[str, Any]:
+        """Phase 64 shadow fields; all None unless the hourly bridge ran with enough history and prices."""
+        empty: dict[str, Any] = {
+            "target_soc_newsvendor": None, "newsvendor_ratio": None, "newsvendor_quantile": None,
+            "newsvendor_under_p": None, "newsvendor_over_p": None,
+        }
+        if decision.reason != "solar_bridge_hourly" or forecast_fallback:
+            return empty
+        prices, _sources = self._tariff_prices(today)
+        costs = newsvendor_costs(prices.get("day"), prices.get("offpeak"), prices.get("export_peak"),
+                                 wear_pence=self._wear_pence())
+        if costs is None:
+            return empty
+        quantile = newsvendor_quantile(*costs)
+        ratio, _days = quantile_correction(paired_days, today, quantile, band)
+        bridge = newsvendor_target(self._get_hourly_forecast_kwh(), avg_consumption_kw, battery_capacity_kwh, ratio)
+        if bridge is None:
+            return empty
+        target = bridge if bridge >= 100 else apply_soc_adjustments(bridge, drain_adjustment, nudge)
+        return {
+            "target_soc_newsvendor": target, "newsvendor_ratio": ratio, "newsvendor_quantile": quantile,
+            "newsvendor_under_p": costs[0], "newsvendor_over_p": costs[1],
+        }
 
     def _wear_pence(self) -> float | None:
         """Battery wear p/kWh from the cost and lifetime options; None when blank (phase 24)."""
