@@ -10,14 +10,13 @@ def test_grid_online_parsing(planning):
         assert planning.grid_online(v) is None
 
 
-def test_grid_on_grid_labels_and_fallback(planning):
-    for v in ("On-grid", "on grid", "Grid-tied"):
-        assert planning.grid_online(v) is True
-    assert planning.grid_online("Off-grid") is False
-    assert planning.grid_restored_fallback("weird", "Off-grid") is True
-    assert planning.grid_restored_fallback("Off-grid", "Off-grid") is False
-    assert planning.grid_restored_fallback("unavailable", "Off-grid") is False
-    assert planning.grid_restored_fallback(None, "x") is False
+def test_grid_online_from_voltage(planning):
+    assert planning.grid_online_from_voltage(240.4) is True
+    assert planning.grid_online_from_voltage("231") is True
+    assert planning.grid_online_from_voltage(0) is False
+    assert planning.grid_online_from_voltage(12) is False
+    for v in (None, "unavailable", 140):
+        assert planning.grid_online_from_voltage(v) is None
 
 
 def test_runtime(planning):
