@@ -57,6 +57,7 @@ from .const import (
     CONF_BATTERY_LIFETIME_KWH,
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_FULL_WINDOW_LIVE,
+    CONF_EVENING_LOAD_LIVE,
     CONF_MEASURED_RATE_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
@@ -98,6 +99,7 @@ from .const import (
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_PEAK_EXPORT_LIVE,
     DEFAULT_FULL_WINDOW_LIVE,
+    DEFAULT_EVENING_LOAD_LIVE,
     DEFAULT_MEASURED_RATE_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
@@ -204,6 +206,7 @@ from .planning import (
     shadow_scorecard,
     soc_cap_shadow,
     daytime_load_kw,
+    evening_reserve_choice,
     evening_reserve_soc,
     days_in_period,
     flux1_end_minutes,
@@ -214,6 +217,7 @@ from .planning import (
     hhmm_to_minutes,
     import_feedback_adjustment,
     latest_complete_cost_day,
+    learned_evening_load_kw,
     learned_load_kw,
     max_charge_current_a,
     minutes_to_hhmm,
@@ -339,6 +343,8 @@ class SunsynkOptimizer:
         # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
         self._clipped: dict[str, Any] = {}
         self._over_limit: dict[str, Any] = {}
+        # Phase 55: learned 16:00-22:00 load (kW), refreshed by the 01:55 plan; unpersisted.
+        self._evening_load_kw: float | None = None
         # Phase 40: today's daytime grid_pac samples and whether it alerted; unpersisted.
         self._daytime_import: dict[str, Any] = {}
         # Cost-aware export-disable shadow-mode tally (v1.0.11 Part 3). Counts
@@ -993,6 +999,7 @@ class SunsynkOptimizer:
         # load readings (clamped to 0.5x-2x config); away keeps its config rate.
         learned_kw, learned_load_days = (None, 0) if away else learned_load_kw(paired_days, now.date(), is_weekend)
         avg_consumption_kw, load_source = resolve_load_kw(avg_consumption_kw, learned_kw)
+        await self._refresh_evening_load(paired_days, now.date(), is_weekend, away)
         forecast_correction = self.data_logger.compute_forecast_correction(paired_days)
         # When the forecast sensor was unavailable we already used yesterday's raw
         # value; don't apply the correction factor a second time on top of values
@@ -1491,7 +1498,8 @@ class SunsynkOptimizer:
                     "endTime": (now_local + timedelta(minutes=45)).strftime("%H:%M"),
                     "targetSoc": trim_target,
                 },
-                {**base_action, "evening_reserve_soc": reserve},
+                {**base_action, "evening_reserve_soc": reserve,
+                 "evening_reserve_soc_learned": self._evening_reserve_pair()[1]},
                 f"soc_{round(soc)}%_exceeds_85",
             )
             title = "🔋 Sunsynk: battery trim" if api_ok else "⚠️ Sunsynk: battery trim NOT applied"
@@ -2193,6 +2201,8 @@ class SunsynkOptimizer:
             **kpis,
             "price_source": price_source(sources, *TARIFF_BANDS),
             "evening_reserve_soc": self._evening_reserve_soc(),
+            "evening_load_kw_learned": self._evening_load_kw,
+            "evening_reserve_soc_learned": self._evening_reserve_pair()[1],
             "wear_cost_p": self._wear_pence(),
             # Phase 37: what the day cost with vs without the battery.
             **no_battery_baseline(
@@ -2456,13 +2466,30 @@ class SunsynkOptimizer:
         )
         return target, reserve
 
+    async def _refresh_evening_load(self, paired_days: list[dict[str, Any]], today, weekend: bool, away: bool) -> None:
+        """Phase 55: learn the 16:00-22:00 load from the meter snapshots (None below 7 home days)."""
+        if away:
+            return
+        days = await self.data_logger.async_load_snapshot_days(30)
+        skip = {d["date"] for d in paired_days if d.get("away") and d.get("date")}
+        self._evening_load_kw, _n = learned_evening_load_kw(days, today, weekend, skip)
+
+    def _evening_reserve_pair(self, hours: float | None = None) -> tuple[int, int | None]:
+        """(reserve in force, learned-load reserve or None); learned only in force when live."""
+        cfg = self.cfg
+        kwargs = {} if hours is None else {"hours": hours}
+        return evening_reserve_choice(
+            self._plan_load_kw(cfg), self._evening_load_kw, self._capacity_kwh(cfg),
+            bool(cfg.get(CONF_EVENING_LOAD_LIVE, DEFAULT_EVENING_LOAD_LIVE)), **kwargs,
+        )
+
     def _evening_reserve_soc(self) -> int:
         """Phase 16: SOC to hold at 19:00 so the house runs to the 02:00 off-peak start.
 
-        Load is tonight's plan rate (phase 12 learned or config), else config.
+        Load is tonight's plan rate (phase 12 learned or config); with
+        ``evening_load_live`` the learned 16:00-22:00 rate (phase 55).
         """
-        cfg = self.cfg
-        return evening_reserve_soc(self._plan_load_kw(cfg), self._capacity_kwh(cfg))
+        return self._evening_reserve_pair()[0]
 
     def _read_daily_meters(self) -> dict[str, float | None]:
         """SolarSynkV3 cumulative daily load / grid import / grid export (kWh); None when unavailable."""
