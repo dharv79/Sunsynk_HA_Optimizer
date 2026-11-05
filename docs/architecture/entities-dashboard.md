@@ -96,3 +96,14 @@ The dashboard's "Bill check and battery health" card (Consumption column, after 
 - **Load forecast (71).** `sensor.load_profile` (kWh, diagnostic): today's learned house load total; attributes carry the 48 half-hour slots, days used, day type, temperature scale and the peak/evening/day bands.
 - **Inverter fault (43).** `binary_sensor.inverter_fault` is on while the Sunsynk realtime event list is non-empty or the cloud counts a fault/protect inverter or a register fault word is set; attributes carry the events and counts. Read from the 2-hour drift check and the charge-watchdog recheck.
 - **Services (46, 43).** `set_tonight_target`, `skip_tonight`, `schedule_free_event`, `cancel_free_event`, `get_plan` (response only), `probe_inverter_events` (response only, read-only). `services.yaml` + `strings.json`. Overrides apply at the next 01:55 plan; writes refuse in monitor mode and while a free event holds the slots.
+
+### Dashboard checked in a real Home Assistant (05/11/2026)
+
+The generated file was loaded in HA 2025.10 with the two HACS cards and sample states, at 1440 px and 390 px (Playwright). It found three bugs the unit tests could not:
+
+- **Emoji escapes.** `json.dumps` escapes emoji as surrogate pairs, which HA's YAML loader rejects ("surrogates not allowed"), so the whole dashboard showed "Unknown error". `_render` uses `ensure_ascii=False` (`test_rendered_file_has_no_surrogate_escapes`).
+- **`grid_options` on apexcharts-card.** v2.1.2 validates strictly and turned all three charts into error cards; custom cards default to full width, so none is set (`test_apexcharts_cards_have_no_unknown_keys`).
+- **Truncated tile names** at section width; tile names are kept to about 12 characters.
+
+All six views then rendered with no error cards, no console errors and no horizontal scroll at both widths. Markdown tables, the charts and the confirmation-guarded actions were checked visually.
+

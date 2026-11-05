@@ -195,8 +195,7 @@ def _apex(title: str, series: list[dict], span: dict, graph_span: str = "24h", y
         "now": {"show": True, "label": "Now"},
         "apex_config": {"chart": {"height": 230}, "legend": {"show": len(series) > 1}, "grid": {"strokeDashArray": 3}},
         "series": series,
-        "grid_options": {"columns": 12},
-    }
+    }  # no grid_options: apexcharts-card rejects unknown keys, and custom cards default to full width
     if yaxis:
         card["yaxis"] = yaxis
     return card
@@ -373,10 +372,9 @@ def _overview(s, forecast_sensor: str) -> dict[str, Any]:
         _heading("Today", "mdi:white-balance-sunny"),
         _tile(forecast_sensor, "Solar forecast", "mdi:solar-power-variant", "amber"),
         _tile("sensor.spare_solar_today", "Spare solar", "mdi:washing-machine", "light-green"),
-        _tile("sensor.cost_of_1_kwh_now", "Cost of 1 kWh now", "mdi:cash-clock", "deep-orange",
-              state_content=["state", "source"]),
-        _tile("sensor.battery_runtime", "Battery runtime left", "mdi:timer-sand", "green"),
-        _tile("sensor.import_causes_today", "Grid import by cause", "mdi:transmission-tower-import", "red"),
+        _tile("sensor.cost_of_1_kwh_now", "1 kWh now", "mdi:cash-clock", "deep-orange"),
+        _tile("sensor.battery_runtime", "Runtime left", "mdi:timer-sand", "green"),
+        _tile("sensor.import_causes_today", "Import causes", "mdi:transmission-tower-import", "red"),
         _tile("sensor.kpi_self_sufficiency", "Self-sufficiency", "mdi:home-battery-outline", "teal"),
         _md(
             "<ha-icon icon=\"mdi:clock-check-outline\"></ha-icon> **Best time for big loads**\n\n"
@@ -395,12 +393,12 @@ def _overview(s, forecast_sensor: str) -> dict[str, Any]:
         _heading("Quick actions", "mdi:gesture-tap-button"),
         _tile("switch.away_mode", "Away mode", "mdi:airplane", "purple",
               action={"action": "toggle"}),
-        _tile("button.test_plan", "Test plan (dry run)", "mdi:flask-outline", "blue",
+        _tile("button.test_plan", "Dry-run plan", "mdi:flask-outline", "blue",
               action=_press("button.test_plan")),
-        _tile("sensor.current_soc_target", "Full charge tonight", "mdi:battery-charging-100", "green",
+        _tile("sensor.current_soc_target", "Charge to 100%", "mdi:battery-charging-100", "green",
               action=_service("sunsynk_optimizer.set_tonight_target",
                               "Charge to 100% tonight? Applies at the 01:55 plan, one night only.", {"soc": 100})),
-        _tile("sensor.next_import_window", "Skip tonight's charge", "mdi:battery-off-outline", "orange",
+        _tile("sensor.next_import_window", "Skip tonight", "mdi:battery-off-outline", "orange",
               action=_service("sunsynk_optimizer.skip_tonight", "Skip tonight's grid charge? One night only.")),
     )
 
@@ -459,8 +457,8 @@ def _plan(s, forecast_sensor: str, avg_consumption_kw: float) -> dict[str, Any]:
 
     load = _section(
         _heading("House load forecast", "mdi:home-lightning-bolt"),
-        _tile("sensor.load_profile", "Learned load today", "mdi:home-analytics", "blue"),
-        _tile("sensor.effective_charge_rate", "Effective charge rate", "mdi:battery-charging-high", "green"),
+        _tile("sensor.load_profile", "Load today", "mdi:home-analytics", "blue"),
+        _tile("sensor.effective_charge_rate", "Charge rate", "mdi:battery-charging-high", "green"),
         _apex(
             "Learned vs actual load (kWh per half hour)",
             [
@@ -486,13 +484,13 @@ def _plan(s, forecast_sensor: str, avg_consumption_kw: float) -> dict[str, Any]:
 
     learning = _section(
         _heading("Adaptive learning", "mdi:school-outline"),
-        _tile("sensor.forecast_correction", "Forecast correction", "mdi:tune-vertical", "amber",
+        _tile("sensor.forecast_correction", "Forecast ×", "mdi:tune-vertical", "amber",
               state_content=["state", "days_collected"]),
-        _tile("sensor.overnight_drain_adjustment", "Drain compensation", "mdi:battery-minus-outline", "orange",
+        _tile("sensor.overnight_drain_adjustment", "Drain adj.", "mdi:battery-minus-outline", "orange",
               state_content=["state", "days_collected"]),
-        _tile("sensor.evening_soc_adjustment", "Evening SOC nudge", "mdi:battery-sync-outline", "purple",
+        _tile("sensor.evening_soc_adjustment", "SOC nudge", "mdi:battery-sync-outline", "purple",
               state_content=["state", "days_collected"]),
-        _tile("sensor.battery_capacity_estimate", "Measured capacity", "mdi:battery-high", "green"),
+        _tile("sensor.battery_capacity_estimate", "Capacity", "mdi:battery-high", "green"),
         _md(_learned_content(avg_consumption_kw), macros=False),
         _md(_seasonal_guidance(forecast_sensor), macros=False),
     )
@@ -591,10 +589,10 @@ def _energy(s) -> dict[str, Any]:
 
     trends = _section(
         _heading("Daily KPIs (30 days)", "mdi:chart-bar"),
-        _tile("sensor.kpi_avoidable_import", "Avoidable import", "mdi:cash-remove", "red"),
-        _tile("sensor.kpi_export_peak", "Peak export income", "mdi:cash-plus", "teal"),
+        _tile("sensor.kpi_avoidable_import", "Avoidable £", "mdi:cash-remove", "red"),
+        _tile("sensor.kpi_export_peak", "Peak export £", "mdi:cash-plus", "teal"),
         _tile("sensor.kpi_unused_charge", "Unused charge", "mdi:battery-alert-variant-outline", "orange"),
-        _tile("sensor.kpi_over_limit_import", "Over-limit import", "mdi:flash-alert-outline", "deep-orange"),
+        _tile("sensor.kpi_over_limit_import", "Over-limit", "mdi:flash-alert-outline", "deep-orange"),
         {"type": "statistics-graph", "title": "£ per day", "chart_type": "line", "period": "hour",
          "days_to_show": 30, "stat_types": ["state"], "hide_legend": False,
          "entities": [{"entity": "sensor.kpi_avoidable_import", "name": "Avoidable import"},
@@ -624,9 +622,9 @@ def _system(s) -> dict[str, Any]:
     battery = _section(
         _heading("Battery health", "mdi:battery-heart-outline"),
         _tile(h, "State of health", "mdi:battery-heart-variant", "green", state_content=["state", "cycles_max"]),
-        _tile(cap, "Measured capacity", "mdi:battery-high", "teal", state_content=["state", "pct_of_configured"]),
+        _tile(cap, "Capacity", "mdi:battery-high", "teal", state_content=["state", "pct_of_configured"]),
         _tile("sensor.battery_runtime", "Runtime left", "mdi:timer-sand", "light-green"),
-        _tile(s("battery_temperature"), "Battery temperature", "mdi:thermometer", "orange"),
+        _tile(s("battery_temperature"), "Battery temp", "mdi:thermometer", "orange"),
         _md(
             "| BMS | |\n|:--|--:|\n"
             f"| Packs | {{{{ a('{h}', 'pack_count') }}}} |\n"
@@ -646,7 +644,7 @@ def _system(s) -> dict[str, Any]:
         _heading("System health", "mdi:heart-pulse"),
         _tile("binary_sensor.grid_outage", "Grid", "mdi:transmission-tower", "red"),
         _tile("binary_sensor.inverter_fault", "Inverter", "mdi:alert-circle-outline", "red"),
-        _tile("sensor.data_health", "Data gaps (14 days)", "mdi:database-check-outline", "amber"),
+        _tile("sensor.data_health", "Data gaps", "mdi:database-check-outline", "amber"),
         _tile("sensor.pv_string_share", "PV string 1 share", "mdi:solar-panel", "amber",
               state_content=["state", "weaker"]),
         _tile("sensor.last_error", "Last error", "mdi:alert-outline", "deep-orange", columns=12),
@@ -802,11 +800,11 @@ def _controls(api_plant_id: str, serial: str, weather_entity: str, forecast_sens
     actions = _section(
         _heading("Actions", "mdi:gesture-tap-button"),
         _tile("switch.away_mode", "Away mode", "mdi:airplane", "purple", action={"action": "toggle"}),
-        _tile("button.test_plan", "Test plan (dry run)", "mdi:flask-outline", "blue", action=_press("button.test_plan")),
-        _tile("sensor.current_soc_target", "Full charge tonight", "mdi:battery-charging-100", "green",
+        _tile("button.test_plan", "Dry-run plan", "mdi:flask-outline", "blue", action=_press("button.test_plan")),
+        _tile("sensor.current_soc_target", "Charge to 100%", "mdi:battery-charging-100", "green",
               action=_service("sunsynk_optimizer.set_tonight_target",
                               "Charge to 100% tonight? Applies at the 01:55 plan, one night only.", {"soc": 100})),
-        _tile("sensor.next_import_window", "Skip tonight's charge", "mdi:battery-off-outline", "orange",
+        _tile("sensor.next_import_window", "Skip tonight", "mdi:battery-off-outline", "orange",
               action=_service("sunsynk_optimizer.skip_tonight", "Skip tonight's grid charge? One night only.")),
         _tile("button.reset_to_baseline", "Reset baseline", "mdi:restore", "grey",
               action=_press("button.reset_to_baseline", "Reset the optimizer to its baseline settings?")),
@@ -887,6 +885,12 @@ def _build_dashboard(config: dict) -> dict:
     }
 
 
+def _render(dashboard: dict) -> str:
+    """The Lovelace file body. ensure_ascii=False: json.dumps would escape emoji as surrogate pairs
+    (\\ud83d\\udfe2), which Home Assistant's YAML loader rejects, so the dashboard fails to load."""
+    return json.dumps(dashboard, indent=2, ensure_ascii=False)
+
+
 async def async_install_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Generate dashboard YAML from config-entry values and notify the user."""
     config = merge_entry_data(dict(entry.data), dict(entry.options))
@@ -895,7 +899,7 @@ async def async_install_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> No
     config_dir = Path(hass.config.config_dir)
     filename = f"sunsynk_optimizer_{entry.entry_id}.yaml"
     dst = config_dir / filename
-    content = json.dumps(dashboard, indent=2)
+    content = _render(dashboard)
     try:
         await hass.async_add_executor_job(dst.write_text, content, "utf-8")
     except Exception as err:
