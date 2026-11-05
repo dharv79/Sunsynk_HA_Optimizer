@@ -125,3 +125,34 @@ def test_timer_callbacks_are_coroutines():
         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "self"
     }
     assert scheduled and scheduled <= async_methods
+
+
+SENSOR = OPTIMIZER.parent / "sensor.py"
+
+
+def _key_branches(fn: ast.FunctionDef) -> list[tuple[str, ast.If]]:
+    """(sensor key, if-node) for every top-level `if self._sensor_key == "<key>"` in a property."""
+    out = []
+    for node in fn.body:
+        test = getattr(node, "test", None)
+        if (isinstance(node, ast.If) and isinstance(test, ast.Compare) and isinstance(test.left, ast.Attribute)
+                and test.left.attr == "_sensor_key" and isinstance(test.ops[0], ast.Eq)
+                and isinstance(test.comparators[0], ast.Constant)):
+            out.append((test.comparators[0].value, node))
+    return out
+
+
+def test_sensor_states_are_scalars_and_keys_unique():
+    # Phase 76 left a duplicate branch: mpc_plan's state became its whole dict (> 255 chars)
+    # and dynamic_tariff_shadow's saving was unreachable.
+    cls = _class(ast.parse(SENSOR.read_text()), "SunsynkOptimizerSensor")
+    prop = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "native_value")
+    branches = _key_branches(prop)
+    keys = [k for k, _ in branches]
+    assert len(keys) == len(set(keys)), "duplicate sensor key branch in native_value"
+    for key, node in branches:
+        for ret in (n for n in ast.walk(node) if isinstance(n, ast.Return) and n.value is not None):
+            call = ret.value
+            assert not (isinstance(call, ast.Call) and getattr(call.func, "id", None) == "_as_dict"), (
+                f"{key}: native_value returns a whole dict"
+            )

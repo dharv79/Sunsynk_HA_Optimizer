@@ -36,8 +36,13 @@ def test_dashboard_is_json_serialisable(dashboard):
 
 def test_dashboard_has_expected_top_level_shape(dashboard):
     assert dashboard["title"]
-    assert dashboard["views"] and dashboard["views"][0]["type"] == "sections"
-    assert len(dashboard["views"][0]["sections"]) >= 6
+    views = dashboard["views"]
+    assert len(views) >= 6
+    assert all(v["type"] == "sections" and v["sections"] for v in views)
+    paths = [v["path"] for v in views]
+    assert len(paths) == len(set(paths))
+    # Existing sidebar links and bookmarks open the first view.
+    assert paths[0] == "sunsynk-optimizer"
 
 
 def test_dashboard_ids_are_sanitised_into_entities(dashboard):
@@ -77,8 +82,7 @@ def test_dashboard_has_consumption_section(dashboard):
         "peak_grid_import_kwh",
         "peak_grid_export_kwh",
     ):
-        assert f'"attribute": "{field}"' in blob, f"{field} not wired into the dashboard"
-        assert '"entity": "sensor.consumption"' in blob
+        assert f"'sensor.consumption', '{field}'" in blob, f"{field} not wired into the dashboard"
 
 
 def test_dashboard_has_cost_cards(dashboard):
@@ -94,15 +98,19 @@ def test_dashboard_has_cost_cards(dashboard):
         "actual_gas_cost_gbp",
         "net_cost_gbp",
     ):
-        assert f'"attribute": "{field}"' in blob, f"{field} not wired into the dashboard"
+        assert f"'sensor.consumption', '{field}'" in blob, f"{field} not wired into the dashboard"
 
 
 def test_malicious_id_cannot_inject_template(dashboard):
     # A serial containing Jinja/quote chars is sanitised before interpolation.
-    hostile = dict(_CONFIG, inverter_serial="1{{states('x')}}", plant_id="9'\"}{9")
+    hostile = dict(
+        _CONFIG, inverter_serial="1{{states('x')}}", plant_id="9'\"}{9",
+        solar_forecast_sensor="sensor.x') }}{{ 7", weather_entity="{{ bad }}",
+    )
     blob = json.dumps(_build_dashboard(hostile))
-    assert "{{states" not in blob
+    assert "{{states" not in blob and "{{ 7" not in blob and "{{ bad" not in blob
     assert "sensor.solarsynkv3_1statesx_battery_soc" in blob
+    assert "sensor.x7" in blob and "weather.forecast_home" in blob
 
 
 def test_dashboard_surfaces_bill_check_and_capacity(dashboard):
@@ -128,3 +136,49 @@ def test_free_event_card_reads_only_always_present_attributes(dashboard):
 
     walk(dashboard)
     assert used and used <= set(planning.FREE_EVENT_ATTRIBUTE_KEYS)
+
+
+def _cards(node):
+    if isinstance(node, dict):
+        if "type" in node:
+            yield node
+        for value in node.values():
+            yield from _cards(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _cards(value)
+
+
+def test_dashboard_surfaces_optimizer_entities(dashboard):
+    blob = json.dumps(dashboard)
+    for entity in (
+        "sensor.mpc_plan", "sensor.dynamic_tariff_shadow", "sensor.tou_shadow", "sensor.flex_event_offer",
+        "sensor.upgrade_advisor", "sensor.shadow_scorecard", "sensor.battery_soh", "sensor.load_profile",
+        "sensor.solar_forecast_p50", "sensor.data_health", "sensor.battery_runtime", "sensor.pv_string_share",
+        "sensor.import_causes_today", "binary_sensor.grid_outage", "binary_sensor.inverter_fault",
+        "sensor.kpi_avoidable_import", "sensor.kpi_export_peak", "sensor.kpi_self_sufficiency",
+        "sensor.kpi_unused_charge", "sensor.kpi_over_limit_import", "switch.away_mode",
+    ):
+        assert entity in blob, f"{entity} missing from dashboard"
+
+
+def test_only_documented_custom_cards(dashboard):
+    custom = {c["type"] for c in _cards(dashboard) if str(c["type"]).startswith("custom:")}
+    assert custom == {"custom:sunsynk-power-flow-card", "custom:apexcharts-card"}
+
+
+def test_actions_use_perform_action_and_confirm_writes(dashboard):
+    blob = json.dumps(dashboard)
+    assert "call-service" not in blob
+    for card in _cards(dashboard):
+        action = card.get("tap_action") or {}
+        if action.get("perform_action", "").startswith("sunsynk_optimizer."):
+            assert action.get("confirmation"), f"{action['perform_action']} has no confirmation"
+
+
+def test_markdown_templates_are_balanced(dashboard):
+    for card in _cards(dashboard):
+        if card["type"] == "markdown":
+            text = card["content"]
+            assert text.count("{{") == text.count("}}"), text[:120]
+            assert text.count("{%") == text.count("%}"), text[:120]

@@ -77,3 +77,18 @@ def test_summary_lines():
     assert planning.electrification_summary({}) == []
     worse = planning.electrification_summary({"heat_pump": planning.heat_pump_scenario(_days(gas=0.3), 6.0, 200.0)})
     assert "more" in worse[0] and "£-" not in worse[0]
+
+
+def test_upgrade_options_flat_and_sorted():
+    report = {
+        "days": 200,
+        "scenarios": [{"name": "+5 kWh battery", "annual_gbp": 90.0, "saving_gbp": 49.3, "payback_years": 12.0},
+                      {"name": "+10 kWh battery", "annual_gbp": 130.0, "saving_gbp": 71.2, "payback_years": None}],
+        "heat_pump": planning.heat_pump_scenario(_days(gas=0.3), 6.0, 200.0),
+        "export_limit": None,
+    }
+    rows = planning.upgrade_options(report)
+    assert [r["name"] for r in rows] == ["+10 kWh battery", "+5 kWh battery", "Heat pump (Cosy) vs gas"]
+    assert rows[-1]["annual_gbp"] < 0 and rows[-1]["confidence"] == "low"
+    assert rows[0]["days"] == 200
+    assert planning.upgrade_options(None) == [] and planning.upgrade_options({"days": 3, "scenarios": []}) == []
