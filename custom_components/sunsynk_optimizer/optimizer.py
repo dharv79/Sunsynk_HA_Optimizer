@@ -78,6 +78,9 @@ from .const import (
     CONF_FREE_EVENT_EXPORT_RATE_KW,
     CONF_FLEX_EVENT_ENTITY,
     CONF_FLEX_PRICE_PENCE,
+    CONF_GAS_UNIT_PENCE,
+    CONF_GAS_STANDING_PENCE,
+    CONF_HEAT_PUMP_PRICE_GBP,
     CONF_INVERTER_SERIAL,
     CONF_NOTIFY_SERVICE,
     CONF_NOTIFY_TARGET,
@@ -181,6 +184,12 @@ from .planning import (
     agile_prices_by_date,
     BATTERY_LOW_SOC,
     cheapest_window_plan,
+    electrification_summary,
+    ELECTRIFY_HISTORY_DAYS,
+    export_limit_scenario,
+    heat_pump_scenario,
+    mean_band_price,
+    price_at,
     flex_event_offer,
     flex_event_window,
     tou_diff,
@@ -3543,15 +3552,33 @@ class SunsynkOptimizer:
             float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)), self._wear_pence(), _opt(CONF_PV_KWP),
             _opt(CONF_UPGRADE_PRICE_PER_KWH), _opt(CONF_PV_UPGRADE_PRICE_PER_KWP),
         )
+        await self._add_electrification(report, cfg, prices, _opt)
         self.coordinator.update_state(touch=False, upgrade_advisor={**report, "date": dt_util.now().date().isoformat()})
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
             await self.async_notify(
                 "Sunsynk Upgrade Advisor", json.dumps({"type": "upgrade_advisor", **report}), target=data_report_target
             )
-        text = upgrade_summary(report)
-        if text:
-            await self.async_notify("🔋 Sunsynk: what a bigger system would have saved", text)
+        lines = [t for t in (upgrade_summary(report), *electrification_summary(report)) if t]
+        if lines:
+            await self.async_notify("🔋 Sunsynk: what a bigger system would have saved", "\n".join(lines))
+
+    async def _add_electrification(self, report: dict[str, Any], cfg: dict[str, Any], prices, opt) -> None:
+        """Phase 78: heat pump on Cosy vs gas, and a higher inverter limit, over the 13-month log (report only)."""
+        paired = await self.data_logger.async_load_paired_days(days=ELECTRIFY_HISTORY_DAYS)
+        temps = {
+            r["date"]: r["outside_temp_c"] for r in await self.data_logger.async_load_records(ELECTRIFY_HISTORY_DAYS)
+            if r.get("type") == "day_kpis" and r.get("date") and isinstance(r.get("outside_temp_c"), (int, float))
+        }
+        overrides = cfg.get(CONF_TARIFF_RATE_OVERRIDES)
+        rates = merge_tariff_rates(overrides)
+        cosy = mean_band_price(bands_from_rates(TARIFF_IMPORT_BANDS["cosy"], rates["cosy"]))
+        hp_price = None if cosy is None else round(cosy * (1 + tariff_vat_percent(overrides) / 100), 2)
+        report["heat_pump"] = heat_pump_scenario(
+            paired, opt(CONF_GAS_UNIT_PENCE), hp_price, opt(CONF_GAS_STANDING_PENCE), opt(CONF_HEAT_PUMP_PRICE_GBP), temps,
+        )
+        export_p = price_at(flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"), 12 * 60)
+        report["export_limit"] = export_limit_scenario(paired, export_p)
 
     async def _async_send_shadow_scorecard(self) -> None:
         """First Sunday of the month: score every shadow feature against what happened (phase 41); read-only."""

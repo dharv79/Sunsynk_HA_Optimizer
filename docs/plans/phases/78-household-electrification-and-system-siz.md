@@ -1,6 +1,6 @@
 # Phase 78 — Household electrification and system-sizing advisor
 
-**Status:** Planned, not built. **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, report only (see As built). **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,11 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (05/11/2026)
+
+- Feasibility: no locked decision or do-not-break rule touched, and nothing is controlled. It builds on the phase 50 `simulate_system` advisor instead of the phase 72 twin, which isn't built. The battery and PV scenarios are already there; this adds the heat-pump and inverter-limit scenarios.
+- `heat_pump_cop`, `mean_band_price`, `heat_pump_scenario` (always "low" confidence, with its assumptions), `export_limit_scenario` and `electrification_summary`.
+- Options `gas_unit_pence`, `gas_standing_pence` and `heat_pump_price_gbp`.
+- Wired into the monthly upgrade advisor (report, debug JSON and notification).
+- Not built: `tools/twin.py --scenario`, which waits for phase 72.

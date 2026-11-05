@@ -49,6 +49,9 @@ from .const import (
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_FLEX_EVENT_ENTITY,
     CONF_FLEX_PRICE_PENCE,
+    CONF_GAS_UNIT_PENCE,
+    CONF_GAS_STANDING_PENCE,
+    CONF_HEAT_PUMP_PRICE_GBP,
     CONF_FULL_WINDOW_LIVE,
     CONF_EVENING_LOAD_LIVE,
     CONF_LOAD_PROFILE_LIVE,
@@ -305,6 +308,24 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 description={"suggested_value": values.get(CONF_FLEX_PRICE_PENCE)},
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=1000, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="p/kWh")
+            ),
+            vol.Optional(
+                CONF_GAS_UNIT_PENCE,
+                description={"suggested_value": values.get(CONF_GAS_UNIT_PENCE)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=100, step=0.01, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="p/kWh")
+            ),
+            vol.Optional(
+                CONF_GAS_STANDING_PENCE,
+                description={"suggested_value": values.get(CONF_GAS_STANDING_PENCE)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=200, step=0.01, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="p/day")
+            ),
+            vol.Optional(
+                CONF_HEAT_PUMP_PRICE_GBP,
+                description={"suggested_value": values.get(CONF_HEAT_PUMP_PRICE_GBP)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=50000, step=100, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="£")
             ),
             vol.Required(CONF_AVG_CONSUMPTION_KW, default=values.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
