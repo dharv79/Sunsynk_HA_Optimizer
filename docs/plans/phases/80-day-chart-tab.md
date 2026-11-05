@@ -1,6 +1,6 @@
 # Phase 80 — Day chart tab with previous/next day navigation
 
-**Status:** In progress. **Size:** M. **Category:** user request (05/11/2026, out of the idea sweep).
+**Status:** Done, merged (93af8a5, PR #159). **Size:** M. **Category:** user request (05/11/2026, out of the idea sweep).
 
 ## Goal
 
