@@ -182,3 +182,22 @@ def test_markdown_templates_are_balanced(dashboard):
             text = card["content"]
             assert text.count("{{") == text.count("}}"), text[:120]
             assert text.count("{%") == text.count("%}"), text[:120]
+
+
+def test_rendered_file_has_no_surrogate_escapes(dashboard):
+    # json.dumps' default escapes emoji (e.g. a green circle) as \\ud83d\\udfe2; HA's YAML loader then fails
+    # with "surrogates not allowed" and the whole dashboard shows "Unknown error".
+    text = conftest._dashboard._render(dashboard)
+    assert "\\ud8" not in text.lower() and "\\ud9" not in text.lower()
+    assert "\U0001f7e2" in text  # emoji written as real characters
+    assert json.loads(text) == dashboard
+    text.encode("utf-8")
+
+
+def test_apexcharts_cards_have_no_unknown_keys(dashboard):
+    # apexcharts-card validates its config strictly ("value.grid_options is extraneous" turns the card into an error).
+    allowed = {"type", "header", "graph_span", "span", "now", "apex_config", "series", "yaxis"}
+    charts = [c for c in _cards(dashboard) if c["type"] == "custom:apexcharts-card"]
+    assert len(charts) == 3
+    for chart in charts:
+        assert set(chart) <= allowed, set(chart) - allowed
