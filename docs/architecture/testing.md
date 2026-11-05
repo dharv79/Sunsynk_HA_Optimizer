@@ -12,7 +12,7 @@ The pure adaptive-learning logic in `data_logger.py` and the pure planning maths
 pip install pytest && python3 -m pytest
 ```
 
-`tests/conftest.py` exposes a `planning` fixture (the `planning` module), a `dl` fixture (a bare `DataLogger` instance for calling its pure methods) and a `make_day(**overrides)` helper for building paired-day dicts. When you change any `compute_*` / `count_*` / `_is_drain_night` / `_percentile` logic, or anything in `planning.py`, add or update a test that pins the new behaviour. The `.github/workflows/tests.yml` workflow runs `py_compile` + `pytest` on every push to `main` and every PR. Testing code that imports HA more deeply (optimizer, coordinator) requires mocking `hass`; prefer extracting pure helpers so they can be tested directly.
+`tests/conftest.py` exposes a `planning` fixture (the `planning` module), a `dl` fixture (a bare `DataLogger` instance for calling its pure methods), `DataLogger`, `flux_helpers` and `safe_id` fixtures, and a `make_day(**overrides)` helper for building paired-day dicts. When you change any `compute_*` / `count_*` / `_is_drain_night` / `_percentile` logic, or anything in `planning.py`, add or update a test that pins the new behaviour. The `.github/workflows/tests.yml` workflow runs `py_compile`, `pyflakes` and `pytest` on every push to `main` and every PR. Testing code that imports HA more deeply (optimizer, coordinator) requires mocking `hass`; prefer extracting pure helpers so they can be tested directly.
 
 ### Home Assistant iteration
 
@@ -22,7 +22,7 @@ Beyond the unit tests, development requires a real or dev Home Assistant instanc
 2. Restart Home Assistant or reload the integration via **Settings → Devices & Services**.
 3. Check **Settings → System → Logs** for errors from the `custom_components.sunsynk_optimizer` logger.
 
-When iterating on logic, the **Test plan (dry run)** button is the primary way to test without waiting for scheduled events: it recomputes the full import plan and posts the complete plan JSON to the HA app notification, with no inverter push, no data-log write, and no state change. The other manual buttons are **Reset baseline** (restore configured Flux windows) and **Update dashboard** (regenerate the Lovelace YAML).
+When iterating on logic, the **Test plan (dry run)** button is the primary way to test without waiting for scheduled events: it recomputes the full import plan and posts the complete plan JSON to the HA app notification, with no inverter push, no data-log write, and no state change. The other manual buttons are **Run choose best day**, **Reset to baseline** (restore configured Flux windows), **Update dashboard** (regenerate the Lovelace YAML) and **Cancel free event**. The `get_plan` service returns the current plan as a response.
 
 To validate Python syntax without a running HA instance:
 ```bash
@@ -33,13 +33,13 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 
 | File | Covers |
 |---|---|
-| `tests/conftest.py` | HA stubs, direct module loading, `dl`/`planning`/`flux_helpers`/`safe_id` fixtures, `make_day` |
+| `tests/conftest.py` | HA stubs, direct module loading, `DataLogger`/`dl`/`planning`/`flux_helpers`/`safe_id` fixtures, `make_day` |
 | `tests/test_data_logger.py` | `compute_*` / `count_*` adaptive-learning maths, `_is_drain_night`, `_percentile`; version stamp on records |
 | `tests/test_away_mode.py` | Home/away calibration split |
 | `tests/test_day_actuals.py` | day_actuals / peak_window_usage logging and dedup; unavailable meters log None; charge_watchdog dedup |
 | `tests/test_daily_cost.py` | daily_cost pairing, net cost, fill-only merge, month-boundary catch-up |
 | `tests/test_planning.py` | `planning.py` target-SOC tree, bridge/ramp, charge rate, Flux 1 window, scoring, weekly period window, latest complete cost day, full-charge-day re-check, weighted forecast correction, learned household load, charge watchdog progress, charge efficiency and window grid kWh, evening reserve and trim floor; shadow scorecard verdicts (phase 41); unavailable-SOC plan retry and snapshot fallback (`soc_retry_due`, `recent_soc`); measured charge rate (phase 61) |
-| `tests/test_kpis.py` | Phase 14 `day_kpis` / `week_kpis`, KPI prices, meter_snapshot dedup and pairing, `tools/backtest.py` replay and forecast-error report; phase 15 `import_feedback_adjustment`; phase 17 `arbitrage_worth_it` / `peak_export_plan` and peak_export pairing; phase 24 wear cost; phase 25 `expected_spare_solar`; phase 26 `baseload_anomaly`; phase 40 `daytime_import_anomaly`; phase 38 `marginal_cost_pence` / `cheapest_hour_today`; phase 37 `no_battery_baseline` / `battery_value_summary`; phase 34 `capacity_samples` / `capacity_estimate` / `capacity_low`; phase 36 `reconcile_month` / `logged_day_cost_gbp`; 85% SOC cap shadow (`soc_cap_shadow`) |
+| `tests/test_kpis.py` | Phase 14 `day_kpis` / `week_kpis`, KPI prices, meter_snapshot dedup and pairing, `tools/backtest.py` replay and forecast-error report; phase 15 `import_feedback_adjustment`; phase 17 `arbitrage_worth_it` / `peak_export_plan` and peak_export pairing; phase 24 wear cost; phase 25 `expected_spare_solar`; phase 26 `baseload_anomaly`; phase 40 `daytime_import_anomaly`; phase 38 `marginal_cost_pence` / `cheapest_hour_today`; phase 37 `no_battery_baseline` / `battery_value_summary`; phase 34 `capacity_samples` / `capacity_estimate` / `capacity_low`; phase 36 `reconcile_month` / `logged_day_cost_gbp`; `bill_period` (bill start day, 2.0.1); 85% SOC cap shadow (`soc_cap_shadow`) |
 | `tests/test_flux_helpers_cost.py` | Peak import price behind the cost trigger (`band_price_pence_per_kwh`) |
 | `tests/test_octopus_rates.py` | Phase 18 Octopus rate-entity window pricing, `tariff_prices_pence` fallback to `charges`, `price_source` labels |
 | `tests/test_planning_auto_away.py` | Phase 27 `auto_away` (anyone home, min hours away, unavailable persons, calendar only, no signal) |
@@ -73,6 +73,6 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_flex_event.py` | Phase 77 flex event shadow: `flex_event_offer` floor/rate cap/decisions/wear, `flex_event_window` calendar and on/off entities |
 | `tests/test_electrification.py` | Phase 78 electrification advisor: `heat_pump_cop`, `mean_band_price`, `heat_pump_scenario`, `export_limit_scenario`, `electrification_summary` |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
-| `tests/test_dashboard.py` | Dashboard YAML structure |
+| `tests/test_dashboard.py` | Dashboard structure and views, sanitised ids, allowed custom cards, confirmed actions, no surrogate escapes, apexcharts keys, flow card and day chart config/JS, `card_resource` serves every bundled card |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |
-| `tests/test_code_integrity.py` | AST guard: every `self.<name>` read in `SunsynkOptimizer` is defined on the class (catches a dropped `def` line); the startup plan is followed by a peak cover re-check; every HA timer callback is an `async def` (a sync one runs off the event loop). CI also runs `pyflakes` |
+| `tests/test_code_integrity.py` | AST guard: every `self.<name>` read in `SunsynkOptimizer` is defined on the class (catches a dropped `def` line); the startup plan is followed by a peak cover re-check; every HA timer callback is an `async def` (a sync one runs off the event loop); nothing mutates the cached `self.cfg`; sensor states are scalars and sensor keys unique. CI also runs `pyflakes` |
