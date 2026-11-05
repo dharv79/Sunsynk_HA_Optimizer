@@ -1,6 +1,6 @@
 # Phase 71 — Half-hourly household load forecaster (weather and calendar aware)
 
-**Status:** Planned, not built. **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, shadow by default (see As built). **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,11 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (05/11/2026)
+
+- Feasibility: no locked decision touched; the live path is behind `load_profile_live` (off), logic in `planning.py` (rule 19).
+- Load is reconstructed per segment from the SolarSynk load meter (so solar- and battery-met load is included); half-hourly import only shapes a segment when it accounts for ≥90% of that segment's load.
+- `day_load_slots`, `load_profile`, `heating_scale` (needs `outside_temp_c` history, logged from now), `load_profile_backtest`.
+- Feeds the shadow MPC always; evening reserve and peak cover when live. The bridge walk is unchanged (it uses the overnight rate, which the profile's early slots match).
+- Not built: calendar/holiday terms beyond weekday/weekend and away.

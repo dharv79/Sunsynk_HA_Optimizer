@@ -260,3 +260,13 @@ The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.me
 **Calibration.** `forecast_quantile_coverage` scores each day walk-forward against quantiles from earlier days only (≈10% / 80% / 10% when calibrated); `tools/backtest.py` reports it as `forecast_quantile_coverage`.
 
 **Verification.** `tests/test_forecast_quantiles.py`: sample filtering and capping, bin order and fallback, season wrap, quantile maths and kWh, coverage, `scale_hourly`, the plan field.
+
+## Learned half-hourly load profile (05/11/2026, phase 71)
+
+**Design.** `planning.day_load_slots` turns one logged day into 48 half-hour house-load kWh: each snapshot segment's metered load (00–02, 02–05, 05–16, 16–19, 19–22) is spread in the shape of the Octopus half-hourly import when that import covered ≥90% of the segment's load (battery and solar idle, so import ≈ load), otherwise evenly; 22:00–24:00 repeats the 19:00–22:00 rate (no snapshot). `load_profile` takes the per-slot median over the last 28 days (away days skipped) of today's day type when ≥7 such days exist, else all days, and summarises it: `peak_kwh` (16–19), `evening_kw` (19:00–02:00 ÷ 7 h), `day_kw` (05–16), `total_kwh`. Temperature: the 30-min tick averages the weather entity's `temperature` attribute into `day_kpis.outside_temp_c`; `heating_scale` fits daily load on heating degrees (15.5 °C base) once 14 days have a temperature, and scales the profile for the current reading (0.7–1.5, positive slope only). Refreshed with the plan (`_refresh_load_profile`), held in `_load_profile` (unpersisted) and `state.load_profile` (`sensor.load_profile`, kWh, diagnostic).
+
+**Use.** The shadow MPC always takes the profile as its load. With `load_profile_live` (default off) the evening reserve uses the profile's `evening_kw` and peak cover its `peak_kwh` (source `load_profile`, no margin). Shadow fields: `day_kpis.evening_reserve_soc_profile`, `peak_cover.peak_load_kwh_profile`.
+
+**Backtest.** `load_profile_backtest` / `tools/backtest.py DATA_DIR --load-profile`: walk-forward 16:00–19:00 MAE of the profile vs the phase 60 day-type median.
+
+**Verification.** `tests/test_load_profile.py`: even and import-shaped slots, 22–24 fill, missing segment → None; min days, day-type choice, away/window filters; heating fit and scaling; backtest, MPC hand-off and CLI.

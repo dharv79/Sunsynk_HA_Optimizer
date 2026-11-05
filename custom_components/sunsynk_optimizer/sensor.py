@@ -98,6 +98,10 @@ async def async_setup_entry(
                 coordinator, entry, "solar_forecast_p50", "Solar forecast P50 (learned)",
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.solar_forecast_p50",
             ),
+            SunsynkOptimizerSensor(
+                coordinator, entry, "load_profile", "Load forecast today (learned)",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.load_profile",
+            ),
             SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
             SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
             SunsynkOptimizerSensor(coordinator, entry, "spare_solar", "Spare solar today"),
@@ -184,7 +188,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return "h"
         if self._sensor_key in ("pv_strings", "battery_soh"):
             return "%"
-        if self._sensor_key in ("battery_capacity_estimate", "solar_forecast_p50"):
+        if self._sensor_key in ("battery_capacity_estimate", "solar_forecast_p50", "load_profile"):
             return "kWh"
         return "kWh" if self._sensor_key in ("spare_solar", "import_causes") else None
 
@@ -246,6 +250,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "solar_forecast_p50":
             return _as_dict(_as_dict(state.last_import_plan).get("forecast_quantiles")).get("p50_kwh")
+
+        if self._sensor_key == "load_profile":
+            return _as_dict(state.load_profile).get("total_kwh")
 
         if self._sensor_key == "shadow_scorecard":
             card = _as_dict(state.shadow_scorecard)
@@ -336,6 +343,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return _as_dict(state.shadow_scorecard)
         if self._sensor_key == "mpc_plan":
             return _as_dict(state.mpc_plan)
+        if self._sensor_key == "load_profile":
+            return _as_dict(state.load_profile)
         if self._sensor_key == "solar_forecast_p50":
             plan = _as_dict(state.last_import_plan)
             return {**_as_dict(plan.get("forecast_quantiles")), "date": plan.get("date"),

@@ -18,6 +18,7 @@ against actual solar. Read-only on the data dir; no Home Assistant needed.
     python3 tools/backtest.py DATA_DIR --load-kw 0.6 --days 60
     python3 tools/backtest.py DATA_DIR --upgrade --pv-kwp 4.2   # phase 50 upgrade advisor
     python3 tools/backtest.py DATA_DIR --planner mpc            # phase 69 MPC headroom
+    python3 tools/backtest.py DATA_DIR --load-profile           # phase 71 peak-load error
 
 Model (approximate, for comparing settings, not absolute figures):
 - The battery charges from the plan's start SOC to its target; the alternative
@@ -234,9 +235,18 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--day-p", type=float, default=27.77, help="--upgrade: day import p/kWh")
     parser.add_argument("--peak-p", type=float, default=38.88, help="--upgrade: peak import p/kWh")
     parser.add_argument("--export-p", type=float, default=15.0, help="--upgrade: flat export p/kWh")
+    parser.add_argument("--load-profile", action="store_true", help="phase 71: score the load profile's 16-19 kWh")
     parser.add_argument("--planner", choices=("rules", "mpc"), default="rules", help="mpc: phase 69 headroom report")
     args = parser.parse_args(argv)
     records = load_records(args.data_dir)
+    if args.load_profile:
+        half_import = {
+            r["date"]: r["kwh"] for r in records
+            if r.get("type") == "half_hourly_import" and r.get("date") and isinstance(r.get("kwh"), list)
+        }
+        report = planning.load_profile_backtest(_snapshot_days(records, args.days), half_import)
+        print(json.dumps(report, indent=2))
+        return report
     if args.planner == "mpc":
         report = mpc_headroom(records, args)
         print(json.dumps(report, indent=2))

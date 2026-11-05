@@ -149,6 +149,8 @@ CONF_MEASURED_RATE_LIVE = "measured_charge_rate_live"   # phase 61: size Flux 1 
 DEFAULT_MEASURED_RATE_LIVE = False
 CONF_EVENING_LOAD_LIVE = "evening_load_live"   # phase 55: size the evening reserve from the learned 16:00-22:00 load
 DEFAULT_EVENING_LOAD_LIVE = False
+CONF_LOAD_PROFILE_LIVE = "load_profile_live"   # phase 71: evening reserve + peak cover from the learned half-hourly profile
+DEFAULT_LOAD_PROFILE_LIVE = False
 CONF_BATTERY_VOLTAGE = "battery_voltage"
 GENTLE_CHARGE_SETTING = "sdBatteryCurrent"
 
