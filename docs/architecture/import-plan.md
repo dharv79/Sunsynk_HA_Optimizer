@@ -252,3 +252,11 @@ The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.me
 **Backtest.** `planning.mpc_backtest_day` re-runs 02:00–22:00 of a logged day with hindsight (segment load/solar spread evenly per half-hour) and compares it with the metered cost, both crediting the 22:00 SOC at the refill price: `tools/backtest.py DATA_DIR --planner mpc`. Headroom is an upper bound, and can be negative when the meters imply better battery efficiency than the model's 0.92.
 
 **Verification.** `tests/test_mpc.py`: charges cheap / discharges dear and only as much as needed; holds when nothing pays; wear blocks marginal arbitrage; floor and rate limits; solar soak and peak export; terminal value; slot building (rounding, horizon, solar halves, profile override); missing inputs → None; summary; backtest and CLI.
+
+## Learned solar forecast quantiles (05/11/2026, phase 70)
+
+**Design.** At each plan run `planning.forecast_ratio_samples` turns up to 13 months of paired days into actual ÷ raw-forecast ratios (raw ≤ 0.5 kWh skipped, capped 0.05–5). `forecast_quantiles` takes P10/P50/P90 (linear interpolation) from the narrowest bin with ≥14 days: forecast band × season (month ± 1), then season, band, all; below that in every bin → None. Logged on the plan as `forecast_quantiles` {bin, days, pXX_ratio, pXX_kwh} (in `_IMPORT_PLAN_FIELDS`), None when the forecast fell back to yesterday's. Shown on `sensor.solar_forecast_p50` (diagnostic). The live target keeps the locked `min(raw, corrected)` rule (do-not-break 8); the quantiles only feed the shadow MPC, which re-solves at today's P10 and P90 ratios and logs `soc_0500_p10/p90`, `first_action_p10/p90` and `cost_gbp_p10/p90` beside the base plan. Cloud/temperature bins aren't used: weather isn't on the paired record.
+
+**Calibration.** `forecast_quantile_coverage` scores each day walk-forward against quantiles from earlier days only (≈10% / 80% / 10% when calibrated); `tools/backtest.py` reports it as `forecast_quantile_coverage`.
+
+**Verification.** `tests/test_forecast_quantiles.py`: sample filtering and capping, bin order and fallback, season wrap, quantile maths and kWh, coverage, `scale_hourly`, the plan field.

@@ -203,6 +203,10 @@ from .planning import (
     upgrade_advisor,
     CHARGE_EFFICIENCY,
     mpc_slots,
+    FORECAST_QUANTILE_HISTORY_DAYS,
+    forecast_quantiles,
+    forecast_ratio_samples,
+    scale_hourly,
     mpc_solve,
     mpc_summary,
     upgrade_summary,
@@ -1145,6 +1149,13 @@ class SunsynkOptimizer:
             decision, forecast_fallback, paired_days, now.date(), band, avg_consumption_kw, battery_capacity_kwh,
             overnight_drain_adjustment, feedback_adj if feedback_live else soc_adjustment,
         )
+        # Phase 70 (shadow): learned P10/P50/P90 of today's solar; the decision above keeps min(raw, corrected).
+        quantile_samples = forecast_ratio_samples(
+            await self.data_logger.async_load_paired_days(days=FORECAST_QUANTILE_HISTORY_DAYS)
+        )
+        solar_quantiles = None if forecast_fallback else forecast_quantiles(
+            quantile_samples, now.month, band, raw_forecast_kwh
+        )
         # A free event later today should start at its floor: buy only that plus the load until then.
         uncapped_target_soc = target_soc
         free_event = self.coordinator.state.free_event
@@ -1243,6 +1254,7 @@ class SunsynkOptimizer:
             "forecast_correction_weighted": weighted_correction,
             "forecast_correction_weighted_basis": weighted_basis,
             **nv,
+            "forecast_quantiles": solar_quantiles,
             "days_since_full": since_full,
             "full_charge_due": full_due,
             "full_charge_skip_would": skip_would,
@@ -2074,23 +2086,38 @@ class SunsynkOptimizer:
             hourly_tomorrow = self._synthetic_hourly_forecast(tomorrow_kwh) or {}
         prices, _sources = self._tariff_prices(now.date())
         loads = self._mpc_loads(cfg)
-        slots = mpc_slots(
-            now.hour * 60 + now.minute, prices, flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"),
-            self._hourly_or_synthetic_forecast(cfg, now), hourly_tomorrow, loads,
-        )
-        if slots is None:
-            return
+        export_bands = flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export")
+        hourly_today = self._hourly_or_synthetic_forecast(cfg, now)
         offpeak = prices.get("offpeak")
         capacity, charge_kw, wear = self._capacity_kwh(cfg), float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)), self._wear_pence()
         terminal = None if offpeak is None else offpeak / CHARGE_EFFICIENCY
-        plan = await self.hass.async_add_executor_job(
-            lambda: mpc_solve(slots, soc, capacity, charge_kw, wear_pence=wear, terminal_pence=terminal)
-        )
+
+        def _solve(ratio: float | None) -> dict[str, Any] | None:
+            slots = mpc_slots(
+                now.hour * 60 + now.minute, prices, export_bands, scale_hourly(hourly_today, ratio),
+                scale_hourly(hourly_tomorrow, ratio), loads,
+            )
+            return None if slots is None else mpc_solve(
+                slots, soc, capacity, charge_kw, wear_pence=wear, terminal_pence=terminal
+            )
+
+        plan = await self.hass.async_add_executor_job(_solve, None)
         if plan is None:
             return
+        # Phase 70: the same plan with today's learned P10 / P90 solar (shadow robustness check).
+        last = self.coordinator.state.last_import_plan or {}
+        quantiles = (last.get("forecast_quantiles") or {}) if last.get("date") == now.date().isoformat() else {}
+        spread: dict[str, Any] = {}
+        for key in ("p10", "p90"):
+            ratio = quantiles.get(f"{key}_ratio")
+            alt = await self.hass.async_add_executor_job(_solve, ratio) if ratio is not None else None
+            alt_summary = mpc_summary(alt)
+            spread[f"soc_0500_{key}"] = alt_summary.get("soc_0500")
+            spread[f"first_action_{key}"] = alt_summary.get("first_action")
+            spread[f"cost_gbp_{key}"] = alt_summary.get("cost_gbp")
         rule = self.coordinator.state.nightly_import_plan or {}
         record = {
-            "date": now.date().isoformat(), "time": now.strftime("%H:%M"), "soc": soc, **mpc_summary(plan),
+            "date": now.date().isoformat(), "time": now.strftime("%H:%M"), "soc": soc, **mpc_summary(plan), **spread,
             "rule_plan_date": rule.get("date"), "rule_target_soc": rule.get("target_soc"),
             "loads_kw": loads, "tomorrow_solar_kwh": tomorrow_kwh,
         }

@@ -44,6 +44,7 @@ _IMPORT_PLAN_FIELDS = (
     "forecast_correction_factor",
     "forecast_correction_weighted",
     "forecast_correction_weighted_basis",
+    "forecast_quantiles",
     "target_soc_newsvendor",
     "newsvendor_ratio",
     "newsvendor_quantile",
