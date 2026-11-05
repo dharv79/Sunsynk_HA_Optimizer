@@ -16,6 +16,7 @@ against actual solar. Read-only on the data dir; no Home Assistant needed.
 
     python3 tools/backtest.py /config/sunsynk_optimizer_data --target-offset -5
     python3 tools/backtest.py DATA_DIR --load-kw 0.6 --days 60
+    python3 tools/backtest.py DATA_DIR --upgrade --pv-kwp 4.2   # phase 50 upgrade advisor
 
 Model (approximate, for comparing settings, not absolute figures):
 - The battery charges from the plan's start SOC to its target; the alternative
@@ -177,6 +178,23 @@ def forecast_error(records: list[dict[str, Any]], days: int | None = None) -> di
     }
 
 
+def upgrade(records: list[dict[str, Any]], args: argparse.Namespace) -> dict[str, Any]:
+    """Phase 50: replay logged days with a bigger battery or more PV, at the given flat band prices."""
+    dates = _recent(sorted({r["date"] for r in records if r.get("type") == "meter_snapshot" and r.get("date")}), args.days)
+    days = {}
+    for date in dates:
+        snaps: dict[str, dict[str, Any]] = {}
+        for rec in records:
+            if rec.get("type") == "meter_snapshot" and rec.get("date") == date and rec.get("time"):
+                snaps.setdefault(rec["time"], rec)
+        days[date] = snaps
+    prices = {"offpeak": args.offpeak_p, "day": args.day_p, "peak": args.peak_p}
+    return planning.upgrade_advisor(
+        days, prices, [(0, 1440, args.export_p)], args.capacity, args.charge_kw,
+        pv_kwp=args.pv_kwp, battery_price_per_kwh=args.battery_price, pv_price_per_kwp=args.pv_price,
+    )
+
+
 def main(argv: list[str] | None = None) -> dict[str, Any]:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("data_dir", help="sunsynk_optimizer_data directory (read-only)")
@@ -184,8 +202,21 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--load-kw", type=float, default=None, help="alternative overnight load for solar_bridge nights")
     parser.add_argument("--capacity", type=float, default=const.DEFAULT_BATTERY_CAPACITY, help="battery kWh")
     parser.add_argument("--days", type=int, default=None, help="only the most recent N nights")
+    parser.add_argument("--upgrade", action="store_true", help="phase 50: price a bigger battery / more PV instead")
+    parser.add_argument("--charge-kw", type=float, default=const.DEFAULT_CHARGE_RATE, help="--upgrade: charge rate")
+    parser.add_argument("--pv-kwp", type=float, default=None, help="--upgrade: installed PV kWp (adds the PV scenario)")
+    parser.add_argument("--battery-price", type=float, default=None, help="--upgrade: £ per extra battery kWh")
+    parser.add_argument("--pv-price", type=float, default=None, help="--upgrade: £ per extra PV kWp")
+    parser.add_argument("--offpeak-p", type=float, default=16.66, help="--upgrade: off-peak import p/kWh")
+    parser.add_argument("--day-p", type=float, default=27.77, help="--upgrade: day import p/kWh")
+    parser.add_argument("--peak-p", type=float, default=38.88, help="--upgrade: peak import p/kWh")
+    parser.add_argument("--export-p", type=float, default=15.0, help="--upgrade: flat export p/kWh")
     args = parser.parse_args(argv)
     records = load_records(args.data_dir)
+    if args.upgrade:
+        report = upgrade(records, args)
+        print(json.dumps(report, indent=2))
+        return report
     report = {
         "plan": replay(records, args.target_offset, args.load_kw, args.capacity, days=args.days),
         "forecast_correction": forecast_error(records, args.days),

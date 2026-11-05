@@ -132,6 +132,7 @@ class OptimizerState:
     # configured_kwh, pct_of_configured. Shadow: never changes battery_capacity.
     battery_capacity_estimate: dict[str, Any] = field(default_factory=dict)
     shadow_scorecard: dict[str, Any] = field(default_factory=dict)
+    upgrade_advisor: dict[str, Any] = field(default_factory=dict)  # phase 50 monthly report
     # Month (YYYY-MM) the monthly reports last covered; None until the first send (phase 57).
     last_monthly_report_month: str | None = None
     # Today's 16:00 peak export decision (phase 17). Persisted so a restart

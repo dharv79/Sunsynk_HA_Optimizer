@@ -91,3 +91,11 @@ Assumes the bill covers a calendar month. Read-only. Tests: `test_reconcile_*` a
 ## Monthly report catch-up (01/11/2026, phase 57)
 
 The monthly tariff comparison, battery value and capacity estimate now run through `_async_monthly_reports`, called daily at 18:00 and at startup. `planning.monthly_report_due` makes them run once per month after the first Sunday, so a Sunday missed while HA was down is sent at the next 18:00 or restart. `last_monthly_report_month` (persisted) prevents duplicates. Sunsynk API calls now time out after 30 s.
+
+## Battery and PV upgrade advisor (05/11/2026, phase 50)
+
+**Design.** `planning.simulate_system` re-runs one logged day (the five 00:00–22:00 KPI segments from the meter snapshots, load and solar derived as in phase 37) with a battery of any size and PV × `pv_scale`. The simulated battery starts at its 25% floor, charges at 02:00–05:00 (capped at charge rate × 3 h) only for the later deficits it can serve cheaper than the grid after round-trip losses and wear, soaks up solar surplus and discharges into deficits; energy left at 22:00 is credited at the off-peak price. `upgrade_advisor` runs the current size, +5 kWh, +10 kWh and (when `pv_kwp` is set) +2 kWp on up to 90 days of snapshots at today's tariff prices, skipping free-event days. Saving = simulated current − simulated scenario, so the model's bias largely cancels; reported in total, per month and annualised, with payback when `upgrade_price_per_kwh` / `pv_upgrade_price_per_kwp` are set. Sent with the monthly reports (`_async_send_upgrade_advisor`): an `upgrade_advisor` JSON line to the debug stream and a summary notification; stored in `state.upgrade_advisor`. Report only: never changes a setting. Offline: `tools/backtest.py DATA_DIR --upgrade --pv-kwp 4.2`.
+
+**Caveats.** Perfect-foresight charging is an upper bound; the segment model ignores in-segment dynamics; winter-only data understates PV, which is why the months covered are listed. Fewer than 7 usable days → no scenarios.
+
+**Verification.** `tests/test_upgrade_advisor.py`: a 0 kWh battery reproduces phase 37's `no_battery_gbp` exactly; cost falls monotonically with size and saturates; the charge-rate cap, PV scale, wear and the "not worth charging" rule; missing data → None; scenario naming, per-month split, payback and the CLI.

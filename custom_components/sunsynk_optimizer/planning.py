@@ -2994,6 +2994,198 @@ def battery_value_summary(days: list[dict[str, Any]]) -> dict[str, Any]:
     return {"saving_gbp": round(sum(values), 2) if values else None, "days": len(values)}
 
 
+# Battery and PV upgrade advisor (phase 50). Report only: never changes a setting.
+UPGRADE_BATTERY_STEPS_KWH = (5.0, 10.0)
+UPGRADE_PV_STEP_KWP = 2.0
+UPGRADE_MIN_DAYS = 7
+UPGRADE_HISTORY_DAYS = 90
+
+
+def _day_flows(
+    snapshots: dict[str, dict[str, Any]], battery_capacity_kwh: float
+) -> list[tuple[str, str, float, float]] | None:
+    """[(segment start, band, house load, solar)] per `_BASELINE_SEGMENTS`, as phase 37 derives them; None if incomplete."""
+    flows = []
+    for start, end, band, sunny in _BASELINE_SEGMENTS:
+        load = _seg_value(snapshots, start, end, "load_kwh")
+        imp = _seg_value(snapshots, start, end, "grid_import_kwh")
+        exp = _seg_value(snapshots, start, end, "grid_export_kwh")
+        if load is None or imp is None or exp is None:
+            return None
+        solar = 0.0
+        if sunny:
+            soc_a, soc_b = _snap(snapshots, start, "soc"), _snap(snapshots, end, "soc")
+            if soc_a is None or soc_b is None:
+                return None
+            solar = max(0.0, load - imp + exp + (soc_b - soc_a) / 100 * battery_capacity_kwh)
+        flows.append((start, band, load, solar))
+    return flows
+
+
+def simulate_system(
+    snapshots: dict[str, dict[str, Any]],
+    prices_pence: dict[str, float | None],
+    export_bands: list[tuple[int, int, float]],
+    battery_capacity_kwh: float,
+    sim_capacity_kwh: float,
+    charge_kw: float,
+    pv_scale: float = 1.0,
+    wear_pence: float | None = None,
+    floor_soc: float = BATTERY_LOW_SOC,
+) -> dict[str, float | None]:
+    """00:00-22:00 cost of one logged day re-run with a `sim_capacity_kwh` battery and PV × `pv_scale`.
+
+    Load and solar per segment come from the meters as in phase 37
+    (`battery_capacity_kwh` is the real battery, used only for that). The
+    simulated battery starts the day at its floor, charges at 02:00-05:00
+    (≤ charge_kw × 3 h) just enough for the later deficits it can serve more
+    cheaply than the grid (perfect foresight: an upper bound for every size,
+    so compare sizes, don't read the absolute), soaks up solar surplus and
+    discharges into any deficit. Energy left at 22:00 is credited at the
+    off-peak price it saves tomorrow. With a 0 kWh battery the cost equals
+    phase 37's `no_battery_gbp`. Missing data → all None.
+    """
+    empty = {"cost_gbp": None, "import_kwh": None, "export_kwh": None, "cycled_kwh": None}
+    flows = _day_flows(snapshots, battery_capacity_kwh)
+    offpeak = prices_pence.get("offpeak")
+    if flows is None or battery_capacity_kwh <= 0:
+        return empty
+    ce, de, wear = CHARGE_EFFICIENCY, DISCHARGE_EFFICIENCY, wear_pence or 0.0
+    usable = max(0.0, sim_capacity_kwh) * (1 - floor_soc / 100)
+    flows = [(s, b, load, solar * pv_scale) for s, b, load, solar in flows]
+
+    def worth_it(band: str) -> bool:
+        price = prices_pence.get(band)
+        return offpeak is not None and price is not None and price > (offpeak + wear) / (ce * de)
+
+    # Backward pass from 22:00: stored kWh needed at 05:00 to cover later deficits.
+    need = 0.0
+    for _start, band, load, solar in reversed(flows[2:]):
+        deficit = max(0.0, load - solar) if worth_it(band) else 0.0
+        need = max(0.0, need + deficit / de - max(0.0, solar - load) * ce)
+    stored = cost = imported = exported = cycled = 0.0
+    for start, band, load, solar in flows:
+        imp_price, exp_price = prices_pence.get(band), price_at(export_bands, hhmm_to_minutes(start))
+        grid_in = grid_out = 0.0
+        if start == "02:00" and usable > 0:
+            add = max(0.0, min(need, usable, charge_kw * 3 * ce) - stored)
+            stored += add
+            cycled += add / ce
+            grid_in += add / ce
+        surplus = solar - load
+        if surplus >= 0:
+            take = min(usable - stored, surplus * ce)
+            stored += take
+            cycled += take / ce
+            grid_out += surplus - take / ce
+        else:
+            draw = min(stored, -surplus / de) if start != "02:00" else 0.0
+            stored -= draw
+            grid_in += -surplus - draw * de
+        parts = (_pence(grid_in, imp_price), _pence(grid_out, exp_price))
+        if any(p is None for p in parts):
+            return empty
+        cost += parts[0] - parts[1]
+        imported += grid_in
+        exported += grid_out
+    if stored > 0:
+        if offpeak is None:
+            return empty
+        cost -= stored / ce * offpeak
+    cost += cycled * wear
+    return {
+        "cost_gbp": round(cost / 100, 2),
+        "import_kwh": round(imported, 2),
+        "export_kwh": round(exported, 2),
+        "cycled_kwh": round(cycled, 2),
+    }
+
+
+def upgrade_scenarios(
+    battery_capacity_kwh: float, pv_kwp: float | None
+) -> list[dict[str, Any]]:
+    """Scenarios to price: current, +5/+10 kWh of battery, and +2 kWp of PV when the installed kWp is known."""
+    out = [{"name": "current", "capacity_kwh": battery_capacity_kwh, "pv_scale": 1.0}]
+    for extra in UPGRADE_BATTERY_STEPS_KWH:
+        out.append({"name": f"+{extra:g} kWh battery", "capacity_kwh": battery_capacity_kwh + extra,
+                    "pv_scale": 1.0, "added_kwh": extra})
+    if _is_number(pv_kwp) and pv_kwp > 0:
+        out.append({"name": f"+{UPGRADE_PV_STEP_KWP:g} kWp PV", "capacity_kwh": battery_capacity_kwh,
+                    "pv_scale": (pv_kwp + UPGRADE_PV_STEP_KWP) / pv_kwp, "added_kwp": UPGRADE_PV_STEP_KWP})
+    return out
+
+
+def upgrade_advisor(
+    days: dict[str, dict[str, dict[str, Any]]],
+    prices_pence: dict[str, float | None],
+    export_bands: list[tuple[int, int, float]],
+    battery_capacity_kwh: float,
+    charge_kw: float,
+    wear_pence: float | None = None,
+    pv_kwp: float | None = None,
+    battery_price_per_kwh: float | None = None,
+    pv_price_per_kwp: float | None = None,
+) -> dict[str, Any]:
+    """What +5/+10 kWh of battery (or +2 kWp of PV) would have saved over logged days, at today's prices.
+
+    Each scenario's saving = simulated current cost − simulated scenario cost,
+    on the same days and policy, so the model's bias largely cancels. Per
+    month and in total; annualised = mean daily saving × 365 (says which months
+    it covers: winter-only data understates PV). Payback in years when a
+    price is given and the saving is positive; otherwise None. Fewer than
+    `UPGRADE_MIN_DAYS` usable days → `"scenarios": []`.
+    """
+    scenarios = upgrade_scenarios(battery_capacity_kwh, pv_kwp)
+    per_day: dict[str, list[float]] = {}
+    used_dates: list[str] = []
+    for day, snaps in sorted(days.items()):
+        costs = [
+            simulate_system(snaps, prices_pence, export_bands, battery_capacity_kwh, s["capacity_kwh"],
+                            charge_kw, s["pv_scale"], wear_pence)["cost_gbp"]
+            for s in scenarios
+        ]
+        if any(c is None for c in costs):
+            continue
+        used_dates.append(day)
+        per_day[day] = costs
+    months = sorted({d[:7] for d in used_dates})
+    report: dict[str, Any] = {"days": len(used_dates), "months": months, "scenarios": []}
+    if len(used_dates) < UPGRADE_MIN_DAYS:
+        return report
+    for i, s in enumerate(scenarios[1:], start=1):
+        savings = {d: per_day[d][0] - per_day[d][i] for d in used_dates}
+        total = sum(savings.values())
+        by_month = {m: round(sum(v for d, v in savings.items() if d.startswith(m)), 2) for m in months}
+        annual = total / len(used_dates) * 365
+        if "added_kwh" in s:
+            price = battery_price_per_kwh * s["added_kwh"] if _is_number(battery_price_per_kwh) else None
+        else:
+            price = pv_price_per_kwp * s["added_kwp"] if _is_number(pv_price_per_kwp) else None
+        report["scenarios"].append({
+            "name": s["name"],
+            "saving_gbp": round(total, 2),
+            "by_month_gbp": by_month,
+            "annual_gbp": round(annual, 2),
+            "price_gbp": round(price, 2) if price else None,
+            "payback_years": round(price / annual, 1) if price and annual > 0 else None,
+        })
+    return report
+
+
+def upgrade_summary(report: dict[str, Any]) -> str | None:
+    """One line per scenario for the notification; None when there's nothing to say."""
+    if not report.get("scenarios"):
+        return None
+    months = report["months"]
+    span = months[0] if len(months) == 1 else f"{months[0]} to {months[-1]}"
+    lines = [f"Replayed {report['days']} logged days ({span}) at today's rates:"]
+    for s in report["scenarios"]:
+        payback = f"; payback ~{s['payback_years']:g} yrs at £{s['price_gbp']:,.0f}" if s["payback_years"] else ""
+        lines.append(f"• {s['name']}: saved £{s['saving_gbp']:.2f} (~£{s['annual_gbp']:.0f}/yr){payback}")
+    lines.append("Upper-bound estimate (perfect-foresight charging); data only covers the months listed.")
+    return "\n".join(lines)
+
+
 # Battery capacity tracking (phase 34). Shadow: never changes battery_capacity.
 CAPACITY_MIN_SWING_SOC = 30.0
 CAPACITY_MIN_SAMPLES = 5

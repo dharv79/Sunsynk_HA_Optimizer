@@ -1,6 +1,6 @@
 # Phase 50 — Battery and PV upgrade advisor
 
-**Status:** Planned, not built. **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
+**Status:** Done (see As built). **Size:** M. **Category:** new feature. **Origin:** feature/improvement sweep, 01/11/2026 (vetted against code).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Two candidates merged (sizing advisor and upgrade advisor). Confirmed the phase 
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (05/11/2026)
+
+- `planning.simulate_system` (0 kWh = phase 37 baseline, tested), `upgrade_scenarios`, `upgrade_advisor`, `upgrade_summary`.
+- Monthly with the other reports; JSON `upgrade_advisor` line + notification; `state.upgrade_advisor`.
+- Options: `upgrade_price_per_kwh`, `pv_kwp` (enables the +2 kWp scenario), `pv_upgrade_price_per_kwp`.
+- `tools/backtest.py --upgrade`. Details: `docs/architecture/weekly-reports.md`.

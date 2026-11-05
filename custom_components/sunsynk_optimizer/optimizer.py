@@ -47,6 +47,9 @@ from .const import (
     CONF_EXPORT_LIMIT_W,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_RATE,
+    CONF_UPGRADE_PRICE_PER_KWH,
+    CONF_PV_KWP,
+    CONF_PV_UPGRADE_PRICE_PER_KWP,
     CONF_CHARGES,
     CONF_DATA_REPORT_TARGET,
     CONF_DEFAULT_FULL_CHARGE_DAY,
@@ -197,8 +200,11 @@ from .planning import (
     marginal_cost_pence,
     solar_is_spare,
     battery_value_summary,
+    upgrade_advisor,
+    upgrade_summary,
     no_battery_baseline,
     CAPACITY_HISTORY_DAYS,
+    UPGRADE_HISTORY_DAYS,
     capacity_estimate,
     capacity_estimate_pending,
     record_for_date,
@@ -1781,6 +1787,7 @@ class SunsynkOptimizer:
             return
         await self._guarded(lambda: self._async_send_monthly_tariff_comparison(force=True), "Monthly tariff comparison")
         await self._guarded(lambda: self._async_send_monthly_battery_value(force=True), "Monthly battery value")
+        await self._guarded(self._async_send_upgrade_advisor, "Upgrade advisor")
         await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
         report_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         self.coordinator.update_state(last_monthly_report_month=report_month)
@@ -3234,6 +3241,39 @@ class SunsynkOptimizer:
             f"Battery saved ~£{summary['saving_gbp']:.2f} this month{wear} ({summary['days']} days) "
             "vs the same days with no battery, 00:00–22:00 at your Flux rates.",
         )
+
+    async def _async_send_upgrade_advisor(self) -> None:
+        """Monthly: what +5/+10 kWh of battery or +2 kWp of PV would have saved (phase 50); report only."""
+        cfg = self.cfg
+        days = await self.data_logger.async_load_snapshot_days(UPGRADE_HISTORY_DAYS)
+        free_days = {
+            r.get("date") for r in await self.data_logger.async_load_records(UPGRADE_HISTORY_DAYS)
+            if r.get("type") == "day_kpis" and (r.get("free_import_excluded_kwh") or 0) > 0
+        }
+        days = {d: snaps for d, snaps in days.items() if d not in free_days}
+
+        def _opt(key: str) -> float | None:
+            try:
+                value = float(cfg.get(key))
+            except (TypeError, ValueError):
+                return None
+            return value if value > 0 else None
+
+        prices, _sources = self._tariff_prices()
+        report = upgrade_advisor(
+            days, prices, flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"), self._capacity_kwh(cfg),
+            float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)), self._wear_pence(), _opt(CONF_PV_KWP),
+            _opt(CONF_UPGRADE_PRICE_PER_KWH), _opt(CONF_PV_UPGRADE_PRICE_PER_KWP),
+        )
+        self.coordinator.update_state(touch=False, upgrade_advisor={**report, "date": dt_util.now().date().isoformat()})
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify(
+                "Sunsynk Upgrade Advisor", json.dumps({"type": "upgrade_advisor", **report}), target=data_report_target
+            )
+        text = upgrade_summary(report)
+        if text:
+            await self.async_notify("🔋 Sunsynk: what a bigger system would have saved", text)
 
     async def _async_send_shadow_scorecard(self) -> None:
         """First Sunday of the month: score every shadow feature against what happened (phase 41); read-only."""
