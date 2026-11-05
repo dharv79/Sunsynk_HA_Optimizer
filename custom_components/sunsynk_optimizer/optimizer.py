@@ -177,7 +177,11 @@ from .planning import (
     flux_bands_from_charges,
     merge_tariff_rates,
     agile_prices_by_date,
+    BATTERY_LOW_SOC,
     cheapest_window_plan,
+    tou_diff,
+    tou_slots_from_plan,
+    tou_slots_from_settings,
     dynamic_tariff_summary,
     DYNAMIC_SHADOW_MINUTE,
     MPC_MAX_SLOTS,
@@ -1358,6 +1362,8 @@ class SunsynkOptimizer:
             # calibration thins (locks in the history seed on first run).
             last_effective_charge_rate_kw=effective_charge_rate,
         )
+        if source != STARTUP_PLAN_SOURCE:
+            await self._guarded(lambda: self.async_run_tou_shadow(plan_state), "Native TOU shadow")
         await self._async_notify_import_plan(plan_state)
         if source != STARTUP_PLAN_SOURCE:
             await self._async_log_multi_day_shadow("plan", target_soc=target_soc)
@@ -2138,6 +2144,29 @@ class SunsynkOptimizer:
         }
         await self.data_logger.async_log_mpc_plan(**record)
         self.coordinator.update_state(touch=False, mpc_plan={**record, "slots": plan["slots"]})
+
+    async def async_run_tou_shadow(self, plan: dict[str, Any]) -> None:
+        """After the plan: the six inverter TOU slots it would need vs what the inverter holds (phase 73).
+
+        Read-only (also in monitor mode); never writes the slots."""
+        flux1 = (plan.get("payload") or {}).get("flux_1") or {}
+        proposed = tou_slots_from_plan(
+            flux1.get("startTime"), flux1.get("endTime"), plan.get("target_soc"), BATTERY_LOW_SOC,
+            self._evening_reserve_soc(),
+        )
+        settings = await self._async_api_read(
+            "Inverter settings", self.coordinator.api.async_read_settings, self.inverter_serial
+        )
+        current = tou_slots_from_settings(settings)
+        diffs = tou_diff(current, proposed)
+        now = dt_util.now()
+        record = {
+            "date": now.date().isoformat(), "time": now.strftime("%H:%M"), "target_soc": plan.get("target_soc"),
+            "proposed": proposed, "inverter": current, "readable": current is not None,
+            "diffs": diffs, "diff_count": None if diffs is None else len(diffs),
+        }
+        await self.data_logger.async_log_tou_shadow(**record)
+        self.coordinator.update_state(touch=False, tou_shadow=record)
 
     async def _async_dynamic_tariff_shadow(self, _now) -> None:
         await self._guarded(self.async_run_dynamic_tariff_shadow, "Dynamic tariff shadow")

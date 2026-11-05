@@ -1,6 +1,6 @@
 # Phase 73 — Native inverter time-of-use programming via the six system-mode slots
 
-**Status:** Planned, not built. **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, shadow only (see As built). **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (05/11/2026)
+
+- Feasibility: no locked decision or do-not-break rule touched. Nothing is written: the settings read is read-only, so rules 5 and 16 hold, and the logic is in `planning.py` (rule 19). `api.async_write_settings` already exists, so no API change was needed.
+- `tou_slots_from_plan`, `tou_slots_from_settings`, `tou_diff` and `tou_settings_payload` (the last one is unused until live).
+- After each 01:55 plan `async_run_tou_shadow` → `tou_shadow` record + `state.tou_shadow`.
+- Not built: `native_tou_live` and the drift-check read-back of slots. Both wait for the shadow log to confirm the setting names (`readable: true`) and that the proposed slots make sense.

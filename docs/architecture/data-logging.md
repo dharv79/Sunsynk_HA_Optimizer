@@ -115,3 +115,7 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## Dynamic tariff record (05/11/2026, phase 76)
 
 `dynamic_tariff` (22:05, deduped by date and time, never read back): date, time, region, soc, flux_cost_gbp, agile_cost_gbp, saving_gbp, flux/agile_grid_charge_kwh, agile_export_kwh, agile_soc_0500, horizon_slots, min_p, max_p, spike_slots, negative_slots, cheapest_windows, cheapest_avg_p, tomorrow_prices. When the run is skipped it carries only date, time, region and `skipped`. See `import-plan.md`.
+
+## TOU shadow record (05/11/2026, phase 73)
+
+`tou_shadow` (after the 01:55 plan, deduped by date and time, never read back): date, time, target_soc, proposed (six {time, soc, grid_charge}), inverter (same shape or None), readable, diffs [{slot, field, inverter, plan}] or None, diff_count. See `import-plan.md`.

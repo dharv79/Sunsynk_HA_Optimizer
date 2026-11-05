@@ -284,3 +284,22 @@ The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.me
 - Spike guard and shortfall; negative slots; `from_slot` across two days; missing prices or rate → None.
 - `mpc_slots` priced from the vectors and stopping where they end, and unchanged without them.
 - The Agile MPC charges only in the cheap run; the summary maths; a missing plan gives None, never 0.
+
+## Native time-of-use slots in shadow (05/11/2026, phase 73)
+
+**Design.** After each 01:55 plan (not the startup plan or the dry run), `async_run_tou_shadow` maps the plan onto the inverter's six system-mode slots with `planning.tou_slots_from_plan`. In a slot the battery discharges no lower than the slot's SOC, and with grid charge on it charges from the grid up to that SOC. The mapping:
+- 00:00 → the evening reserve.
+- Flux 1 start → target SOC with grid charge on.
+- Flux 1 end → the 25% floor.
+- An optional peak hold (start, SOC) between the charge end and 16:00, for a later peak-cover hand-off.
+- 16:00 → the evening reserve.
+
+Equal neighbours merge, and the longest slot is split on the half-hour until there are exactly six. The run then reads the inverter's settings (read-only, so it also runs in monitor mode) and parses `sellTimeN` / `capN` / `timeNon` with `tou_slots_from_settings` (None if any slot is missing or unreadable). It logs a `tou_shadow` record with the proposed slots, the inverter's slots, `readable`, and the per-slot `diffs` and their count, and stores it in `state.tou_shadow`. `tou_settings_payload` builds the write payload for a later live mode; nothing calls it yet.
+
+**Use.** Shadow only. The setting names are the commonly documented Sunsynk ones and are not yet confirmed on this inverter: `readable: false` in the logs means they differ. A live `native_tou_live` mode needs those names confirmed, a few weeks of diffs that make sense, and monitor-mode gating on the write.
+
+**Verification.** `tests/test_native_tou.py`:
+- The plan becomes six ordered slots with the right SOC and grid-charge flags.
+- Padding stays on the half-hour and keeps the settings.
+- Peak hold and merging; missing inputs → None.
+- The payload round-trips through the settings parser; the diff; parser variants and unreadable settings.

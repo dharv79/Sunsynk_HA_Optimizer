@@ -69,6 +69,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_forecast_quantiles.py` | Phase 70 learned P10/P50/P90 solar: ratio samples, bin fallback, season wrap, walk-forward coverage, `scale_hourly`, plan field |
 | `tests/test_load_profile.py` | Phase 71 load profile: `day_load_slots` shaping, `load_profile` day type/filters/summary, `heating_scale`, walk-forward backtest, MPC hand-off, `backtest.py --load-profile` |
 | `tests/test_dynamic_tariff.py` | Phase 76 Agile shadow: `cheapest_window_plan` (ordering, partial slot, spike guard, negative slots, two days), `mpc_slots` price vectors, `dynamic_tariff_summary` |
+| `tests/test_native_tou.py` | Phase 73 TOU shadow: `tou_slots_from_plan` mapping, padding, peak hold, merge, missing inputs; `tou_slots_from_settings` parsing; `tou_diff`; `tou_settings_payload` round trip |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |

@@ -4767,3 +4767,117 @@ def dynamic_tariff_summary(
         "cheapest_windows": (windows or {}).get("windows"),
         "cheapest_avg_p": (windows or {}).get("avg_p"),
     }
+
+
+# Native inverter time-of-use slots (phase 73). Shadow only: the six system-mode slots the plan
+# would need are logged next to what the inverter holds; nothing is written.
+TOU_SLOT_COUNT = 6
+TOU_PEAK_FROM_MINUTES = 16 * 60
+TOU_SLOT_STEP_MINUTES = 30
+
+
+def _tou_setting_keys(n: int) -> tuple[str, str, str]:
+    """(start time, SOC, grid-charge flag) setting names for slot n (1-6) in the Sunsynk settings dict."""
+    return f"sellTime{n}", f"cap{n}", f"time{n}on"
+
+
+def _tou_flag(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower() if value is not None else ""
+    if text in ("true", "1", "on"):
+        return True
+    if text in ("false", "0", "off"):
+        return False
+    return None
+
+
+def tou_slots_from_plan(
+    charge_start: str | None,
+    charge_end: str | None,
+    target_soc: float | None,
+    floor_soc: int,
+    evening_reserve_soc: int | None,
+    peak_hold: tuple[str, float] | None = None,
+) -> list[dict[str, Any]] | None:
+    """The plan as the inverter's six (start, SOC, grid charge) slots.
+
+    Each slot runs from its start to the next one's. In a slot the battery
+    discharges no lower than its SOC, and with grid charge on it charges
+    from the grid up to that SOC. Mapping: midnight → the evening reserve;
+    the charge window → target SOC with grid charge on; after it → the floor
+    (the day uses the battery); an optional peak hold (start, SOC) from
+    phase 59; 16:00 → the evening reserve. Neighbouring slots with the same
+    settings merge, then the longest slot is split on the half-hour until
+    there are exactly six (the inverter always has six). None when the
+    charge window or target is missing.
+    """
+    start, end = hhmm_to_minutes(charge_start or ""), hhmm_to_minutes(charge_end or "")
+    if start is None or end is None or not _is_number(target_soc) or end <= start:
+        return None
+    reserve = int(evening_reserve_soc) if _is_number(evening_reserve_soc) else floor_soc
+    points: dict[int, tuple[int, bool]] = {
+        0: (reserve, False),
+        start: (int(round(target_soc)), True),
+        end: (floor_soc, False),
+        TOU_PEAK_FROM_MINUTES: (reserve, False),
+    }
+    if peak_hold is not None:
+        hold_at = hhmm_to_minutes(peak_hold[0] or "")
+        if hold_at is not None and end < hold_at < TOU_PEAK_FROM_MINUTES and _is_number(peak_hold[1]):
+            points[hold_at] = (int(round(peak_hold[1])), False)
+    merged: list[list[Any]] = []
+    for minute in sorted(points):
+        if merged and tuple(merged[-1][1:]) == points[minute]:
+            continue
+        merged.append([minute, *points[minute]])
+    while len(merged) < TOU_SLOT_COUNT:
+        lengths = [((merged[i + 1][0] if i + 1 < len(merged) else 1440) - m[0], i) for i, m in enumerate(merged)]
+        length, i = max(lengths)
+        if length < 2 * TOU_SLOT_STEP_MINUTES:
+            break
+        mid = merged[i][0] + (length // 2 // TOU_SLOT_STEP_MINUTES) * TOU_SLOT_STEP_MINUTES
+        merged.insert(i + 1, [mid, merged[i][1], merged[i][2]])
+    if len(merged) > TOU_SLOT_COUNT:
+        return None
+    return [{"time": minutes_to_hhmm(m), "soc": soc, "grid_charge": grid} for m, soc, grid in merged]
+
+
+def tou_slots_from_settings(settings: Any) -> list[dict[str, Any]] | None:
+    """The six slots the inverter holds, from its settings dict; None if any slot is missing or unreadable."""
+    if not isinstance(settings, dict):
+        return None
+    out = []
+    for n in range(1, TOU_SLOT_COUNT + 1):
+        time_key, soc_key, grid_key = _tou_setting_keys(n)
+        minute = hhmm_to_minutes(str(settings.get(time_key) or ""))
+        soc, grid = _as_float(settings.get(soc_key)), _tou_flag(settings.get(grid_key))
+        if minute is None or soc is None or grid is None:
+            return None
+        out.append({"time": minutes_to_hhmm(minute), "soc": int(round(soc)), "grid_charge": grid})
+    return out
+
+
+def tou_diff(current: list[dict[str, Any]] | None, proposed: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Per-slot differences (slot, field, inverter, plan); None when either side is unknown."""
+    if current is None or proposed is None:
+        return None
+    diffs = []
+    for n, (cur, new) in enumerate(zip(current, proposed), start=1):
+        for key in ("time", "soc", "grid_charge"):
+            if cur.get(key) != new.get(key):
+                diffs.append({"slot": n, "field": key, "inverter": cur.get(key), "plan": new.get(key)})
+    return diffs
+
+
+def tou_settings_payload(slots: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """The settings-API fields for six slots (for a later live mode; unused while in shadow)."""
+    if not slots or len(slots) != TOU_SLOT_COUNT:
+        return None
+    payload: dict[str, Any] = {}
+    for n, slot in enumerate(slots, start=1):
+        time_key, soc_key, grid_key = _tou_setting_keys(n)
+        payload[time_key] = slot["time"]
+        payload[soc_key] = str(slot["soc"])
+        payload[grid_key] = "true" if slot["grid_charge"] else "false"
+    return payload

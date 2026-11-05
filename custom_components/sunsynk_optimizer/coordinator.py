@@ -137,6 +137,8 @@ class OptimizerState:
     mpc_plan: dict[str, Any] = field(default_factory=dict)
     # Nightly Agile-vs-Flux shadow comparison (phase 76); never pushed.
     dynamic_tariff: dict[str, Any] = field(default_factory=dict)
+    # Native TOU slots the last plan would need vs the inverter's (phase 73); never written.
+    tou_shadow: dict[str, Any] = field(default_factory=dict)
     # Learned half-hourly load profile (phase 71): 48 slots, days, day_type, temp_scale, peak/evening/day bands.
     load_profile: dict[str, Any] = field(default_factory=dict)
     # Month (YYYY-MM) the monthly reports last covered; None until the first send (phase 57).
