@@ -47,6 +47,8 @@ from .const import (
     CONF_PV_KWP,
     CONF_PV_UPGRADE_PRICE_PER_KWP,
     CONF_SPARE_SOLAR_NOTIFY_KWH,
+    CONF_FLEX_EVENT_ENTITY,
+    CONF_FLEX_PRICE_PENCE,
     CONF_FULL_WINDOW_LIVE,
     CONF_EVENING_LOAD_LIVE,
     CONF_LOAD_PROFILE_LIVE,
@@ -296,6 +298,13 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 description={"suggested_value": values.get(CONF_SPARE_SOLAR_NOTIFY_KWH)},
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=50, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWh")
+            ),
+            vol.Optional(CONF_FLEX_EVENT_ENTITY, default=values.get(CONF_FLEX_EVENT_ENTITY, "")): selector.TextSelector(),
+            vol.Optional(
+                CONF_FLEX_PRICE_PENCE,
+                description={"suggested_value": values.get(CONF_FLEX_PRICE_PENCE)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1000, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="p/kWh")
             ),
             vol.Required(CONF_AVG_CONSUMPTION_KW, default=values.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")

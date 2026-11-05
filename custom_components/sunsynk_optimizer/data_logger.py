@@ -314,6 +314,10 @@ class DataLogger:
         """Shadow MPC plan summary every 30 min (phase 69); never read back by learning."""
         await self._async_append(_record("mpc_plan", **fields))
 
+    async def async_log_flex_event(self, **fields: Any) -> None:
+        """What the battery could offer a paid export event (phase 77, shadow): one per event start."""
+        await self._async_append(_record("flex_event", **fields))
+
     async def async_log_tou_shadow(self, **fields: Any) -> None:
         """Native TOU slots the plan would need vs the inverter's (phase 73): one per plan run."""
         await self._async_append(_record("tou_shadow", **fields))
@@ -914,7 +918,7 @@ class DataLogger:
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog", "charge_outcome",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load", "import_causes",
         "half_hourly_import", "half_hourly_export", "capacity_estimate", "pv_strings",
-        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health", "dynamic_tariff", "tou_shadow",
+        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health", "dynamic_tariff", "tou_shadow", "flex_event",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:

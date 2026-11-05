@@ -80,11 +80,11 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 70. Self-learned probabilistic solar forecast (own P10/P50/P90) | Done, merged (f5a86eb, PR #142), shadow; no weather bins | M, ~35k actual |
 | 71. Half-hourly household load forecaster (weather and calendar aware) | Done, merged (2ee29b0, PR #143), shadow (`load_profile_live` off) | M, ~45k actual |
 | 72. Full digital twin: replay every subsystem on half-hourly history | Planned, not built | XL |
-| 73. Native inverter time-of-use programming via the six system-mode slots | Done, merged (PENDING73), shadow; no writes | M, ~30k actual |
+| 73. Native inverter time-of-use programming via the six system-mode slots | Done, merged (98b3280, PR #149), shadow; no writes | M, ~30k actual |
 | 74. Local Modbus/RS485 control path as a cloud-outage fallback | Planned, not built | XL |
 | 75. Battery state-of-health and degradation ledger | Done, merged (3b4ddb5, PR #137) | M, ~70k actual |
 | 76. Dynamic-tariff native mode (Agile / half-hourly prices in the loop) | Done, merged (bb5b6fb, PR #148), shadow; control stays on Flux | M, ~40k actual |
-| 77. Flexibility-market export bidding (non-Saving-Sessions VPP) | Planned, not built | L |
+| 77. Flexibility-market export bidding (non-Saving-Sessions VPP) | Done, merged (PENDING77), shadow; nothing exported | M, ~25k actual |
 | 78. Household electrification and system-sizing advisor | Planned, not built | L |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.

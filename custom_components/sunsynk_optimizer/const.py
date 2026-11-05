@@ -162,6 +162,9 @@ CONF_UPGRADE_PRICE_PER_KWH = "upgrade_price_per_kwh"
 CONF_PV_KWP = "pv_kwp"
 CONF_PV_UPGRADE_PRICE_PER_KWP = "pv_upgrade_price_per_kwp"
 CONF_SPARE_SOLAR_NOTIFY_KWH = "spare_solar_notify_kwh"  # blank = no morning notification
+# Flexibility-market export events (phase 77, shadow): an on/off or calendar entity and the p/kWh it pays.
+CONF_FLEX_EVENT_ENTITY = "flex_event_entity"
+CONF_FLEX_PRICE_PENCE = "flex_price_pence"
 
 # Overnight baseload alert (phase 26): 05:00 notification when 00:00-05:00 house load is well above normal.
 CONF_BASELOAD_ALERT = "baseload_alert"

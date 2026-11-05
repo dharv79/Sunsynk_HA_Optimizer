@@ -1,6 +1,6 @@
 # Phase 77 — Flexibility-market export bidding (non-Saving-Sessions VPP)
 
-**Status:** Planned, not built. **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, shadow only (see As built). **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (05/11/2026)
+
+- Feasibility: no locked decision or do-not-break rule touched. Nothing is exported: no write path exists, so rules 5 and 16 hold, and rule 7 is respected through `slots_held`. The logic is in `planning.py` (rule 19), reusing the `peak_export_plan` floor.
+- Options `flex_event_entity` (calendar or on/off entity) and `flex_price_pence`.
+- `flex_event_window` and `flex_event_offer`. The 30-min `async_run_flex_event_shadow` logs once per event start → `flex_event` record + `state.flex_event` + a debug-stream JSON line.
+- Not built: delivery and payment tracking, and a live export. Both wait for a real scheme (eligibility with Flux and delivery terms) and summer shadow totals.

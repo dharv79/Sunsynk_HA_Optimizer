@@ -4881,3 +4881,72 @@ def tou_settings_payload(slots: list[dict[str, Any]] | None) -> dict[str, Any] |
         payload[soc_key] = str(slot["soc"])
         payload[grid_key] = "true" if slot["grid_charge"] else "false"
     return payload
+
+
+# Flexibility-market export events (phase 77). Shadow only: what the battery could safely offer
+# a paid export event, logged; nothing is exported.
+FLEX_DEFAULT_HOURS = 1.0  # an on/off entity with no end time
+FLEX_MAX_HOURS = 4.0
+
+
+def flex_event_window(attrs: Any, now: datetime, tz: Any = None) -> tuple[str, float]:
+    """(event start HH:MM, hours left) from a calendar entity's start_time/end_time attributes.
+
+    An on/off entity has neither: it starts now and lasts FLEX_DEFAULT_HOURS.
+    Hours are capped at FLEX_MAX_HOURS and never below half an hour.
+    """
+    attrs = attrs if isinstance(attrs, dict) else {}
+    tz = tz or now.tzinfo
+    start = _as_aware(attrs.get("start_time"), tz)
+    end = _as_aware(attrs.get("end_time"), tz)
+    start_local = (start.astimezone(tz) if tz is not None else start) if start is not None else now
+    hours = (end - now).total_seconds() / 3600 if end is not None else FLEX_DEFAULT_HOURS
+    hours = max(0.5, min(FLEX_MAX_HOURS, hours))
+    return f"{start_local.hour:02d}:{start_local.minute:02d}", round(hours, 2)
+
+
+def flex_event_offer(
+    soc: float | None,
+    reserve_soc: int,
+    battery_capacity_kwh: float,
+    hours: float,
+    house_load_kw: float,
+    price_pence: float | None,
+    offpeak_pence: float | None,
+    export_rate_kw: float,
+    wear_pence: float | None = None,
+    slots_held: bool = False,
+) -> dict[str, Any]:
+    """kWh the battery could sell into a paid export event without breaking the evening reserve.
+
+    Reuses the peak export floor (`peak_export_plan`): reserve + the house
+    load over the event + margin, and the same worth-it test against the
+    off-peak refill cost after round-trip losses and wear. The offer is also
+    capped by the export rate over the event. `decision` is offer /
+    no_surplus / not_worth_it / no_price / no_soc / slots_held (a free event
+    owns the slots).
+    """
+    empty = {"offer_kwh": 0.0, "value_gbp": None, "gain_gbp": None, "floor_soc": None}
+    if slots_held:
+        return {"decision": "slots_held", **empty}
+    if not _is_number(soc):
+        return {"decision": "no_soc", **empty}
+    need_soc = max(0.0, house_load_kw) * hours / battery_capacity_kwh * 100 if battery_capacity_kwh > 0 else 0.0
+    plan = peak_export_plan(
+        soc, reserve_soc, battery_capacity_kwh, price_pence, offpeak_pence, wear_pence=wear_pence, peak_need_soc=need_soc
+    )
+    decision = {"export": "offer"}.get(plan["decision"], plan["decision"])
+    if decision != "offer":
+        return {"decision": decision, **empty, "floor_soc": plan["target_soc"]}
+    offer = min(plan["export_kwh"], max(0.0, export_rate_kw) * hours)
+    if offer < PEAK_EXPORT_MIN_KWH:
+        return {"decision": "no_surplus", **empty, "floor_soc": plan["target_soc"]}
+    value = offer * price_pence / 100
+    gain = value - offer * (offpeak_pence / ROUND_TRIP_EFFICIENCY + (wear_pence or 0.0)) / 100
+    return {
+        "decision": "offer",
+        "offer_kwh": round(offer, 2),
+        "value_gbp": round(value, 2),
+        "gain_gbp": round(gain, 2),
+        "floor_soc": plan["target_soc"],
+    }

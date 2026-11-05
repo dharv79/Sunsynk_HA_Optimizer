@@ -245,3 +245,23 @@ Phase 31. `_async_post_with_status` stores the pushed `fluxProducts` in `state.l
 **Fix.** `_async_initial_refresh` now calls `_async_peak_cover_after_startup`, which runs peak cover and, while `planning.peak_cover_startup_retry_due` holds (inside 09:00-16:00, SOC still None or an outage still flagged, fewer than 5 attempts), retries 60 s later. Peak cover's own once-a-day logging is unchanged.
 
 **Verification.** `tests/test_battery_health.py::test_peak_cover_startup_retry` and the updated `tests/test_code_integrity.py::test_startup_plan_is_followed_by_peak_cover`.
+
+## Flexibility export events in shadow (05/11/2026, phase 77)
+
+**Design.** Every 30 min, while `flex_event_entity` is on, `async_run_flex_event_shadow` logs once per event start (`_flex_event_logged`, unpersisted; the record dedup covers restarts).
+
+`planning.flex_event_window` takes the event start and the hours left from a calendar's `start_time` / `end_time`. An on/off entity has no times, so it counts as starting now and lasting 1 h. Hours are clamped to 0.5–4.
+
+`planning.flex_event_offer` reuses the `peak_export_plan` floor: evening reserve + the house load over the event (learned evening load, else the config average) + 5% margin. It applies the same worth-it test against the off-peak refill after round-trip losses and wear, and caps the offer at the export rate × hours. Decisions:
+- `offer`, `no_surplus`, `not_worth_it` or `no_price`.
+- `no_soc` when the SOC is unknown.
+- `slots_held` while a free event holds the slots.
+
+The record (`flex_event`: date, start time, entity, hours, soc, price, house load, decision, offer_kwh, value_gbp, gain_gbp, floor_soc) goes to the log, to `state.flex_event` and as JSON to the debug stream.
+
+**Use.** Shadow only: nothing is exported and no option makes it live. Check the summer logs against an actual scheme's terms (eligibility alongside Flux, delivery obligations) before building a live path.
+
+**Verification.** `tests/test_flex_event.py`:
+- The offer is capped by the export rate and keeps the reserve floor; it is limited by surplus on a long event.
+- The no_surplus / not_worth_it / no_price / no_soc / slots_held decisions, and wear tipping the decision.
+- Calendar and on/off windows, caps, and naive times.
