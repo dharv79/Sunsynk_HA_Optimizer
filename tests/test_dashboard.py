@@ -230,3 +230,25 @@ def test_flow_card_file_defines_element_and_registers():
 def _flow_card_keys():
     card = _flow_card(conftest._dashboard._build_dashboard({"inverter_serial": "1", "plant_id": "2"}))
     return [k for sect in ("entities", "extras") for k in card[sect]]
+
+
+def test_free_event_times_are_formatted_not_raw_iso(dashboard):
+    # 05/11: the alert printed "2026-11-08T08:00:00+00:00 → …"; show local "Sun 08:00 → 09:00" instead.
+    blob = json.dumps(dashboard, ensure_ascii=False)
+    assert "when('sensor.free_event', 'free_start')" in blob
+    assert "a('sensor.free_event', 'free_start')" not in blob
+
+    rows = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("entity") == "sensor.free_event" and node.get("attribute") in ("free_start", "free_end"):
+                rows.append(node)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(dashboard)
+    assert rows and all(row.get("format") == "datetime" for row in rows)
