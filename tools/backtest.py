@@ -160,6 +160,12 @@ def replay(
     }
 
 
+def _paired(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """{date: import_plan fields + day_actuals fields} for dates with both."""
+    plans, actuals = _by_date(records, "import_plan"), _by_date(records, "day_actuals")
+    return {d: {**plans[d], **actuals[d]} for d in sorted(set(plans) & set(actuals))}
+
+
 def forecast_error(records: list[dict[str, Any]], days: int | None = None) -> dict[str, Any]:
     """Mean absolute error (kWh) of raw × live vs raw × weighted correction against actual solar."""
     plans, actuals = _by_date(records, "import_plan"), _by_date(records, "day_actuals")
@@ -239,7 +245,9 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         report = upgrade(records, args)
         print(json.dumps(report, indent=2))
         return report
+    samples = planning.forecast_ratio_samples(list(_paired(records).values()))
     report = {
+        "forecast_quantile_coverage": planning.forecast_quantile_coverage(samples),
         "plan": replay(records, args.target_offset, args.load_kw, args.capacity, days=args.days),
         "forecast_correction": forecast_error(records, args.days),
     }

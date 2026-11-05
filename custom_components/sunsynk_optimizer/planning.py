@@ -4404,3 +4404,107 @@ def mpc_backtest_day(
     mpc = plan["cost_gbp"] * 100 - max(0, plan["slots"][-1]["soc"] - BATTERY_LOW_SOC) / 100 * capacity_kwh * terminal
     return {"actual_gbp": round(actual / 100, 2), "mpc_gbp": round(mpc / 100, 2),
             "headroom_gbp": round((actual - mpc) / 100, 2)}
+
+
+# Self-learned probabilistic solar forecast (phase 70). Shadow: never replaces min(raw, corrected).
+FORECAST_QUANTILE_LEVELS = (0.1, 0.5, 0.9)
+FORECAST_QUANTILE_MIN_DAYS = 14
+FORECAST_QUANTILE_HISTORY_DAYS = 395  # the 13-month log
+FORECAST_QUANTILE_RATIO_CAP = (0.05, 5.0)
+
+
+def _season(month: int) -> set[int]:
+    """The month and its two neighbours (Dec wraps to Jan)."""
+    return {(month - 2) % 12 + 1, month, month % 12 + 1}
+
+
+def _quantile(values: list[float], q: float) -> float:
+    """Linear-interpolated quantile of sorted ``values``."""
+    pos = (len(values) - 1) * q
+    lo = int(pos)
+    hi = min(lo + 1, len(values) - 1)
+    return values[lo] + (values[hi] - values[lo]) * (pos - lo)
+
+
+def forecast_ratio_samples(paired_days: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """[{date, ratio, band, month}] of actual / raw forecast; raw ≤ 0.5 kWh or no actual skipped."""
+    out = []
+    for d in paired_days:
+        raw, actual = d.get("raw_forecast_kwh"), d.get("actual_solar_kwh")
+        if not _is_number(raw) or raw <= 0.5 or not _is_number(actual) or actual < 0:
+            continue
+        try:
+            month = date.fromisoformat(str(d.get("date"))).month
+        except ValueError:
+            continue
+        ratio = max(FORECAST_QUANTILE_RATIO_CAP[0], min(FORECAST_QUANTILE_RATIO_CAP[1], actual / raw))
+        out.append({"date": d["date"], "ratio": ratio, "band": d.get("forecast_band"), "month": month})
+    return out
+
+
+def forecast_quantiles(
+    samples: list[dict[str, Any]],
+    month: int,
+    band: str | None,
+    raw_forecast_kwh: float | None,
+    min_days: int = FORECAST_QUANTILE_MIN_DAYS,
+) -> dict[str, Any] | None:
+    """P10/P50/P90 of actual/raw from the narrowest bin with enough days.
+
+    Bins, narrowest first: forecast band × season (month ± 1), season, band,
+    all. kWh = raw × ratio when a raw forecast is given. None below
+    ``min_days`` in every bin (thin history is not a guess).
+    """
+    season = _season(month)
+    bins = (
+        ("band_season", lambda s: s["band"] == band and s["month"] in season),
+        ("season", lambda s: s["month"] in season),
+        ("band", lambda s: s["band"] == band),
+        ("all", lambda s: True),
+    )
+    for name, keep in bins:
+        if band is None and name.startswith("band"):
+            continue
+        ratios = sorted(s["ratio"] for s in samples if keep(s))
+        if len(ratios) < min_days:
+            continue
+        out: dict[str, Any] = {"bin": name, "days": len(ratios)}
+        for q in FORECAST_QUANTILE_LEVELS:
+            key = f"p{int(q * 100)}"
+            ratio = round(_quantile(ratios, q), 3)
+            out[f"{key}_ratio"] = ratio
+            out[f"{key}_kwh"] = round(raw_forecast_kwh * ratio, 2) if _is_number(raw_forecast_kwh) else None
+        return out
+    return None
+
+
+def forecast_quantile_coverage(
+    samples: list[dict[str, Any]], min_days: int = FORECAST_QUANTILE_MIN_DAYS
+) -> dict[str, Any]:
+    """Walk-forward calibration: share of days whose actual fell below P10, inside P10-P90, above P90.
+
+    Each day is scored against quantiles from earlier days only. A calibrated
+    band has ~10% / 80% / 10%. Shares are None until a day can be scored.
+    """
+    ordered = sorted(samples, key=lambda s: s["date"])
+    below = inside = above = 0
+    for i, s in enumerate(ordered):
+        q = forecast_quantiles(ordered[:i], s["month"], s["band"], None, min_days)
+        if q is None:
+            continue
+        if s["ratio"] < q["p10_ratio"]:
+            below += 1
+        elif s["ratio"] > q["p90_ratio"]:
+            above += 1
+        else:
+            inside += 1
+    n = below + inside + above
+    share = (lambda k: round(k / n, 2) if n else None)
+    return {"days": n, "below_p10": share(below), "inside": share(inside), "above_p90": share(above)}
+
+
+def scale_hourly(hourly: dict[int, float] | None, ratio: float | None) -> dict[int, float] | None:
+    """An hourly forecast × ``ratio`` (a learned quantile); unchanged when either is missing."""
+    if hourly is None or not _is_number(ratio):
+        return hourly
+    return {h: kwh * ratio for h, kwh in hourly.items()}

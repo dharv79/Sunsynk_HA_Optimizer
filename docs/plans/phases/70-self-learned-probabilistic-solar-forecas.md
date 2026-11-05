@@ -1,6 +1,6 @@
 # Phase 70 — Self-learned probabilistic solar forecast (own P10/P50/P90)
 
-**Status:** Planned, not built. **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, shadow only (see As built). **Size:** L. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (05/11/2026)
+
+- Feasibility: the locked `min(raw, corrected)` rule and do-not-break 8 untouched; quantiles are logged and feed only the shadow MPC.
+- Logic in `planning.py` (rule 19), not `data_logger`: `forecast_ratio_samples`, `forecast_quantiles` (band × season → season → band → all, ≥14 days), `forecast_quantile_coverage`, `scale_hourly`.
+- Plan field `forecast_quantiles`; `sensor.solar_forecast_p50`; MPC P10/P90 re-solves; backtest coverage.
+- Not built: cloud/temperature bins (weather not on the paired record) and quantile regression.
