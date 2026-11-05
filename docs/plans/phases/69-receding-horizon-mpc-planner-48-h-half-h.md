@@ -1,6 +1,6 @@
 # Phase 69 — Receding-horizon MPC planner (48 h, half-hourly) in shadow
 
-**Status:** Planned, not built. **Size:** XL. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, shadow only (see As built). **Size:** XL. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,11 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (05/11/2026)
+
+- Feasibility: no locked decision or do-not-break rule touched; nothing is pushed (rule 16 holds trivially), logic in `planning.py` (rule 19) rather than a new module.
+- `mpc_slots` / `mpc_solve` (DP over whole-% SOC, 24 h of half-hours, not 48 h: the forecast only reaches tomorrow) / `mpc_summary` / `mpc_backtest_day`.
+- 30-min `async_run_mpc_shadow` → `mpc_plan` record + `state.mpc_plan` + `sensor.mpc_plan`.
+- `tools/backtest.py --planner mpc`.
+- Not built: the `mpc_live` option mapping slots onto the 2 Flux slots. Do that after the backtest and a few weeks of shadow logs agree.

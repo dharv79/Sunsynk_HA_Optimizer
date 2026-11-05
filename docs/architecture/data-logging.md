@@ -103,3 +103,7 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 - **`outage` (48).** One record per closed grid outage (start, end, minutes, SOC start/low/end, battery kWh served). Not deduped. While an outage is open, plan, Flux 2, peak cover/export and retry pushes return early.
 - **`pv_strings` (49).** One per day, deduped: MPPT0/MPPT1 kWh sampled 10:00-15:00 above 1 kW (battery not full), MPPT0 share, rolling median, anomaly flag.
 - **`user_override` (46).** Tag on `import_plan` (in `_IMPORT_PLAN_FIELDS`); such nights are excluded from drain and evening-nudge learning.
+
+## MPC plan record (05/11/2026, phase 69)
+
+`mpc_plan` (every 30 min, not deduped, never read back by learning): date, time, soc, cost_gbp, first_action, first_soc, soc_0500, grid_charge_kwh, offpeak_charge_kwh, day_charge_kwh, export_kwh, horizon_slots, rule_plan_date, rule_target_soc, loads_kw, tomorrow_solar_kwh. See `import-plan.md`.

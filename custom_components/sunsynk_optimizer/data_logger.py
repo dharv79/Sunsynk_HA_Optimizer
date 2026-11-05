@@ -309,6 +309,10 @@ class DataLogger:
         """Log a closed grid outage (phase 48): start, end, SOC low point, battery kWh served. Not deduped."""
         await self._async_append(_record("outage", **fields))
 
+    async def async_log_mpc_plan(self, **fields: Any) -> None:
+        """Shadow MPC plan summary every 30 min (phase 69); never read back by learning."""
+        await self._async_append(_record("mpc_plan", **fields))
+
     async def async_log_pv_strings(self, **fields: Any) -> None:
         """Log the day's per-string PV energy and MPPT0 share (phase 49): one per day."""
         await self._async_append(_record("pv_strings", **fields))
