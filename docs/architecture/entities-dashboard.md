@@ -1,6 +1,6 @@
 # Entities and dashboard
 
-Sensors, buttons, binary sensors, Lovelace YAML generator.
+Sensors, binary sensors, buttons, switch, number, datetime entities; Lovelace YAML generator and bundled cards.
 
 Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 
@@ -10,12 +10,18 @@ All entities extend `CoordinatorEntity` and read state from `coordinator.state` 
 
 - **Sensors** (`sensor.py`): expose `OptimizerState` fields; `import_plan_end` and `flux2_action` have rich `extra_state_attributes` exposing the full plan/action dicts. Four dedicated adaptive learning sensors read from `last_import_plan`: `forecast_correction`, `overnight_drain_adjustment`, `evening_soc_adjustment`, `effective_charge_rate` — each exposes `days_collected`, `days_required`, and `active` in `extra_state_attributes`. Thresholds are defined in `_ADAPTIVE_THRESHOLDS`. The `consumption` sensor (native value `"{day_load_kwh} kWh today"`) merges `last_morning_state`, `last_day_actuals`, `last_peak_window_usage`, `last_daily_cost`, and `last_year_to_date_cost` into one `extra_state_attributes` dict for the dashboard's Consumption section — field names don't collide (`peak_*`/`year_to_date_*` are distinctly prefixed) so it's a plain merge, except `last_daily_cost`'s own `date` is exposed separately as `daily_cost_date` since it's inherently a day behind the others (see below). `last_day_actuals` exists solely to give this sensor something to read; before v1.0.10b3 the 22:00 day-actuals capture was logged/notified but never persisted to `OptimizerState`.
 
-- **Buttons** (`button.py`): call `optimizer` methods directly on press. `test_plan` calls `async_run_import_plan(source="test_button", dry_run=True)` — recomputes the full plan and notifies the JSON, but does not push to the inverter, log, or mutate state. Also `choose_best_day`, `reset_baseline`, `install_dashboard` (labelled "Update dashboard"). The old `run_import`/`run_flux2` push buttons were removed — pressing them mid-day pushed a daytime SOC reading to the inverter; the dry-run test replaces them. The `async_run_import_plan` / `async_run_flux2_check` methods still exist for the scheduled listeners.
-- **Binary sensors** (`binary_sensor.py`): `evening_export_disabled` and `monitor_only` (derived from `operation_mode == "monitor"`).
+- **Sensors** (`sensor.py`) also include the diagnostic and dashboard sensors listed in the dated sections below, plus `sensor.kpi_*` (`planning.KPI_SENSORS`).
+- **Buttons** (`button.py`): call `optimizer` methods directly on press. `test_plan` calls `async_run_import_plan(source="test_button", dry_run=True)` — recomputes the full plan and notifies the JSON, but does not push to the inverter, log, or mutate state. Also `choose_best_day`, `reset_baseline`, `install_dashboard` (labelled "Update dashboard", entity id pinned to `button.install_dashboard`) and `cancel_free_event`. The old `run_import`/`run_flux2` push buttons were removed; the dry-run test replaces them. The `async_run_import_plan` / `async_run_flux2_check` methods still exist for the scheduled listeners.
+- **Binary sensors** (`binary_sensor.py`): `evening_export_disabled`, `grid_outage`, `inverter_fault` and `monitor_only` (derived from `operation_mode == "monitor"`).
+- **Switch** (`switch.py`): `away_mode`.
+- **Number** (`number.py`): `number.billed_last_month` (see below).
+- **Datetime** (`datetime.py`): `free_event_start` / `free_event_end`, the manual free electricity event window (see free-electricity.md).
 
 ### Dashboard
 
-`dashboard_installer.py` generates a Lovelace YAML file by building a Python dict and serialising it with `json.dumps`. All SolarSynkV3 entity IDs are constructed from `inverter_serial` via the local `s()` helper. The file is written to `{hass.config.config_dir}/sunsynk_optimizer_{entry_id}.yaml` via `async_add_executor_job` (to avoid blocking the event loop), and a persistent HA notification shows the `configuration.yaml` snippet to add.
+`dashboard_installer.py` generates a Lovelace YAML file by building a Python dict and serialising it with `json.dumps(..., ensure_ascii=False)`. All SolarSynkV3 entity IDs are constructed from `inverter_serial` via the local `s()` helper. The file is written to `{hass.config.config_dir}/sunsynk_optimizer_{entry_id}.yaml` via `async_add_executor_job` (to avoid blocking the event loop), and a persistent HA notification shows the `configuration.yaml` snippet to add.
+
+Views, in order: Overview, Day chart (panel view), Plan, Energy & cost, Battery & system, Shadow lab, Controls. Custom cards: the bundled `custom:sunsynk-optimizer-flow-card` (Overview power flow) and `custom:sunsynk-optimizer-day-chart` (Day chart view), served by `card_resource.py` with no Lovelace resource needed, and `custom:apexcharts-card`, which still has to be installed from HACS. The slipx06 power-flow card is no longer used (`test_only_documented_custom_cards`).
 
 ### Dashboard revamp (05/11/2026)
 
@@ -28,7 +34,7 @@ Six sections views, one builder per view (`_overview`, `_plan`, `_energy`, `_sys
 - **Shadow lab**: scorecard, MPC SOC/grid chart, Agile vs Flux, TOU slot check, flex event offer, upgrade advisor.
 - **Controls**: away mode, test plan, one-night full charge / skip (`sunsynk_optimizer.*` actions, always with a confirmation), reset, update dashboard, free event entry, install details.
 
-Attribute values are read in markdown through the `_MACROS` Jinja helpers `a()` / `gbp()`, which print "—" for a missing value (never 0). Entities-card attribute rows are only used for always-present attributes (Spook). Config entity ids interpolated into templates pass `_safe_entity`. Charts of attribute arrays (MPC path, load profile, spare solar by hour) use `custom:apexcharts-card` `data_generator`; the only custom cards are it and the bundled `custom:sunsynk-optimizer-flow-card` (`test_only_documented_custom_cards`).
+Attribute values are read in markdown through the `_MACROS` Jinja helpers `a()` / `gbp()`, which print "—" for a missing value (never 0). Entities-card attribute rows are only used for always-present attributes (Spook). Config entity ids interpolated into templates pass `_safe_entity`. Charts of attribute arrays (MPC path, load profile, spare solar by hour) use `custom:apexcharts-card` `data_generator`. At the time the only custom cards were it and the bundled flow card; the day chart was added in phase 80 (below).
 
 New diagnostic sensors for the dashboard: `sensor.tou_shadow` (state = slot differences, attributes the phase 73 record), `sensor.flex_event_offer` (state = decision, attributes the phase 77 record) and `sensor.upgrade_advisor` (GBP, best annual saving; attributes `options` from `planning.upgrade_options`, best first). Fixed with it: phase 76 had left `sensor.mpc_plan`'s state as its whole dict and `sensor.dynamic_tariff_shadow` unknown; `test_sensor_states_are_scalars_and_keys_unique` guards both.
 

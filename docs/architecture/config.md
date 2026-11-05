@@ -16,12 +16,14 @@ These are different values and must never be swapped.
 
 ### Options flow
 
-The options flow is multi-step: `init` → `charges_1` (import tariff rows 1–4) → `charges_2` (export tariff rows 5–8) → `flux` (baseline Flux windows). State is accumulated in `self._working` dict across steps before being saved on the final step.
+Setup is one `user` step (credentials, `inverter_serial`, `plant_id` plus the main settings; login is validated). The options flow is multi-step: `init` (all main settings except credentials) → `charges_1` (tariff rows 1–4) → `charges_2` (tariff rows 5–8) → `flux` (baseline Flux windows). State is accumulated in `self._working` (seeded from `merge_entry_data`) across steps before being saved on the final step, which reloads the entry. An optional field emptied in `init` is dropped, so "blank = off" sticks.
+
+Main settings (`config_flow._base_schema`, defaults in `const.py` / `planning.py`): weather entity, solar forecast sensor, notify service/target, `operation_mode`, currency/invest (Sunsynk portal), `export_disable_threshold` (1500 W), `export_disable_cost_threshold_pence_per_hour` (58.32), the shadow/live toggles below, `baseload_alert` (on), `default_full_charge_day` (Wednesday), battery capacity (10 kWh), charge rate (3 kW), `battery_voltage` (51.2 V), free event charge/export rate, battery cost and lifetime (wear), upgrade/PV/flex/gas/heat-pump inputs, `spare_solar_notify_kwh`, average/weekend/away consumption, auto-away fields, `export_limit_w` (0), solar start offset (2.5 h), hourly/tomorrow forecast sensors, Octopus cost/consumption/rate entities, `bill_start_day`, `tariff_rate_overrides`, `data_report_target`, `enable_ai_weekly_insight` (off).
 
 ### Operation modes
 
 `auto` — full optimizer behaviour, API writes enabled.  
-`monitor` — all three main logic paths (`async_run_import_plan`, `async_run_flux2_check`, `async_choose_best_full_charge_day`) return early without making API calls.
+`monitor` — all three main logic paths (`async_run_import_plan`, `async_run_flux2_check`, `async_choose_best_full_charge_day`) return early without making API calls. Live peak export, peak cover and gentle charge stay shadow-only, and service writes are refused. Read-only features (alerts, reports, shadows, fault reads) still run. The 05:00 grid-charge current restore is the one write that still runs.
 
 
 ## Shadow-first options
@@ -32,6 +34,8 @@ The options flow is multi-step: `init` → `charges_1` (import tariff rows 1–4
 - `gentle_charge_live` (default off, phase 23): when off, the gentle grid-charge current is only logged; when on, the 01:55 plan writes it, keeps Flux 1 open to 05:00 and restores the previous current at 05:00. `battery_voltage` (default 51.2 V) converts kWh to amps. See import-plan.md.
 
 - `peak_cover_live` (default off, phase 30): when off, the midday "will the battery last the peak window" projection is only logged; when on, a Flux 1 slot now→16:00 holds the battery at the SOC the peak needs, at the day rate. See export-control.md.
+
+- Other live toggles, all default off and shown in the options flow: `full_window_live` (phase 62, Flux 1 to 05:00 every night), `measured_charge_rate_live` (phase 61), `evening_load_live` (phase 55), `load_profile_live` (phase 71), `trim_defer_live` (phase 65), `full_charge_skip_live` (phase 68). See import-plan.md / export-control.md.
 
 ## Octopus rate entities (phase 18)
 
@@ -52,3 +56,7 @@ Optional: `auto_away_persons` (comma-separated `person.*`), `auto_away_calendar`
 `flex_event_entity` (optional calendar or on/off entity; on = a paid export event) and `flex_price_pence` (optional p/kWh the event pays) for the phase 77 flex event shadow. Both are blank by default, which turns it off.
 
 `gas_unit_pence`, `gas_standing_pence` and `heat_pump_price_gbp` (all optional) feed the phase 78 heat-pump scenario in the monthly upgrade report. Without `gas_unit_pence` it doesn't run.
+
+## Bill period start day (2.0.1)
+
+`bill_start_day` (optional, 1–28, default 1). The bill check (`number.billed_last_month`) reconciles the latest complete period before today, from that day to the day before it next month (`planning.bill_period`, values clamped 1–28). Day 1 is the previous calendar month, labelled `YYYY-MM`; other days are labelled `YYYY-MM-DD to YYYY-MM-DD`. A reconciliation stored before this option (month only) is read as a calendar month.
