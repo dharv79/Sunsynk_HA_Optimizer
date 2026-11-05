@@ -85,7 +85,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 75. Battery state-of-health and degradation ledger | Done, merged (3b4ddb5, PR #137) | M, ~70k actual |
 | 76. Dynamic-tariff native mode (Agile / half-hourly prices in the loop) | Done, merged (bb5b6fb, PR #148), shadow; control stays on Flux | M, ~40k actual |
 | 77. Flexibility-market export bidding (non-Saving-Sessions VPP) | Done, merged (c6a3488, PR #150), shadow; nothing exported | M, ~25k actual |
-| 78. Household electrification and system-sizing advisor | Done, merged (PENDING78), report only | M, ~30k actual |
+| 78. Household electrification and system-sizing advisor | Done, merged (1291c33, PR #151), report only | M, ~30k actual |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
