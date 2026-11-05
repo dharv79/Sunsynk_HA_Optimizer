@@ -2,7 +2,7 @@
 
 Home Assistant integration that optimises a Sunsynk inverter's overnight charging and evening export for the Octopus Flux tariff. It uses the solar forecast, battery state of charge (SOC), learned household load and the tariff's price bands.
 
-Latest version: see [Releases](https://github.com/dharv79/Sunsynk_HA_Optimizer/releases). Versions with `b` in them (for example `1.0.12b29`) are betas. Turn on **Show beta versions** in HACS to get them.
+Latest version: see [Releases](https://github.com/dharv79/Sunsynk_HA_Optimizer/releases). Stable releases look like `2.0.1`. Versions with `b` in them (for example `1.0.12b50`) are betas; turn on **Show beta versions** in HACS to get them.
 
 ## Features
 
@@ -14,25 +14,38 @@ Latest version: see [Releases](https://github.com/dharv79/Sunsynk_HA_Optimizer/r
 - Gentle charging (optional, observe-only by default): the lowest grid charge current that still reaches the target by 05:00.
 
 **Day and evening**
-- Peak cover (optional, observe-only by default): before 16:00, tops the battery up at the day rate if it would not last the 16:00–19:00 peak.
+- Peak cover (optional, observe-only by default): before 16:00, makes sure the battery will last the 16:00–19:00 peak, holding charge early or topping up at the day rate.
 - Evening reserve: the battery keeps enough charge at 19:00 to run the house until the 02:00 charge.
 - Evening export pause when grid draw is high (watt trigger, with a cost-based trigger running in observe-only mode).
 - Daytime trim: above 85% SOC, sells down towards 82% for 45 minutes. It never goes below the evening reserve or, before 16:00, below the SOC bought cheaply overnight. On the full-charge day it holds 100% for an hour first.
-- Optional peak export: sells the surplus above the evening reserve at the peak export rate (observe-only by default).
+- Optional peak export: sells the surplus above the evening reserve at the peak export rate, re-checked at 17:00 and 18:00 (observe-only by default).
 
 **Free electricity events**
-- Enter a free-electricity window (start and end). The integration sells down before it and refills during it, then restores the normal plan.
+- Enter a free-electricity window (start and end) on the dashboard or with a service action.
+- The overnight charge on that day stops at what the house needs until the window, so you don't buy power you'd only sell back.
+- From 4 hours before, it watches the battery and sells any surplus just before the window, then charges to 100% during it and restores the normal plan.
 
 **Learning**
 - Forecast correction, overnight drain buffer, evening SOC nudge, effective charge rate and learned household load, all from your own history.
 - Separate away profile (manual switch or automatic from people and calendar), so holidays don't skew the everyday learning.
 
+**Health and monitoring**
+- Grid outage detection (from grid voltage), battery runtime left and an outage log.
+- Inverter fault sensor from the Sunsynk event list.
+- Battery state of health from the BMS, measured usable capacity and fault words.
+- PV string health: alerts when one MPPT string keeps producing well below its usual share.
+- Nightly data check (06:20) that raises a Repairs issue when logged data is missing.
+
 **Costs and reports**
 - Optional Octopus Energy link for real electricity and gas cost, a running year-to-date total and tariff rates read from Octopus.
-- Daily efficiency KPIs and what the battery saved you, a weekly cost digest, a monthly tariff comparison (Flux vs Go, Cosy, Agile, Intelligent and others) and a bill check against your statement.
+- Daily efficiency KPIs and what the battery saved you, a weekly cost digest, a monthly tariff comparison (Flux vs Go, Cosy, Agile, Intelligent and others) and a bill check against your Octopus statement (see [Bill check](#bill-check)).
 - Alerts: tariff price changes, overnight load well above normal, daytime grid import spikes, low battery capacity and spare midday solar.
 - "Cost of 1 kWh now" sensor for automations (run appliances when energy is cheap).
+- Monthly battery and solar upgrade advisor and electrification (heat pump) advisor.
 - Optional AI Task weekly insight.
+
+**Shadow lab**
+- New planners run in observe-only mode and report what they would have done: a receding-horizon (MPC) planner, a self-learned P10/P50/P90 solar forecast, a half-hourly load forecaster, Agile vs Flux, native inverter time-of-use slots and flexibility-market export events. A monthly scorecard shows which are worth switching on.
 
 **Safety**
 - Monitor mode runs all the logic without writing to the inverter.
@@ -87,14 +100,17 @@ These two values are different and must not be swapped.
 | Default full-charge day | Used until the first Sunday pick. Default Wednesday |
 | Evening export disable threshold (W) | Default 1500 |
 | Evening export disable cost threshold (p/hour) + observe-only switch | Cost-based trigger; observe-only by default |
-| Free event charge rate / export rate (kW) | Used to plan free-electricity events |
+| Free event charge rate / export rate (kW) | Used to plan free-electricity events. Blank = the charge rate |
 | Inverter export limit (W) | Turns on clipped-solar detection; 0 = off |
 | Battery purchase cost (£) + lifetime throughput (kWh) | Optional wear cost in export decisions |
 | Auto away: person entities, calendar + keyword, hours away | Optional automatic away mode |
 | Spare solar notification threshold (kWh) | Optional morning prompt |
-| Octopus cost sensors (import, export, gas) | Optional real cost and year-to-date total |
+| Octopus cost sensors (import, export, gas) | Optional real cost and year-to-date total. Use the "previous accumulative cost" sensors |
+| Bill usage period start day | 1–28, default 1 (calendar month). Set it to the first date in your bill's "We have charged you" lines |
 | Octopus import / export rates entities | Optional; tariff prices read from Octopus instead of the tariff rows |
 | Octopus accumulative consumption sensors + comparison overrides | Optional monthly tariff comparison |
+| Upgrade prices, PV size, gas prices, heat pump price | Optional; add payback figures to the monthly upgrade report |
+| Flexibility event entity + payment (p/kWh) | Optional; logs flexibility export events (observe only) |
 | AI Task weekly insight | Optional, off by default; needs an AI Task provider (HA 2025.7+) |
 
 ### Behaviour switches
@@ -107,6 +123,12 @@ New decision logic ships in observe-only mode first. It logs what it would do wi
 | Adjust the overnight target from day-rate import | Off (observing) |
 | Sell the surplus above the evening reserve at the peak rate | Off (observing) |
 | Charge gently across 02:00–05:00 | Off (observing) |
+| Hold the target to 05:00 every night (grid runs the house after the charge) | Off (observing) |
+| Size the 02:00 window from the charge rate measured on the meters | Off (observing) |
+| Size the evening reserve from the learned 16:00–22:00 load | Off (observing) |
+| Size the evening reserve and peak cover from the learned half-hourly load | Off (observing) |
+| Trim only the solar that would overflow and sell the rest at the peak rate | Off (observing) |
+| Skip the weekly full charge when the battery reached 99% in the last 7 days | Off (observing) |
 | Top up before 16:00 if the battery would not last the peak | Off (observing) |
 | Notify at 05:00 when overnight load is high | On |
 
@@ -147,12 +169,15 @@ Learning (active once enough days are logged):
 | 06:00 | Morning SOC recorded |
 | 06:05 | Spare solar estimate |
 | 06:10 | Tariff price-change check |
+| 06:20 | Data check (missing records raise a Repairs issue) |
 | Before 16:00 | Peak cover check |
-| 16:00 | Peak export decision |
-| 18:00 (Sundays, and daily re-check) | Full-charge day choice |
-| 22:00 | Day actuals, KPIs and the data report |
+| 16:00 | Peak export decision, re-checked at 17:00 and 18:00 |
+| 18:00 | Full-charge day choice (Sundays, plus a daily re-check) and the monthly reports when due |
+| 22:00 | Day actuals, KPIs, PV string check and the data report |
+| 22:05 | Agile vs Flux comparison (observe only) |
 | Every 30 min and on SOC change | Evening export pause, daytime trim, daytime import alert, cost of 1 kWh now |
 | Every 2 h | Inverter drift check |
+| On grid voltage change | Grid outage start and end |
 
 ### Full-charge day scoring
 
@@ -171,14 +196,37 @@ Sunday 18:00 scores Monday–Friday: `100 − cloud − 0.7 × rain`, with +25 s
 | `sensor.spare_solar_today` | Expected spare midday solar (kWh) |
 | `sensor.cost_of_1_kwh_now` | What using 1 kWh now costs (p/kWh) |
 | `sensor.operation_mode` | `auto` or `monitor` |
-| Diagnostic sensors | Forecast correction, drain adjustment, evening SOC adjustment, effective charge rate, battery capacity estimate, battery state of health, MPC plan, Agile vs Flux saving, inverter TOU differences, flex event offer, upgrade advisor best saving, last error, last updated |
+| `sensor.import_causes_today` | Today's grid import split by cause (kWh) |
+| `sensor.battery_runtime` | Hours the battery would run the house now |
+| `sensor.kpi_*` | Daily KPIs with long-term statistics: avoidable import £, peak export £, self-sufficiency %, unused charge, over-limit import |
+| Diagnostic sensors | Forecast correction, drain adjustment, evening SOC adjustment, effective charge rate, battery capacity estimate, battery state of health, PV string 1 share, data health gaps, solar forecast P50, load profile, MPC plan, Agile vs Flux saving, inverter TOU differences, flex event offer, upgrade advisor, shadow scorecard, last error, last updated |
+| `binary_sensor.grid_outage`, `binary_sensor.inverter_fault` | Grid outage and inverter fault |
 | `binary_sensor.evening_export_disabled`, `binary_sensor.monitor_only_mode` | Status flags |
 | `switch.away_mode` | Away (holiday) profile |
 | `datetime` Free event start / end | Manual free-event entry |
-| `number.billed_last_month` | Enter last month's bill (£) to check it against the logged cost |
+| `number.billed_last_month` | Enter your latest bill (£) to check it against the logged cost |
 | Buttons | Test plan (dry run), Run choose best day, Reset to baseline, Update dashboard, Cancel free event |
 
 **Test plan** recomputes tonight's plan and sends the JSON to your notify target. It doesn't push, log or change state, so it's safe to press at any time.
+
+### Service actions
+
+| Action | What it does |
+|---|---|
+| `sunsynk_optimizer.set_tonight_target` | Charge to a set SOC tonight only (learning ignores that night) |
+| `sunsynk_optimizer.skip_tonight` | Hold the battery where it is tonight (no grid charge) |
+| `sunsynk_optimizer.schedule_free_event` / `cancel_free_event` | Enter or cancel a free-electricity window |
+| `sunsynk_optimizer.get_plan` | Dry-run tonight's plan and return it (nothing is pushed or logged) |
+
+## Bill check
+
+1. Under **Configure**, set **Bill usage period start day** to the first date in your bill's "We have charged you" lines (for example 8 for a bill covering 8 Sep – 7 Oct).
+2. On the dashboard's **Energy & cost** tab, enter the bill amount in **Bill check**:
+   - with the gas cost sensor set: the bill's **Total charges for bill** (charges minus export credit);
+   - without it: electricity charges minus export credit.
+   - Leave out one-off credits (such as Weekend Happy Hour) and payments.
+3. Enter it before the next start day. It's checked against the latest complete bill period before the day you enter it.
+4. A notification shows the gap. Over £2 on a complete period gives a warning; a period with missing logged days is marked partial.
 
 ## Dashboard
 
@@ -198,11 +246,12 @@ lovelace:
 
 3. Restart Home Assistant.
 
-The dashboard has six tabs:
+The dashboard has seven tabs:
 
 | Tab | Shows |
 |---|---|
 | Overview | Power flow, alerts (only when something needs attention), tonight's target and why, today's best time for big loads, quick actions |
+| Day chart | One day's solar, battery, load, grid power and SOC, with the day's totals; ◀ / ▶ and a date picker go to earlier days |
 | Plan | The full "why this plan?" table, P10/P50/P90 solar, learned vs actual house load, what the system has learned |
 | Energy & cost | Today's meters, overnight/peak/day use, settled and year-to-date cost, import causes, bill check, 30-day KPI trends |
 | Battery & system | State of health and BMS detail, measured capacity, runtime left, grid/inverter/data health, live values |
@@ -219,7 +268,7 @@ If a **daily data report target** is set, the integration posts one JSON line pe
 
 ## Notifications
 
-Titles start with "🔋 Sunsynk:", for example: import plan set, full-charge day chosen or moved, evening export paused, battery trim, topping up before the peak, free event scheduled, started or finished, spare solar today, overnight load high, daytime grid import, Flux prices changed, tariff comparison, bill check, battery value, weekly insight. A failed inverter write is titled "⚠️ Sunsynk: … NOT applied".
+Titles start with "🔋 Sunsynk:", for example: import plan set, grid outage, PV string output low, full-charge day chosen or moved, evening export paused, battery trim, topping up before the peak, free event scheduled, started or finished, spare solar today, overnight load high, daytime grid import, Flux prices changed, tariff comparison, bill check, battery value, weekly insight. A failed inverter write is titled "⚠️ Sunsynk: … NOT applied".
 
 ## Troubleshooting
 

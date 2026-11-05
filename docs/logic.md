@@ -1,344 +1,393 @@
-# Sunsynk Optimizer — Logic Reference
+# Sunsynk Optimizer — How it works
 
-Complete description of all decision logic as implemented in the current codebase. Intended as a technical reference for understanding, debugging, and extending the integration.
-
----
-
-## Table of contents
-
-1. [Scheduled triggers](#1-scheduled-triggers)
-2. [Full-charge day selection](#2-full-charge-day-selection)
-3. [Import plan (01:55)](#3-import-plan-0155)
-4. [Flux 2 and trim logic](#4-flux-2-and-trim-logic)
-5. [Data logging](#5-data-logging)
-6. [Adaptive learning corrections](#6-adaptive-learning-corrections)
-7. [Configuration parameters](#7-configuration-parameters)
-8. [Known thresholds to revisit](#8-known-thresholds-to-revisit)
+A plain walkthrough of what the integration does each day, and why. Numbers are the current defaults.
 
 ---
 
-## 1. Scheduled triggers
+## Contents
 
-| Time | Mechanism | Action |
+1. [Daily timeline](#1-daily-timeline)
+2. [Modes, safety and shadow features](#2-modes-safety-and-shadow-features)
+3. [Full-charge day](#3-full-charge-day)
+4. [Overnight import plan (01:55)](#4-overnight-import-plan-0155)
+5. [Daytime: trims and peak cover](#5-daytime-trims-and-peak-cover)
+6. [Evening peak (16:00–19:00)](#6-evening-peak-16001900)
+7. [Free electricity event](#7-free-electricity-event)
+8. [Health checks and alerts](#8-health-checks-and-alerts)
+9. [Reports and bill check](#9-reports-and-bill-check)
+10. [Learning from the logs](#10-learning-from-the-logs)
+11. [Entities, services and dashboard](#11-entities-services-and-dashboard)
+12. [Main settings](#12-main-settings)
+
+---
+
+## 1. Daily timeline
+
+| Time | What happens |
+|---|---|
+| **01:55** | Overnight import plan: sets the 02:00 charge window and target SOC (§4) |
+| **02:00, 05:00, 16:00, 19:00, 22:00** | Meter snapshots (load, grid import/export, SOC) at the tariff band edges |
+| **02:20** | Charge watchdog: if the charge is not running, re-push the plan once and re-check 15 min later |
+| **05:00** | Overnight load check, charge outcome check; gentle-charge current put back |
+| **06:00** | Morning SOC, PV power and overnight load; reads Octopus daily cost |
+| **06:05** | Spare-solar estimate (optional notification) |
+| **06:10** | Tariff price check against Octopus rates |
+| **06:20** | Data audit of the last 14 days (raises HA Repairs issues) |
+| **16:00** | Peak surplus export decision (§6) |
+| **17:00, 18:00** | Peak export re-check from the load seen since 16:00 |
+| **18:00** | Sundays: pick the week's full-charge day and send weekly reports. Every day: full-charge-day re-check and any due monthly reports |
+| **22:00** | Day actuals, day KPIs, PV string check, auto-away check, Octopus cost, daily debug report |
+| **22:05** | Agile vs Flux comparison (shadow) |
+| **Every 30 min** | Flux 2 check (export pause and trim), peak cover, daytime import alert, cost of 1 kWh now, clipped-solar, PV-string and import-cause tallies, MPC and flex-event shadows |
+| **Every 2 h**, and 10 min after each push | Drift check: reads back the inverter settings, faults and battery health |
+| **On SOC change** | Trim checks, full-charge-day hold, battery runtime, cost of 1 kWh now |
+| **On grid voltage change** | Grid outage start/end (§8) |
+| **60 s after start or reload** | Re-runs the import plan, then peak cover and any due monthly reports. Skipped 16:00–19:00 and while a free event holds the slots. Waits for the SOC sensor if it is not ready yet |
+
+---
+
+## 2. Modes, safety and shadow features
+
+**Operation mode** (`operation_mode`):
+
+- `auto` — full control.
+- `monitor` — observe only. No inverter writes (the one exception: putting back a gentle-charge current it set earlier). Read-only jobs (snapshots, alerts, reports) still run.
+
+**Safety rules**
+
+- Every push reports success or failure. A failed push sends "⚠️ Sunsynk: … NOT applied".
+- A failed overnight plan push is retried every 10 min, up to 5 times, while it can still land between 01:30 and 02:40.
+- If the SOC sensor is unavailable at 01:55, the plan retries every 5 min until 02:30, then is skipped with a warning.
+- If the forecast sensor is unavailable, the plan uses yesterday's raw forecast (no correction). With no usable forecast it is skipped.
+- During a grid outage, plan, trim and export pushes are paused.
+- While a free event holds the Flux slots, other pushes wait (§7).
+
+**Shadow features.** Many features first run in shadow: they log what they would do, but push nothing. Each has an option in **Configure** to make it live. All are off (shadow) by default.
+
+| Option | When live |
+|---|---|
+| `import_feedback_live` | Day-rate import feedback replaces the evening SOC nudge (§10) |
+| `peak_export_live` | Sells surplus 16:00–19:00 (§6) |
+| `peak_cover_live` | Tops up or holds the battery before 16:00 (§5) |
+| `trim_defer_live` | Trims only the solar that would overflow; the rest waits for the peak (needs `peak_export_live` too) |
+| `gentle_charge_live` | Lowers the inverter's grid-charge current so the charge spreads to 05:00 |
+| `full_window_live` | Flux 1 always runs to 05:00, so the grid runs the house overnight |
+| `measured_charge_rate_live` | Sizes Flux 1 from the charge rate measured by the meters |
+| `evening_load_live` | Evening reserve uses the learned 16:00–22:00 load |
+| `load_profile_live` | Evening reserve and peak cover use the learned half-hourly load profile |
+| `full_charge_skip_live` | Skips the weekly 100% if the battery reached 99% in the last 7 days |
+| `cost_aware_export_shadow_mode` | **On by default.** Turn **off** to let the cost trigger drive the export pause (§6) |
+
+Report-only shadows (never pushed): MPC plan, Agile vs Flux saving, inverter TOU differences, flex event offer, newsvendor target, learned forecast P10/P50/P90. The monthly **shadow scorecard** rates each shadow feature against what happened.
+
+---
+
+## 3. Full-charge day
+
+Once a week the battery is charged to 100% for cell balancing.
+
+**Sunday 18:00 pick.** Scores Monday–Friday from the HA weather forecast; the highest wins.
+
+```
+score = 100 − cloud_coverage − 0.7 × rain_probability
+        + condition adjustment + temperature nudge − day penalty
+```
+
+| Condition | Adjustment |
+|---|---|
+| sunny, clear | +25 |
+| partlycloudy | +10 |
+| cloudy, fog | −10 |
+| rainy, pouring, lightning-rainy, snowy, snowy-rainy | −25 |
+
+Temperature: ≥ 18 °C +3, ≤ 5 °C −3. Day penalty: Thursday −5, Friday −15 (less of the week left to use the energy).
+
+**Daily 18:00 re-check.** Moves the full-charge day to tomorrow when tomorrow's solar forecast (`tomorrow_forecast_sensor`, the lower of raw and corrected) can fill the battery from PV (capacity + 8 h of house load) **and** tomorrow's weather scores better. At most once a week, and never to a day after the chosen one.
+
+**On the day.** If solar is good, the overnight plan only bridges to solar start and PV fills the battery for free. If solar is poor (< 7 kWh), it imports to 100%. When SOC reaches 99.5% it holds for 1 hour, then trims (§5).
+
+**Skip (shadow).** If any meter snapshot reached 99% in the last 7 days, the forced 100% is not needed. Logged nightly; applied only with `full_charge_skip_live`. Never skipped beyond 14 days.
+
+Until the first pick, `default_full_charge_day` (Wednesday) is used.
+
+---
+
+## 4. Overnight import plan (01:55)
+
+Decides how far to charge in the cheap 02:00–05:00 window.
+
+### Forecast
+
+- `raw` = today's forecast (`solar_forecast_sensor`).
+- `corrected` = raw × learned forecast correction (§10).
+- **Low-solar decisions use the lower of the two**: if either says a poor day, believe it.
+- Band: ≥ 10 kWh summer-like, ≤ 5 kWh winter-like, else shoulder.
+
+### House load
+
+- Weekday 0.75 kW, weekend 0.9 kW, away 0.3 kW (config).
+- At home, the overnight rate learned from the 06:00 load readings replaces config once 7 days exist (last 28 days, clamped to 0.5×–2× config).
+
+### Target SOC
+
+Checked in order:
+
+| Case | Target |
+|---|---|
+| Full-charge day, good solar | Solar bridge (PV fills to 100% in the day) |
+| Full-charge day, low solar (< 7 kWh) | 100% |
+| Low solar (< 7 kWh), winter-like | 100% |
+| Low solar (< 7 kWh), other bands | 95% |
+| Hourly forecast configured | Hourly solar bridge |
+| `sun.sun` available | Simple solar bridge, raised by a morning-ramp check |
+| No `sun.sun` | Band fallback: summer 80%, shoulder 85%, winter 95% |
+
+**Solar bridge.** Enough charge to run the house from 05:00 until solar covers the load, on top of the 20% battery floor:
+
+```
+target = 20% + energy_to_bridge / capacity × 100     (clamped 30–100%)
+```
+
+- *Simple:* energy = load × hours from 05:00 to solar start (sunrise + `solar_start_offset_hours`, default 2.5 h).
+- *Hourly:* walks 05:00–12:00 hour by hour, adding the load not covered by (corrected) solar, until solar covers the load.
+- *Ramp check:* without an hourly sensor, a sine-shaped day built from the raw forecast is walked the same way; it can only raise the simple target.
+
+**Adjustments** (when the target is below 100%):
+
+```
+target = clamp(base + drain buffer + evening nudge, 20%, 100%)
+```
+
+The drain buffer also keeps the expected morning SOC at or above 25%. See §10 for both.
+
+**Caps, in order:**
+
+1. A free event later today (before 16:00) caps the target at its sell floor plus the house load from 05:00 to the free start (§7).
+2. A one-night override from `set_tonight_target` or `skip_tonight` wins over everything (§11).
+
+### Charge window (Flux 1, 02:00 → end)
+
+- **Low solar:** runs to 05:00.
+- **Otherwise:** just long enough to reach the target.
+
+```
+energy_needed = (target − SOC) / 100 × capacity
+minutes       = energy_needed / efficiency / charge_rate × 60
+end           = 02:00 + minutes rounded up to 15 min, clamped 02:15–05:00
+```
+
+- **Charge rate:** the nameplate `charge_rate_kw`, unless the learned rate is more than 10% lower. Then derated for a cold battery: > 15 °C ×1.0, 10–15 °C ×0.85, 5–10 °C ×0.70, ≤ 5 °C ×0.55.
+- **Efficiency:** 0.92 with the nameplate rate; 1.0 with the learned rate (losses already included).
+- House load during the window adds grid kWh, not window time.
+- With `full_window_live`, the window always runs to 05:00.
+- With `gentle_charge_live`, the inverter's grid-charge current is lowered to the smallest that still reaches the target by 05:00 (with a 20% margin, at least 10 A, never raised), the window runs to 05:00, and the old current is restored at 05:00.
+
+### Push
+
+```
+Flux 1: 02:00 → end, target SOC
+Flux 2: 16:00 → 16:15, 85%   (standard placeholder)
+```
+
+A notification gives the plan and a short "Why". If a free event holds the slots, the plan is computed and logged, and pushed when the event ends.
+
+**Test plan (dry run)** button: computes the plan any time and sends it as a notification. No push, no log, no state change.
+
+---
+
+## 5. Daytime: trims and peak cover
+
+### Evening reserve
+
+The SOC to keep at 19:00 so the house runs until the 02:00 cheap start:
+
+```
+reserve = ceil(20% + load × 7 h / capacity × 100)     (max 100%)
+```
+
+With 0.75 kW and 10 kWh this is 73%. `evening_load_live` or `load_profile_live` switch the load to the learned figure.
+
+### Daytime trim (non-full-charge days)
+
+When SOC is above 85%, sell down with a 45-minute Flux 2 window.
+
+- Target = the highest of 82%, the evening reserve, and (before 16:00) tonight's planned target. Skipped if that is not below the current SOC.
+- Only 05:00–19:00. Selling overnight and buying back later loses money.
+- 30-minute cooldown between trims.
+- Not while a live peak export owns Flux 2.
+- **Trim defer (shadow):** before 16:00, only the solar that would overflow the battery needs trimming now; the rest can be sold at the peak rate. Live with `trim_defer_live` and `peak_export_live`.
+
+### Full-charge-day trim
+
+At ≥ 99.5% on the full-charge day, hold 1 hour, then (if still ≥ 99.5%) trim with a 60-minute window to the same target. Not if a live peak export, an export pause or a free event is active.
+
+### Peak cover (shadow)
+
+Every 30 min, 12:00–16:00: will the battery reach 16:00 with enough to run the house through the peak?
+
+- Projects SOC at 16:00 from SOC now, forecast solar to 16:00 and today's load.
+- Needs `25% + expected 16:00–19:00 load` (with margin and losses).
+- If short by 3 points or more and the peak rate beats the day rate after charge losses (and wear, if set): **top up** with a Flux 1 slot now → 16:00 at the day rate, started just in time.
+- From 09:00, if SOC is still above the need but falling towards it: **hold** the battery there.
+- One decision logged a day. Live with `peak_cover_live`. The normal plan is put back at 16:00.
+
+---
+
+## 6. Evening peak (16:00–19:00)
+
+### Export pause
+
+Checked every 30 min and on SOC change, 16:00–19:00.
+
+- **Watt trigger (default):** grid draw above `export_disable_threshold` (1500 W).
+- **Cost trigger:** grid kW × peak import price above `export_disable_cost_threshold_pence_per_hour` (58.32 p/h). Used only when `cost_aware_export_shadow_mode` is off; otherwise just logged, and disagreements are tallied in the weekly summary.
+- Action: Flux 2 16:00 → 16:15 at 100%, which stops export. Pushed once per pause, not on every check.
+
+### Peak surplus export (shadow)
+
+At 16:00, sell the charge not needed tonight at the peak export price.
+
+```
+target = evening reserve + expected 16:00–19:00 use + 5%
+```
+
+- Only when at least 0.5 kWh is spare and the peak export price beats the off-peak price ÷ 0.85 (plus battery wear, if set).
+- Live with `peak_export_live`: Flux 2 16:00 → 19:00 at the target.
+- **17:00 and 18:00 re-checks** resize the target from the load actually seen since 16:00. A push needs a move of at least 0.5 kWh.
+- The export pause wins: if it fires, the battery is held at 100%.
+
+---
+
+## 7. Free electricity event
+
+For free-import periods (e.g. Octopus free electricity sessions). Set by hand with the **Free event start/end** entities or the `schedule_free_event` service. **Cancel free event** stops it.
+
+**Plan.** Sell down before the free period, then refill free.
+
+```
+sell floor = 100% − charge_rate × free hours / capacity × 100     (at least 40%)
+```
+
+Charge and export rates come from `free_event_charge_rate_kw` / `free_event_export_rate_kw` (blank = `charge_rate_kw`).
+
+**Overnight cap.** If the event starts today before 16:00, the 01:55 target is capped at the sell floor plus the house load from 05:00 to the free start. No point buying cheap power to sell it cheaper.
+
+**Live sell watch.** From 4 h before the free start, every 10 min:
+
+- Projects SOC at the free start from the battery's charge trend over the last 30 min.
+- Starts selling when the time to export down to the floor (+15 min) reaches the time left.
+- Sell: Flux 2 now → free start, target = sell floor.
+
+**Free period.** Flux 1 now → free end at 100%.
+
+**End.** The normal plan is pushed back (keeping an active export pause), and a result is sent: kWh sold, kWh imported free, SOC at the end.
+
+While selling or charging, the event holds both Flux slots: the import plan, trims, peak export and reload plan wait. Timers survive an HA restart.
+
+---
+
+## 8. Health checks and alerts
+
+| Check | What it does |
+|---|---|
+| **Charge watchdog** (02:20) | Charge stalled → re-push once; still stalled 15 min later → alert |
+| **Charge outcome** (05:00) | Alerts when the charge ended 5+ points below target, with a likely cause |
+| **Overnight load** (05:00) | Alerts when 00:00–05:00 load is 1.5× the usual and 1 kWh more (home nights, 7+ nights of history) |
+| **Daytime import** (05:00–16:00) | Alerts once a day when grid import stays above 1500 W (750 W away) for two 30-min checks while SOC is above 30% |
+| **Grid outage** | Grid voltage < 100 V opens an outage, ≥ 180 V closes it. Notifies with battery runtime left; pauses pushes; re-runs a skipped plan when power returns |
+| **Inverter drift** | Alerts once when the inverter's Flux slots or grid-charge current differ from what was pushed. Never re-pushes |
+| **Inverter fault** | Reads inverter events and fault counts; new events notify and set `binary_sensor.inverter_fault` |
+| **Battery health** | Reads the BMS snapshot (state of health, cells, faults); logs one record a day and tracks the trend |
+| **Battery capacity** | Measures usable capacity from charge/discharge swings; alerts below 90% of the configured size |
+| **PV string health** | Samples each MPPT string 10:00–15:00 (≥ 1 kW, battery not full). Alerts when one string's share has been well below usual for 3 days |
+| **Clipped solar** | With `export_limit_w` set, estimates solar lost while the battery is full and export is at the limit |
+| **Tariff prices** (06:10) | Alerts once when the Octopus rates no longer match the configured tariff rows |
+| **Data audit** (06:20) | Missing, duplicate or contradictory records → HA Repairs issues |
+
+`baseload_alert` (on by default) controls the overnight-load and daytime-import alerts.
+
+---
+
+## 9. Reports and bill check
+
+| Report | When | Where |
 |---|---|---|
-| **01:55** daily | `async_track_time_change` | Run import plan |
-| **06:00** daily | `async_track_time_change` | Capture morning SOC + PV power |
-| **18:00 Sundays only** | `async_track_time_change` (gated in handler) | Choose best full-charge day |
-| **22:00** daily | `async_track_time_change` | Capture evening SOC + actual solar kWh |
-| **Every 30 min** | `async_track_time_interval` | Run Flux 2 check |
-| **SOC state change** | `async_track_state_change_event` | Trigger trim or Flux 2 check |
-| **60 s after startup** | `async_call_later` (one-shot) | Run initial import plan on every reload, then the peak cover check (12:00-16:00 only) |
+| Daily data (plan, actuals, KPIs, peak, cost) | 22:00 | Debug stream (`data_report_target`) |
+| Weekly cost summary | Sunday 18:00 | Debug stream |
+| AI weekly insight (`enable_ai_weekly_insight`) | Sunday 18:00 | Notification |
+| Shadow scorecard | First Sunday of the month | Notification and debug stream |
+| Tariff comparison, battery value, upgrade advisor, capacity estimate | Once a month, at the next 18:00 or start-up after the month ends | Notification |
+| Spare solar (`spare_solar_notify_kwh`) | 06:05 | Notification |
 
-The 60-second startup delay exists so that HA notify services are registered before the first plan runs.
-
-In **monitor mode**, all three main logic paths (`async_run_import_plan`, `async_run_flux2_check`, `async_choose_best_full_charge_day`) return immediately without making API calls.
+**Bill check.** Enter your latest Octopus bill's net £ in `number.billed_last_month`. It is compared with the logged Octopus costs for the latest complete bill period. The period starts on `bill_start_day` (1–28; 1 = calendar month). A gap over £2 alerts.
 
 ---
 
-## 2. Full-charge day selection
+## 10. Learning from the logs
 
-Runs every **Sunday at 18:00**. Scores Monday–Friday using the HA weather forecast and picks the highest-scoring day as the weekly full-charge day.
+Records are JSON lines in `{config}/sunsynk_optimizer_data/YYYY-MM.jsonl`, kept for 13 months. Most daily record types keep only the first record per date. The daily cost record is filled in as late Octopus readings arrive, and the newest copy is used. Days are paired by date (plan + actuals, plus morning state if present). Away days are learned separately from home days.
 
-### Scoring formula
-
-```
-base = 100 - cloud_coverage - (rain_probability × 0.7)
-```
-
-Rain is weighted at 0.7× because partial rain days still allow meaningful generation.
-
-### Condition adjustments
-
-| Condition value | Adjustment |
-|---|---|
-| `sunny`, `clear` | +25 |
-| `partlycloudy` | +10 |
-| `cloudy`, `fog` | −10 |
-| `rainy`, `pouring`, `lightning-rainy`, `snowy`, `snowy-rainy` | −25 |
-
-### Temperature nudge
-
-| Temperature | Adjustment |
-|---|---|
-| ≥ 18°C | +3 |
-| ≤ 5°C | −3 |
-
-### Day-of-week penalty
-
-| Day | Penalty |
-|---|---|
-| Thursday | −5 |
-| Friday | −15 |
-
-Later-in-week penalty exists because filling up on Thursday or Friday leaves less of the week to use the stored energy before the next weekend.
-
-### Result
-
-The highest-scoring weekday is written to coordinator state (persisted) and logged as a `full_charge_day` record. A notification is sent with all five scores.
-
----
-
-## 3. Import plan (01:55)
-
-The core decision: how much to charge overnight and for how long. Runs daily at 01:55 and once 60 seconds after integration startup.
-
-### Step 1 — Forecast correction
-
-Reads the last 30 days of paired `import_plan` + `day_actuals` records and computes:
-
-```
-correction_factor = mean(actual_solar_kwh / forecast_solar_kwh)
-                    over all days where forecast > 0.5 kWh
-```
-
-- Requires **7+ paired days** to activate; returns `1.0` (no correction) until then
-- Capped at **0.5–3.0×**
-- Applied: `adjusted_forecast = raw_forecast × correction_factor`
-
-### Step 2 — Solar start time
-
-Reads `sun.sun` HA entity → `next_rising` attribute (UTC timestamp), converts to local time, then adds the configured offset:
-
-```
-solar_start = local_sunrise + solar_start_offset_hours   (default 2.5 h)
-hours_to_solar = max(0, solar_start_hour − 5.0)
-```
-
-`5.0` is the latest possible charge window end (05:00). Using 05:00 as the reference avoids a circular dependency between target SOC and charge end time.
-
-### Step 3 — Target SOC
-
-Evaluated in priority order:
-
-| Priority | Condition | Target SOC | Reason key |
-|---|---|---|---|
-| 1 | Full-charge day | 100% | `weekly_full_charge_day` |
-| 2 | Adjusted forecast < 7 kWh AND winter-like band | 100% | `low_solar_override_winter_like` |
-| 3 | Adjusted forecast < 7 kWh (other bands) | 95% | `low_solar_override` |
-| 4 | Normal day, `sun.sun` available | Solar bridge formula (see below) | `solar_bridge` |
-| 5 | Normal day, `sun.sun` unavailable | Band fallback: 80/85/95% | `summer_like` / `shoulder` / `winter_like` |
-
-**Solar bridge formula (priority 4):**
-
-```
-energy_to_cover = hours_to_solar × avg_consumption_kw
-base_target_soc = 10% + (energy_to_cover / battery_capacity_kwh × 100)
-base_target_soc = clamp(base_target_soc, 20%, 100%)
-```
-
-The 10% is a minimum reserve kept in the battery at solar start time.
-
-**Adaptive adjustments** (applied on non-full-charge days after base target is set):
-
-```
-target_soc = clamp(base_target_soc + overnight_drain_adjustment + soc_adjustment, 20%, 100%)
-```
-
-See [Section 6](#6-adaptive-learning-corrections) for how each adjustment is derived.
-
-### Step 4 — Charge window (flux1\_end)
-
-| Condition | flux1\_end |
-|---|---|
-| Adjusted forecast < 7 kWh | `05:00` (full window — scarce solar, take all available cheap import) |
-| Normal | Physics formula below |
-
-**Physics formula:**
-
-```
-energy_needed = max(0, (target_soc − current_soc) / 100 × battery_capacity_kwh)
-efficiency    = 0.92 at the nameplate rate, 1.0 when the learned rate is used (it already embeds losses)
-raw_minutes   = energy_needed / efficiency / charge_rate_kw × 60
-quarter_slots = ceil(raw_minutes / 15)            ← rounds up to next 15-min slot
-flux1_end     = 02:00 + quarter_slots × 15 min
-flux1_end     = clamp(flux1_end, 02:15, 05:00)
-```
-
-The 02:15 minimum ensures the window is never shorter than 15 minutes from the fixed 02:00 start, which is not worth an API call.
-
-The plan also logs `window_load_kwh` (house load × window hours, served from the grid alongside the charge) and `grid_kwh_needed` (`energy_needed / efficiency + window_load_kwh`). Window load adds grid kWh, not window time.
-
-### Step 5 — API push
-
-Pushes to the Sunsynk API via `async_push_flux_override`:
-
-```
-Flux 1: startTime=02:00, endTime=flux1_end, targetSoc=target_soc
-Flux 2: startTime=16:00, endTime=16:15,    targetSoc=85   (placeholder reset)
-```
-
-### Step 6 — State and logging
-
-Updates `coordinator.state` with the full plan dict and logs an `import_plan` record to the JSONL data store. Sends a notification with the plan summary.
-
----
-
-## 4. Flux 2 and trim logic
-
-Runs every 30 minutes and on every battery SOC state change.
-
-### Evening export disable (16:00–19:00)
-
-**Condition:** `now.hour` is 16–18 AND `grid_pac > export_disable_threshold`
-
-**Action:** Push Flux 2 with `targetSoc=100%`
-
-This prevents the inverter from exporting to the grid when the home is drawing heavily — grid power above the threshold indicates the home is consuming more than the panels produce, so keeping the battery full is more valuable than exporting.
-
-Default threshold: **1500 W** (configurable).
-
-### Daytime SOC trim (non-full-charge days)
-
-**Condition:** `soc > 85%` AND 30-minute cooldown has elapsed AND it is not the full-charge day
-
-**Action:** Push Flux 2: export window for 45 minutes, `targetSoc=82%`
-
-The 82% target sits 3% below the 85% trigger, preventing oscillation where a trim to 85% would immediately re-trigger another trim. The 30-minute cooldown prevents the Sunsynk API from being hammered if the battery fluctuates around the threshold.
-
-### Full-charge day trim (SOC state change)
-
-**Condition:** SOC ≥ 99.5% AND today is the selected full-charge day
-
-**Action:**
-1. Schedule a 1-hour hold via `async_call_later(3600, _delayed_full_trim)`
-2. After 1 hour, re-check SOC — if still ≥ 99.5%, push Flux 2: 60-minute export window, `targetSoc=82%`
-
-The 1-hour hold allows the battery cells to fully condition at 100% before trimming. This only runs once per arrival at 100% (guarded by `pending_full_trim_cancel`).
-
-### Evening reserve floor (phase 16)
-
-Both trims sell down to `max(82%, evening_reserve_soc)`, and skip when that is not below the current SOC.
-
-### Trim time guard (14/10/2026)
-
-Neither trim runs 19:00–05:00, and before 16:00 the floor also includes the target tonight's plan charged to (`planning.trim_target_soc(..., minutes=, plan_target_soc=)`). Selling at the night/day export rate and rebuying later loses money, and an overnight trim fights the charge.
-
-```
-evening_reserve_soc = min(100, ceil(20 + load_kw × 7 h / battery_capacity_kwh × 100))
-```
-
-`load_kw` is tonight's plan rate (phase 12 learned or config). With the defaults (0.75 kW, 10 kWh) the reserve is 73%, so the 82% trim is unchanged. It only binds for heavier loads or smaller batteries.
-
----
-
-## 5. Data logging
-
-All records are appended as JSON lines to monthly files at:
-
-```
-{config_dir}/sunsynk_optimizer_data/YYYY-MM.jsonl
-```
-
-Files older than **13 months** are pruned on startup (one full year plus one month ensures year-over-year comparisons are always available).
-
-### Record types
-
-| Type | When written | Key fields |
+| Correction | Needs | How |
 |---|---|---|
-| `import_plan` | 01:55 (and on manual trigger) | date, soc, forecast, target_soc, flux1_end, corrections applied |
-| `morning_state` | 06:00 | date, morning_soc, morning_pv_power |
-| `day_actuals` | 22:00 | date, evening_soc, actual_solar_kwh, evening_export_disabled |
-| `full_charge_day` | Sunday 18:00 | chosen_day, scores dict |
+| **Forecast correction** | 7 days with forecast > 0.5 kWh | Median of actual ÷ forecast, capped 0.5–3.0× |
+| **Drain buffer** | 5 drain nights; until then 15% (8% away) | 75th percentile of SOC lost after the charge, measured to 05:00; rounded to 5%, capped 0–20% |
+| **Evening SOC nudge** | 5 days in the same band | Mean 22:00 SOC: above 35% → −5%; below 20% → +5% |
+| **Day-rate import feedback** (shadow) | 5 of the last 14 days in the same band | Median 05:00–16:00 grid import > 0.3 kWh → +5%; else unused charge > 0.5 kWh → −5% |
+| **Charge rate** | Calibration nights | Learned SOC gain per window hour; reused when data thins |
+| **Measured charge rate** (shadow) | 3 nights | 75th percentile from the 02:00/05:00 meters, last 14 nights |
+| **Overnight load** | 7 home days | Median 00:00–06:00 load, last 28 days |
 
-### Record pairing
-
-`async_load_paired_days(days=30)` joins records by date:
-- `import_plan` + `day_actuals` must both exist for a date to be included
-- `morning_state` is joined if available (optional — used for drain calculation)
-- Multiple `import_plan` records for the same date: last one wins (dict keyed by date)
-
-Derived field added at pairing time:
-```
-overnight_drain_pct = target_soc − morning_soc
-```
+Drain nights exclude: full-charge days, overrides, nights with early PV (≥ 200 W at 06:00), and nights that started at or above target. The evening nudge excludes full-charge days, export-pause days, full-window and override nights, and days with more than 15 kWh of solar.
 
 ---
 
-## 6. Adaptive learning corrections
+## 11. Entities, services and dashboard
 
-Three corrections are computed from paired records and applied during the import plan. All return neutral values until minimum day thresholds are met.
+**Buttons:** Run choose best day, Test plan (dry run), Reset to baseline (pushes your configured Flux settings back), Update dashboard, Cancel free event.
 
-### 6.1 Forecast correction
+**Switch:** Away mode. Also set automatically at 22:00 from `auto_away_persons` (away for `auto_away_min_hours`, default 24 h) or an `auto_away_calendar` event containing `auto_away_keyword` ("holiday"); the switch overrides until the next change.
 
-| Parameter | Value |
+**Binary sensors:** Evening export disabled, Grid outage, Inverter fault, Monitor only mode.
+
+**Sensors** include: selected full-charge day, import plan, next import window, current SOC target, Flux 2 action, learning corrections, consumption, free event, spare solar, cost of 1 kWh now, battery runtime left, import causes, data health, PV string share, battery capacity estimate and state of health, the five day KPIs (avoidable import, peak export income, self-sufficiency, unused charge, over-limit import), and the shadow sensors.
+
+**Services** (`sunsynk_optimizer.*`):
+
+| Service | Does |
 |---|---|
-| Minimum days | 7 paired days where `forecast > 0.5 kWh` |
-| Formula | `mean(actual_solar / forecast_solar)` over last 30 days |
-| Cap | 0.5–3.0× |
-| Effect | Multiplied into raw forecast before band classification and target calculation |
+| `set_tonight_target` (`soc` 20–100) | Next 01:55 plan uses this target |
+| `skip_tonight` | Next 01:55 plan holds the battery where it is (no grid charge) |
+| `schedule_free_event` (`start`, `end`) | Schedules a free event |
+| `cancel_free_event` | Cancels it |
+| `get_plan` | Returns the dry-run plan as a response |
+| `probe_inverter_events` | Read-only probe of the Sunsynk event routes |
 
-Until 7 days accumulate, the factor is 1.0 and the raw forecast is used unmodified.
+Writes are refused in monitor mode and while a free event holds the slots.
 
-### 6.2 Overnight drain adjustment
-
-| Parameter | Value |
-|---|---|
-| Minimum days | 5 valid morning states |
-| Valid record filter | `morning_pv_power < 50 W` (solar not yet started) AND `not is_full_day` AND `overnight_drain_pct ≥ 0` |
-| Formula | `mean(target_soc − morning_soc)` rounded to nearest 5% |
-| Cap | 0–20% |
-| Effect | Added to target SOC so the battery arrives at the solar start time at the intended level |
-
-The 50 W PV threshold ensures the 06:00 SOC reading is pure battery drain, not contaminated by early solar generation. The 20% cap prevents overreaction to outlier nights (e.g. cold-weather standby spikes).
-
-### 6.3 Evening SOC nudge
-
-| Parameter | Value |
-|---|---|
-| Minimum days | 5 days in the same forecast band |
-| Valid record filter | Same `forecast_band` AND `not is_full_day` AND `not evening_export_disabled` |
-| Formula | `mean(evening_soc)` at 22:00 |
-| Thresholds | HIGH = 35% (over-charged), LOW = 20% (under-charged) |
-| Output | −5%, 0, or +5% |
-| Effect | Added to target SOC to correct systematic over- or under-charging |
-
-Evening export disabled days are excluded because the export disable action keeps the battery artificially full, which would corrupt the nudge signal.
-
-### 6.4 Day-rate import feedback (phase 15, shadow by default)
-
-| Parameter | Value |
-|---|---|
-| Minimum days | 5 in the last 14, same `forecast_band` and home/away regime |
-| Valid record filter | `not is_full_day` AND `not evening_export_disabled` AND `target_soc < 100` AND a logged `grid_import_morning_kwh` |
-| Signal | median 05:00–16:00 grid import (phase 14 KPI); else median `unused_charge_kwh` |
-| Output | +5% if import > 0.3 kWh; −5% if no import and unused charge > 0.5 kWh; else 0 |
-| Effect | Logged as `import_feedback_adjustment`; replaces the evening SOC nudge only when `import_feedback_live` is on |
+**Dashboard.** **Update dashboard** writes the Lovelace view. It bundles its own power-flow card and day chart; it also needs the HACS **apexcharts-card**.
 
 ---
 
-## 7. Configuration parameters
+## 12. Main settings
 
-All configurable via **Settings → Devices & Services → Sunsynk Optimizer → Configure**.
+All in **Settings → Devices & Services → Sunsynk Optimizer → Configure**.
 
-| Parameter | Key | Default | Description |
-|---|---|---|---|
-| Battery capacity | `battery_capacity_kwh` | 10.0 kWh | Used for physics-based window and solar bridge calculations |
-| Charge rate | `charge_rate_kw` | 3.0 kW | Used to compute how long the charge window needs to be |
-| Average consumption | `avg_consumption_kw` | 0.75 kW | Home load rate used in solar bridge calculation |
-| Solar start offset | `solar_start_offset_hours` | 2.5 h | Hours after sunrise when solar produces enough to cover home load |
-| Export disable threshold | `export_disable_threshold` | 1500 W | Grid draw above this between 16–19h disables Flux 2 export |
-| Default full-charge day | `default_full_charge_day` | Wednesday | Used until the weather-based selector has run |
-| Operation mode | `operation_mode` | auto | `auto` = full control, `monitor` = observe only |
-| Day-rate import feedback live | `import_feedback_live` | off | Off = log the phase 15 adjustment only; on = it replaces the evening SOC nudge |
-| Peak surplus export live | `peak_export_live` | off | Off = log the 16:00 decision only; on = export 16:00–19:00 down to evening reserve + expected 16:00–19:00 use + 5% |
+| Setting | Key | Default |
+|---|---|---|
+| Battery capacity | `battery_capacity_kwh` | 10 kWh |
+| Charge rate | `charge_rate_kw` | 3 kW |
+| Weekday / weekend / away load | `avg_consumption_kw` / `weekend_avg_consumption_kw` / `away_avg_consumption_kw` | 0.75 / 0.9 / 0.3 kW |
+| Solar start offset | `solar_start_offset_hours` | 2.5 h |
+| Solar forecast (today / tomorrow) | `solar_forecast_sensor` / `tomorrow_forecast_sensor` | Forecast.Solar sensors |
+| Hourly forecast | `hourly_forecast_sensor` (+ attribute) | blank |
+| Export pause threshold | `export_disable_threshold` | 1500 W |
+| Default full-charge day | `default_full_charge_day` | Wednesday |
+| Operation mode | `operation_mode` | auto |
+| Battery voltage | `battery_voltage` | 51.2 V |
+| Battery cost / lifetime (wear cost) | `battery_cost_gbp` / `battery_lifetime_kwh` | blank (no wear term) |
+| Export limit (clipped solar) | `export_limit_w` | 0 (off) |
+| Bill period start day | `bill_start_day` | 1 |
+| Octopus cost, consumption and rate entities | `octopus_*` | blank (optional) |
+| Notifications / debug stream | `notify_service`, `notify_target` / `data_report_target` | `notify.notify` / blank |
 
----
-
-## 8. Known thresholds to revisit
-
-### Evening SOC nudge thresholds
-
-`_EVENING_SOC_HIGH = 35%` and `_EVENING_SOC_LOW = 20%` were calibrated when the import target was 80–85%. With the solar bridge approach targeting 36–56%, the battery will naturally arrive at a lower evening SOC (it is used more through the day). This means:
-
-- The 35% "too full" signal may never trigger, even if the system is slightly over-importing
-- The 20% "too empty" signal may trigger on cloudy days when the solar bridge target was too optimistic
-
-These thresholds should be reviewed after 2–3 weeks of solar bridge data has accumulated. Phase 15's day-rate import feedback (§6.4) is the intended replacement; it ships in shadow until the backtest agrees.
-
-### Low-solar override threshold
-
-The 7 kWh threshold that triggers the full-window / 95–100% override was chosen against the old band definitions. With forecast correction applied, an adjusted forecast of 6.9 kWh might still represent a reasonable solar day (if the site runs 2× the model). Consider whether the override should apply to the raw or adjusted forecast, and whether the threshold should be a configurable parameter.
-
-### Solar bridge minimum floor
-
-The 20% minimum target SOC is a pragmatic safety floor. On midsummer mornings with an early sunrise, the solar bridge formula can produce values as low as 10–15%. The 20% floor prevents the inverter from ever being commanded to a critically low state.
+Plus the live toggles in §2. Blank optional settings turn their feature off.
