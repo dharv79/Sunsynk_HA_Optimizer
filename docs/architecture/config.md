@@ -50,3 +50,5 @@ Optional: `auto_away_persons` (comma-separated `person.*`), `auto_away_calendar`
 `upgrade_price_per_kwh`, `pv_kwp`, `pv_upgrade_price_per_kwp` (optional, upgrade advisor payback and PV scenario) and `load_profile_live` (default off: evening reserve and peak cover from the learned half-hourly profile).
 
 `flex_event_entity` (optional calendar or on/off entity; on = a paid export event) and `flex_price_pence` (optional p/kWh the event pays) for the phase 77 flex event shadow. Both are blank by default, which turns it off.
+
+`gas_unit_pence`, `gas_standing_pence` and `heat_pump_price_gbp` (all optional) feed the phase 78 heat-pump scenario in the monthly upgrade report. Without `gas_unit_pence` it doesn't run.

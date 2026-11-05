@@ -14,10 +14,12 @@ def test_plan_maps_to_six_slots():
     assert len(slots) == 6
     assert _times(slots) == sorted(_times(slots))
     by_time = {s["time"]: s for s in slots}
-    assert by_time["00:00"] == {"time": "00:00", "soc": 40, "grid_charge": False}
+    # Midnight runs the house on the battery to the charge; only 16:00-19:00 holds the evening reserve.
+    assert by_time["00:00"] == {"time": "00:00", "soc": 25, "grid_charge": False}
     assert by_time["02:00"] == {"time": "02:00", "soc": 85, "grid_charge": True}
     assert by_time["04:30"] == {"time": "04:30", "soc": 25, "grid_charge": False}
     assert by_time["16:00"] == {"time": "16:00", "soc": 40, "grid_charge": False}
+    assert by_time["19:00"] == {"time": "19:00", "soc": 25, "grid_charge": False}
     # Only the charge window charges from the grid.
     assert [s["time"] for s in slots if s["grid_charge"]] == ["02:00"]
 
@@ -39,7 +41,7 @@ def test_peak_hold_slot_and_merge():
     slots = planning.tou_slots_from_plan("02:00", "05:00", 90, 25, 40, peak_hold=("13:45", 70))
     by_time = {s["time"]: s for s in slots}
     assert by_time["13:45"]["soc"] == 70 and not by_time["13:45"]["grid_charge"]
-    # Reserve equal to the floor: 00:00 and the post-charge floor stay separate, but 16:00 merges into the floor run.
+    # Reserve equal to the floor: 16:00 and 19:00 merge into the floor run, then padding refills six slots.
     flat = planning.tou_slots_from_plan("02:00", "05:00", 90, 25, 25)
     assert len(flat) == 6
     assert sum(1 for s in flat if s["grid_charge"]) == 1

@@ -99,3 +99,27 @@ The monthly tariff comparison, battery value and capacity estimate now run throu
 **Caveats.** Perfect-foresight charging is an upper bound; the segment model ignores in-segment dynamics; winter-only data understates PV, which is why the months covered are listed. Fewer than 7 usable days → no scenarios.
 
 **Verification.** `tests/test_upgrade_advisor.py`: a 0 kWh battery reproduces phase 37's `no_battery_gbp` exactly; cost falls monotonically with size and saturates; the charge-rate cap, PV scale, wear and the "not worth charging" rule; missing data → None; scenario naming, per-month split, payback and the CLI.
+
+## Electrification advisor: heat pump and inverter limit (05/11/2026, phase 78)
+
+**Design.** The monthly upgrade advisor (`_async_send_upgrade_advisor`) now also calls `_add_electrification`, which works over the 13-month paired log.
+
+`planning.heat_pump_scenario` handles the heat pump:
+- Per day: gas kWh = (gas cost − `gas_standing_pence`) ÷ `gas_unit_pence`.
+- Heat = gas kWh × 0.9 boiler efficiency.
+- Heat-pump kWh = heat ÷ `heat_pump_cop(day's mean outside °C)`. The COP is linear (2.8 at 0 °C, +0.08 per °C), clamped to 2.0–4.5, and 2.8 on days with no temperature.
+- Saving = the whole gas cost (supply assumed capped off) − heat-pump kWh × the Cosy all-day mean price (`mean_band_price`, VAT applied).
+- Away days and days without a gas cost are skipped. At least 14 days are needed.
+- Payback is shown when `heat_pump_price_gbp` is set and the saving is positive.
+- Always flagged "low" confidence, with the assumptions spelled out.
+
+`export_limit_scenario` prices the logged `clipped_solar_kwh` at the midday Flux export rate ("medium" confidence: the clipping is estimated, phase 29).
+
+Both scenarios go into the report as `heat_pump` / `export_limit` (None when they can't run) and onto the notification via `electrification_summary`. The battery and PV scenarios are unchanged.
+
+**Use.** Report only: nothing is controlled. The heat-pump scenario needs `gas_unit_pence`. Annualising from the logged days follows the season they cover, so a winter-only log overstates the yearly saving; the notification says so.
+
+**Verification.** `tests/test_electrification.py`:
+- COP curve and clamps; the Cosy mean, and None when a half-hour has no price.
+- Heat-pump maths (standing charge, COP, payback); skipping away and missing days; required inputs; negative saving gives no payback.
+- Export-limit maths and minimum days; summary lines.

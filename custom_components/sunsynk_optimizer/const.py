@@ -165,6 +165,10 @@ CONF_SPARE_SOLAR_NOTIFY_KWH = "spare_solar_notify_kwh"  # blank = no morning not
 # Flexibility-market export events (phase 77, shadow): an on/off or calendar entity and the p/kWh it pays.
 CONF_FLEX_EVENT_ENTITY = "flex_event_entity"
 CONF_FLEX_PRICE_PENCE = "flex_price_pence"
+# Electrification advisor (phase 78, report only): gas prices for the heat-pump scenario and its install price.
+CONF_GAS_UNIT_PENCE = "gas_unit_pence"
+CONF_GAS_STANDING_PENCE = "gas_standing_pence"
+CONF_HEAT_PUMP_PRICE_GBP = "heat_pump_price_gbp"
 
 # Overnight baseload alert (phase 26): 05:00 notification when 00:00-05:00 house load is well above normal.
 CONF_BASELOAD_ALERT = "baseload_alert"

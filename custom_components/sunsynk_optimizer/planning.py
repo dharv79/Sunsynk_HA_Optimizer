@@ -4773,6 +4773,7 @@ def dynamic_tariff_summary(
 # would need are logged next to what the inverter holds; nothing is written.
 TOU_SLOT_COUNT = 6
 TOU_PEAK_FROM_MINUTES = 16 * 60
+TOU_PEAK_TO_MINUTES = 19 * 60
 TOU_SLOT_STEP_MINUTES = 30
 
 
@@ -4804,10 +4805,12 @@ def tou_slots_from_plan(
 
     Each slot runs from its start to the next one's. In a slot the battery
     discharges no lower than its SOC, and with grid charge on it charges
-    from the grid up to that SOC. Mapping: midnight → the evening reserve;
-    the charge window → target SOC with grid charge on; after it → the floor
-    (the day uses the battery); an optional peak hold (start, SOC) from
-    phase 59; 16:00 → the evening reserve. Neighbouring slots with the same
+    from the grid up to that SOC. Mapping: midnight → the floor (the battery
+    runs the house to the charge); the charge window → target SOC with grid
+    charge on; after it → the floor (the day uses the battery); an optional
+    peak hold (start, SOC) from phase 59; 16:00 → the evening reserve (the
+    SOC to hold at 19:00); 19:00 → the floor (the reserve then carries the
+    house to 02:00). Neighbouring slots with the same
     settings merge, then the longest slot is split on the half-hour until
     there are exactly six (the inverter always has six). None when the
     charge window or target is missing.
@@ -4817,10 +4820,11 @@ def tou_slots_from_plan(
         return None
     reserve = int(evening_reserve_soc) if _is_number(evening_reserve_soc) else floor_soc
     points: dict[int, tuple[int, bool]] = {
-        0: (reserve, False),
+        0: (floor_soc, False),
         start: (int(round(target_soc)), True),
         end: (floor_soc, False),
         TOU_PEAK_FROM_MINUTES: (reserve, False),
+        TOU_PEAK_TO_MINUTES: (floor_soc, False),
     }
     if peak_hold is not None:
         hold_at = hhmm_to_minutes(peak_hold[0] or "")
@@ -4950,3 +4954,143 @@ def flex_event_offer(
         "gain_gbp": round(gain, 2),
         "floor_soc": plan["target_soc"],
     }
+
+
+# Household electrification and sizing advisor (phase 78). Report only: extends the phase 50
+# upgrade report with a heat pump on Cosy vs gas, and a higher inverter limit (clipped solar).
+HEAT_PUMP_COP_RANGE = (2.0, 4.5)
+HEAT_PUMP_COP_AT_0C = 2.8
+HEAT_PUMP_COP_PER_C = 0.08
+HEAT_PUMP_COP_DEFAULT = 2.8  # a day with no logged outside temperature
+BOILER_EFFICIENCY = 0.9
+ELECTRIFY_MIN_DAYS = 14
+ELECTRIFY_HISTORY_DAYS = 395  # the 13-month log
+
+
+def heat_pump_cop(temp_c: float | None) -> float:
+    """Seasonal air-source COP at a daily mean outside temperature (linear, clamped); a default without one."""
+    if not _is_number(temp_c):
+        return HEAT_PUMP_COP_DEFAULT
+    low, high = HEAT_PUMP_COP_RANGE
+    return round(max(low, min(high, HEAT_PUMP_COP_AT_0C + HEAT_PUMP_COP_PER_C * temp_c)), 2)
+
+
+def mean_band_price(bands: list[tuple[int, int, float]]) -> float | None:
+    """Time-weighted mean p/kWh over the 48 half-hours of a day; None if any half-hour has no price."""
+    prices = [band_price(bands, i * 30) for i in range(HALF_HOURS_PER_DAY)]
+    if not prices or any(p is None for p in prices):
+        return None
+    return round(sum(prices) / len(prices), 2)
+
+
+def _annual_block(savings: dict[str, float], price_gbp: float | None) -> dict[str, Any]:
+    total = sum(savings.values())
+    annual = total / len(savings) * 365 if savings else 0.0
+    return {
+        "days": len(savings),
+        "months": sorted({d[:7] for d in savings}),
+        "saving_gbp": round(total, 2),
+        "annual_gbp": round(annual, 2),
+        "price_gbp": round(price_gbp, 2) if _is_number(price_gbp) and price_gbp > 0 else None,
+        "payback_years": round(price_gbp / annual, 1) if _is_number(price_gbp) and price_gbp > 0 and annual > 0 else None,
+    }
+
+
+def heat_pump_scenario(
+    days: list[dict[str, Any]],
+    gas_unit_pence: float | None,
+    hp_price_pence: float | None,
+    gas_standing_pence: float | None = None,
+    install_price_gbp: float | None = None,
+    temps: dict[str, float] | None = None,
+) -> dict[str, Any] | None:
+    """What replacing gas with an air-source heat pump would have saved on the logged days.
+
+    Per day: gas kWh = (gas cost − standing) ÷ unit price; heat = gas kWh ×
+    boiler efficiency; heat-pump kWh = heat ÷ COP(the day's outside °C);
+    saving = gas cost (standing included: the gas supply is assumed capped
+    off) − heat-pump kWh × `hp_price_pence` (the Cosy all-day mean). Away
+    days and days without a gas cost are skipped. None without a gas unit
+    price, a heat-pump price, or `ELECTRIFY_MIN_DAYS` usable days.
+    Confidence is always "low": COP, boiler efficiency and the heating share
+    of gas (hot water and cooking are counted as heat) are assumptions.
+    """
+    if not (_is_number(gas_unit_pence) and gas_unit_pence > 0 and _is_number(hp_price_pence)):
+        return None
+    standing = gas_standing_pence if _is_number(gas_standing_pence) else 0.0
+    temps = temps or {}
+    savings: dict[str, float] = {}
+    gas_kwh = hp_kwh = 0.0
+    cops: list[float] = []
+    for day in days:
+        date_str, cost = day.get("date"), day.get("actual_gas_cost_gbp")
+        if not date_str or day.get("away") or not _is_number(cost):
+            continue
+        kwh = max(0.0, cost * 100 - standing) / gas_unit_pence
+        cop = heat_pump_cop(temps.get(date_str))
+        elec = kwh * BOILER_EFFICIENCY / cop
+        savings[date_str] = (cost * 100 - elec * hp_price_pence) / 100
+        gas_kwh += kwh
+        hp_kwh += elec
+        cops.append(cop)
+    if len(savings) < ELECTRIFY_MIN_DAYS:
+        return None
+    return {
+        **_annual_block(savings, install_price_gbp),
+        "gas_kwh": round(gas_kwh, 1),
+        "heat_pump_kwh": round(hp_kwh, 1),
+        "mean_cop": round(sum(cops) / len(cops), 2),
+        "hp_price_p": hp_price_pence,
+        "confidence": "low",
+        "assumptions": f"COP {HEAT_PUMP_COP_RANGE[0]:g}–{HEAT_PUMP_COP_RANGE[1]:g} by outside temp, "
+                       f"boiler {BOILER_EFFICIENCY:.0%}, all gas treated as heat, gas standing charge dropped, "
+                       "Cosy all-day mean price (no shifting into cheap windows)",
+    }
+
+
+def export_limit_scenario(
+    days: list[dict[str, Any]], export_pence: float | None, price_gbp: float | None = None
+) -> dict[str, Any] | None:
+    """What a higher inverter limit would have earned: the logged clipped solar sold at the midday export price.
+
+    Clipping is estimated from the PV string power near the limit (phase 29),
+    so treat it as indicative ("medium" confidence). None without an export
+    price or `ELECTRIFY_MIN_DAYS` days with a clipping figure.
+    """
+    if not _is_number(export_pence):
+        return None
+    savings = {
+        d["date"]: d["clipped_solar_kwh"] * export_pence / 100
+        for d in days if d.get("date") and _is_number(d.get("clipped_solar_kwh"))
+    }
+    if len(savings) < ELECTRIFY_MIN_DAYS:
+        return None
+    return {
+        **_annual_block(savings, price_gbp),
+        "clipped_kwh": round(sum(d["clipped_solar_kwh"] for d in days if d.get("date") in savings), 2),
+        "export_p": export_pence,
+        "confidence": "medium",
+    }
+
+
+def electrification_summary(report: dict[str, Any]) -> list[str]:
+    """Notification lines for the heat-pump and inverter-limit scenarios (empty when neither ran)."""
+    lines = []
+    hp = report.get("heat_pump")
+    if hp:
+        payback = f"; payback ~{hp['payback_years']:g} yrs" if hp.get("payback_years") else ""
+        if hp["saving_gbp"] >= 0:
+            outcome = f"saved £{hp['saving_gbp']:.2f} over {hp['days']} days (~£{hp['annual_gbp']:.0f}/yr"
+        else:
+            outcome = f"cost £{-hp['saving_gbp']:.2f} more over {hp['days']} days (~£{-hp['annual_gbp']:.0f}/yr more"
+        lines.append(
+            f"• Heat pump on Cosy instead of gas: {outcome} at the logged season's rate{payback}; "
+            f"low confidence: {hp['assumptions']})"
+        )
+    limit = report.get("export_limit")
+    if limit:
+        lines.append(
+            f"• Higher inverter limit: {limit['clipped_kwh']:g} kWh clipped solar would have earned "
+            f"£{limit['saving_gbp']:.2f} (~£{limit['annual_gbp']:.0f}/yr)"
+        )
+    return lines
