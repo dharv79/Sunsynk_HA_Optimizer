@@ -119,3 +119,7 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## TOU shadow record (05/11/2026, phase 73)
 
 `tou_shadow` (after the 01:55 plan, deduped by date and time, never read back): date, time, target_soc, proposed (six {time, soc, grid_charge}), inverter (same shape or None), readable, diffs [{slot, field, inverter, plan}] or None, diff_count. See `import-plan.md`.
+
+## Flex event record (05/11/2026, phase 77)
+
+`flex_event` (once per event start, deduped by date and start time, never read back): date, time (event start), entity, hours, soc, price_p, house_load_kw, decision, offer_kwh, value_gbp, gain_gbp, floor_soc. See `export-control.md`.

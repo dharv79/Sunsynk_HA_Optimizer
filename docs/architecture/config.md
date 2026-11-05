@@ -48,3 +48,5 @@ Optional: `auto_away_persons` (comma-separated `person.*`), `auto_away_calendar`
 ## Options added 05/11/2026 (phases 50, 71)
 
 `upgrade_price_per_kwh`, `pv_kwp`, `pv_upgrade_price_per_kwp` (optional, upgrade advisor payback and PV scenario) and `load_profile_live` (default off: evening reserve and peak cover from the learned half-hourly profile).
+
+`flex_event_entity` (optional calendar or on/off entity; on = a paid export event) and `flex_price_pence` (optional p/kWh the event pays) for the phase 77 flex event shadow. Both are blank by default, which turns it off.

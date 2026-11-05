@@ -76,6 +76,8 @@ from .const import (
     CONF_FLUX_PRODUCTS,
     CONF_FREE_EVENT_CHARGE_RATE_KW,
     CONF_FREE_EVENT_EXPORT_RATE_KW,
+    CONF_FLEX_EVENT_ENTITY,
+    CONF_FLEX_PRICE_PENCE,
     CONF_INVERTER_SERIAL,
     CONF_NOTIFY_SERVICE,
     CONF_NOTIFY_TARGET,
@@ -179,6 +181,8 @@ from .planning import (
     agile_prices_by_date,
     BATTERY_LOW_SOC,
     cheapest_window_plan,
+    flex_event_offer,
+    flex_event_window,
     tou_diff,
     tou_slots_from_plan,
     tou_slots_from_settings,
@@ -422,6 +426,8 @@ class SunsynkOptimizer:
         self._evening_load_kw: float | None = None
         # Phase 71: learned half-hourly load profile (refreshed with the plan) and today's outside-temp samples.
         self._load_profile: dict[str, Any] | None = None
+        # Phase 77: the flex event already logged ("date HH:MM"); unpersisted, the record dedup covers restarts.
+        self._flex_event_logged: str | None = None
         self._outside_temp: dict[str, Any] = {}
         # Phase 40: today's daytime grid_pac samples and whether it alerted; unpersisted.
         self._daytime_import: dict[str, Any] = {}
@@ -2085,6 +2091,7 @@ class SunsynkOptimizer:
         await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
         await self._guarded(self._async_track_outside_temp, "Outside temperature")
         await self._guarded(self.async_run_mpc_shadow, "MPC shadow plan")
+        await self._guarded(self.async_run_flex_event_shadow, "Flex event shadow")
 
     def _mpc_loads(self, cfg: dict[str, Any]) -> dict[str, float]:
         """Per-band house load kW for the MPC: tonight's plan rate, the learned evening rate, the config day rate."""
@@ -2144,6 +2151,42 @@ class SunsynkOptimizer:
         }
         await self.data_logger.async_log_mpc_plan(**record)
         self.coordinator.update_state(touch=False, mpc_plan={**record, "slots": plan["slots"]})
+
+    async def async_run_flex_event_shadow(self) -> None:
+        """While the flex event entity is on: log once per event what the battery could offer (phase 77); no export."""
+        entity = self._cfg_str(CONF_FLEX_EVENT_ENTITY)
+        state = self.hass.states.get(entity) if entity else None
+        if state is None or state.state != "on":
+            return
+        cfg, now = self.cfg, dt_util.now()
+        start, hours = flex_event_window(dict(state.attributes), now, dt_util.DEFAULT_TIME_ZONE)
+        key = f"{now.date().isoformat()} {start}"
+        if self._flex_event_logged == key:
+            return
+        self._flex_event_logged = key
+        try:
+            price = float(cfg.get(CONF_FLEX_PRICE_PENCE))
+        except (TypeError, ValueError):
+            price = None
+        prices, _sources = self._tariff_prices(now.date())
+        charge_kw = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
+        load_kw = self._evening_load_kw or float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        soc = self._essential_state(self.battery_soc_entity)
+        offer = flex_event_offer(
+            soc, self._evening_reserve_soc(), self._capacity_kwh(cfg), hours, load_kw, price, prices.get("offpeak"),
+            float(cfg.get(CONF_FREE_EVENT_EXPORT_RATE_KW) or charge_kw), self._wear_pence(), self._slots_held(),
+        )
+        record = {
+            "date": now.date().isoformat(), "time": start, "entity": entity, "hours": hours, "soc": soc,
+            "price_p": price, "house_load_kw": round(load_kw, 2), **offer,
+        }
+        await self.data_logger.async_log_flex_event(**record)
+        self.coordinator.update_state(touch=False, flex_event=record)
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify(
+                "Sunsynk Flex Event (shadow)", json.dumps({"type": "flex_event", **record}), target=data_report_target
+            )
 
     async def async_run_tou_shadow(self, plan: dict[str, Any]) -> None:
         """After the plan: the six inverter TOU slots it would need vs what the inverter holds (phase 73).
