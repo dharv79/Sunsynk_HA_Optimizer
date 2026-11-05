@@ -1,6 +1,6 @@
 # Phase 79 — Own Sunsynk power-flow card (replaces slipx06)
 
-**Status:** In progress. **Size:** L. **Category:** user request (05/11/2026, out of the idea sweep).
+**Status:** Done, merged (1101fb0, PR #156). **Size:** L. **Category:** user request (05/11/2026, out of the idea sweep).
 
 ## Goal
 
