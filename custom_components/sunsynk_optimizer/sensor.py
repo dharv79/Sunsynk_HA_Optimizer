@@ -90,6 +90,10 @@ async def async_setup_entry(
                 coordinator, entry, "shadow_scorecard", "Shadow scorecard",
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.shadow_scorecard",
             ),
+            SunsynkOptimizerSensor(
+                coordinator, entry, "mpc_plan", "MPC plan (shadow)",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.mpc_plan",
+            ),
             SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
             SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
             SunsynkOptimizerSensor(coordinator, entry, "spare_solar", "Spare solar today"),
@@ -233,6 +237,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         if self._sensor_key == "battery_soh":
             return _as_dict(_as_dict(state.battery_health).get("latest")).get("soh_pct")
 
+        if self._sensor_key == "mpc_plan":
+            return _as_dict(state.mpc_plan).get("first_action")
+
         if self._sensor_key == "shadow_scorecard":
             card = _as_dict(state.shadow_scorecard)
             return sum(1 for v in card.values() if isinstance(v, dict) and v.get("verdict") == "ready") if card else None
@@ -320,6 +327,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return {**latest, "trend": _as_dict(health.get("trend")), "checked": health.get("checked")}
         if self._sensor_key == "shadow_scorecard":
             return _as_dict(state.shadow_scorecard)
+        if self._sensor_key == "mpc_plan":
+            return _as_dict(state.mpc_plan)
         if self._sensor_key == "pv_strings":
             return {k: v for k, v in _as_dict(state.pv_strings).items() if k != "share"}
         if self._sensor_key == "battery_runtime":

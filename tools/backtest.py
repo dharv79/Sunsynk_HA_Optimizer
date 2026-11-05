@@ -17,6 +17,7 @@ against actual solar. Read-only on the data dir; no Home Assistant needed.
     python3 tools/backtest.py /config/sunsynk_optimizer_data --target-offset -5
     python3 tools/backtest.py DATA_DIR --load-kw 0.6 --days 60
     python3 tools/backtest.py DATA_DIR --upgrade --pv-kwp 4.2   # phase 50 upgrade advisor
+    python3 tools/backtest.py DATA_DIR --planner mpc            # phase 69 MPC headroom
 
 Model (approximate, for comparing settings, not absolute figures):
 - The battery charges from the plan's start SOC to its target; the alternative
@@ -178,19 +179,35 @@ def forecast_error(records: list[dict[str, Any]], days: int | None = None) -> di
     }
 
 
+def _snapshot_days(records: list[dict[str, Any]], days: int | None) -> dict[str, dict[str, dict[str, Any]]]:
+    dates = _recent(sorted({r["date"] for r in records if r.get("type") == "meter_snapshot" and r.get("date")}), days)
+    out: dict[str, dict[str, dict[str, Any]]] = {date: {} for date in dates}
+    for rec in records:
+        if rec.get("type") == "meter_snapshot" and rec.get("date") in out and rec.get("time"):
+            out[rec["date"]].setdefault(rec["time"], rec)
+    return out
+
+
+def _band_prices(args: argparse.Namespace) -> dict[str, float]:
+    return {"offpeak": args.offpeak_p, "day": args.day_p, "peak": args.peak_p}
+
+
+def mpc_headroom(records: list[dict[str, Any]], args: argparse.Namespace) -> dict[str, Any]:
+    """Phase 69: metered 02:00-22:00 cost vs the MPC with hindsight, per logged day."""
+    per_day = {}
+    for date, snaps in _snapshot_days(records, args.days).items():
+        out = planning.mpc_backtest_day(snaps, _band_prices(args), [(0, 1440, args.export_p)], args.capacity, args.charge_kw)
+        if out["headroom_gbp"] is not None:
+            per_day[date] = out
+    total = round(sum(d["headroom_gbp"] for d in per_day.values()), 2)
+    return {"days": len(per_day), "headroom_gbp": total, "per_day": per_day}
+
+
 def upgrade(records: list[dict[str, Any]], args: argparse.Namespace) -> dict[str, Any]:
     """Phase 50: replay logged days with a bigger battery or more PV, at the given flat band prices."""
-    dates = _recent(sorted({r["date"] for r in records if r.get("type") == "meter_snapshot" and r.get("date")}), args.days)
-    days = {}
-    for date in dates:
-        snaps: dict[str, dict[str, Any]] = {}
-        for rec in records:
-            if rec.get("type") == "meter_snapshot" and rec.get("date") == date and rec.get("time"):
-                snaps.setdefault(rec["time"], rec)
-        days[date] = snaps
-    prices = {"offpeak": args.offpeak_p, "day": args.day_p, "peak": args.peak_p}
+    days = _snapshot_days(records, args.days)
     return planning.upgrade_advisor(
-        days, prices, [(0, 1440, args.export_p)], args.capacity, args.charge_kw,
+        days, _band_prices(args), [(0, 1440, args.export_p)], args.capacity, args.charge_kw,
         pv_kwp=args.pv_kwp, battery_price_per_kwh=args.battery_price, pv_price_per_kwp=args.pv_price,
     )
 
@@ -211,8 +228,13 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--day-p", type=float, default=27.77, help="--upgrade: day import p/kWh")
     parser.add_argument("--peak-p", type=float, default=38.88, help="--upgrade: peak import p/kWh")
     parser.add_argument("--export-p", type=float, default=15.0, help="--upgrade: flat export p/kWh")
+    parser.add_argument("--planner", choices=("rules", "mpc"), default="rules", help="mpc: phase 69 headroom report")
     args = parser.parse_args(argv)
     records = load_records(args.data_dir)
+    if args.planner == "mpc":
+        report = mpc_headroom(records, args)
+        print(json.dumps(report, indent=2))
+        return report
     if args.upgrade:
         report = upgrade(records, args)
         print(json.dumps(report, indent=2))

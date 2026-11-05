@@ -201,6 +201,10 @@ from .planning import (
     solar_is_spare,
     battery_value_summary,
     upgrade_advisor,
+    CHARGE_EFFICIENCY,
+    mpc_slots,
+    mpc_solve,
+    mpc_summary,
     upgrade_summary,
     no_battery_baseline,
     CAPACITY_HISTORY_DAYS,
@@ -2048,6 +2052,50 @@ class SunsynkOptimizer:
         await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         await self._guarded(self._async_daytime_import_check, "Daytime import check")
         await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
+        await self._guarded(self.async_run_mpc_shadow, "MPC shadow plan")
+
+    def _mpc_loads(self, cfg: dict[str, Any]) -> dict[str, float]:
+        """Per-band house load kW for the MPC: tonight's plan rate, the learned evening rate, the config day rate."""
+        overnight = self._plan_load_kw(cfg)
+        day = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
+        return {"overnight": overnight, "day": day, "evening": self._evening_load_kw or day}
+
+    async def async_run_mpc_shadow(self) -> None:
+        """Every 30 min: solve the 24 h MPC plan and log it next to the rule plan (phase 69); never pushes."""
+        cfg = self.cfg
+        now = dt_util.now()
+        soc = self._essential_state(self.battery_soc_entity)
+        if soc is None:
+            return
+        tomorrow_id = self._cfg_str(CONF_TOMORROW_FORECAST_SENSOR, cfg) or DEFAULT_TOMORROW_FORECAST_SENSOR
+        tomorrow_kwh = self._essential_state(tomorrow_id)
+        hourly_tomorrow = None
+        if tomorrow_kwh is not None:
+            hourly_tomorrow = self._synthetic_hourly_forecast(tomorrow_kwh) or {}
+        prices, _sources = self._tariff_prices(now.date())
+        loads = self._mpc_loads(cfg)
+        slots = mpc_slots(
+            now.hour * 60 + now.minute, prices, flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"),
+            self._hourly_or_synthetic_forecast(cfg, now), hourly_tomorrow, loads,
+        )
+        if slots is None:
+            return
+        offpeak = prices.get("offpeak")
+        capacity, charge_kw, wear = self._capacity_kwh(cfg), float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)), self._wear_pence()
+        terminal = None if offpeak is None else offpeak / CHARGE_EFFICIENCY
+        plan = await self.hass.async_add_executor_job(
+            lambda: mpc_solve(slots, soc, capacity, charge_kw, wear_pence=wear, terminal_pence=terminal)
+        )
+        if plan is None:
+            return
+        rule = self.coordinator.state.nightly_import_plan or {}
+        record = {
+            "date": now.date().isoformat(), "time": now.strftime("%H:%M"), "soc": soc, **mpc_summary(plan),
+            "rule_plan_date": rule.get("date"), "rule_target_soc": rule.get("target_soc"),
+            "loads_kw": loads, "tomorrow_solar_kwh": tomorrow_kwh,
+        }
+        await self.data_logger.async_log_mpc_plan(**record)
+        self.coordinator.update_state(touch=False, mpc_plan={**record, "slots": plan["slots"]})
 
     async def _async_track_pv_strings(self) -> None:
         """Tally each MPPT string's energy over bright mid-day hours (phase 49); no writes.

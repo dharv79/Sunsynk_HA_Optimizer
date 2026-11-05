@@ -4195,3 +4195,212 @@ def peak_cover_startup_retry_due(minutes: int, soc, outage_active: bool, attempt
     in_window = PEAK_COVER_HOLD_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES
     return in_window and (soc is None or outage_active) and attempts < PEAK_COVER_STARTUP_RETRIES
 
+
+
+# Receding-horizon MPC planner (phase 69). Shadow only: logged next to the rule-based plan, never pushed.
+MPC_SLOT_MINUTES = 30
+MPC_MAX_SLOTS = 48  # 24 h ahead
+MPC_EVENING_FROM_MINUTES = 16 * 60
+MPC_OVERNIGHT_FROM_MINUTES = 22 * 60
+MPC_DAY_FROM_MINUTES = 6 * 60
+
+
+def mpc_load_kw(minute: int, loads: dict[str, float]) -> float:
+    """House load kW at a minute of day: overnight 22:00-06:00, evening 16:00-22:00, else day."""
+    minute %= 1440
+    if minute >= MPC_OVERNIGHT_FROM_MINUTES or minute < MPC_DAY_FROM_MINUTES:
+        return loads["overnight"]
+    if minute >= MPC_EVENING_FROM_MINUTES:
+        return loads["evening"]
+    return loads["day"]
+
+
+def mpc_slots(
+    start_minute: int,
+    prices_pence: dict[str, float | None],
+    export_bands: list[tuple[int, int, float]],
+    hourly_today: dict[int, float] | None,
+    hourly_tomorrow: dict[int, float] | None,
+    loads: dict[str, float],
+    load_profile: list[float] | None = None,
+) -> list[dict[str, Any]] | None:
+    """Half-hour slots from `start_minute` (rounded down) for up to 24 h.
+
+    Solar per slot = half the forecast hour's kWh. Without tomorrow's forecast
+    the horizon stops at the next 06:00 (before tomorrow's solar matters).
+    `load_profile` (48 kWh values by slot of day, phase 71) overrides `loads`.
+    A slot with no import price → None (no plan); no export price exports for 0p.
+    """
+    start = (start_minute // MPC_SLOT_MINUTES) * MPC_SLOT_MINUTES
+    slots = []
+    for i in range(MPC_MAX_SLOTS):
+        absolute = start + i * MPC_SLOT_MINUTES
+        day, minute = divmod(absolute, 1440)
+        hourly = hourly_today if day == 0 else hourly_tomorrow
+        if day == 1 and hourly_tomorrow is None and minute >= MPC_DAY_FROM_MINUTES:
+            break
+        import_p = prices_pence.get(band_key_at(minute))
+        if import_p is None:
+            return None
+        export_p = price_at(export_bands, minute)
+        if load_profile is not None and len(load_profile) == 48:
+            load = float(load_profile[minute // MPC_SLOT_MINUTES])
+        else:
+            load = mpc_load_kw(minute, loads) * MPC_SLOT_MINUTES / 60
+        solar = float((hourly or {}).get(minute // 60, 0.0) or 0.0) / 2
+        slots.append({"minute": minute, "day": day, "import_p": import_p,
+                      "export_p": 0.0 if export_p is None else export_p, "load_kwh": load, "solar_kwh": solar})
+    return slots or None
+
+
+def _mpc_step(slot: dict[str, Any], energy: float, wear: float) -> tuple[float, float]:
+    """(pence, grid kWh) for one slot moving `energy` kWh into (+) or out of (−) the battery."""
+    net = slot["load_kwh"] - slot["solar_kwh"]
+    grid = net + (energy / CHARGE_EFFICIENCY if energy > 0 else energy * DISCHARGE_EFFICIENCY)
+    pence = grid * (slot["import_p"] if grid > 0 else slot["export_p"])
+    if energy > 0:
+        pence += energy / CHARGE_EFFICIENCY * wear
+    return pence, grid
+
+
+def mpc_solve(
+    slots: list[dict[str, Any]],
+    soc_pct: float,
+    capacity_kwh: float,
+    charge_kw: float,
+    discharge_kw: float | None = None,
+    floor_soc: int = BATTERY_LOW_SOC,
+    wear_pence: float | None = None,
+    terminal_pence: float | None = None,
+) -> dict[str, Any] | None:
+    """Cheapest SOC path over `slots` by dynamic programming on whole-% SOC.
+
+    Per slot the battery may move up to the charge/discharge rate; the grid
+    covers load − solar ± battery, priced at the slot's import or export
+    price, plus wear on charged kWh. SOC left at the end is worth
+    `terminal_pence` per kWh above the floor (default: none). Ties keep the
+    smaller move, so the plan holds unless moving pays. None without slots,
+    SOC or capacity.
+    """
+    if not slots or not _is_number(soc_pct) or capacity_kwh <= 0:
+        return None
+    wear, terminal = wear_pence or 0.0, terminal_pence or 0.0
+    start = int(round(max(0.0, min(100.0, soc_pct))))
+    low = min(floor_soc, start)
+    up = max(0, int(charge_kw * MPC_SLOT_MINUTES / 60 * CHARGE_EFFICIENCY / capacity_kwh * 100))
+    down = max(0, int((discharge_kw or charge_kw) * MPC_SLOT_MINUTES / 60 / DISCHARGE_EFFICIENCY / capacity_kwh * 100))
+    moves = sorted(range(-down, up + 1), key=abs)
+    states = range(low, 101)
+    kwh_per_pct = capacity_kwh / 100
+    value = {s: -max(0, s - floor_soc) * kwh_per_pct * terminal for s in states}
+    choice: list[dict[int, int]] = []
+    for slot in reversed(slots):
+        nxt, pick = {}, {}
+        for s in states:
+            best = best_move = None
+            for m in moves:
+                t = s + m
+                if t < low or t > 100 or (m < 0 and t < floor_soc):
+                    continue
+                pence, _ = _mpc_step(slot, m * kwh_per_pct, wear)
+                total = pence + value[t]
+                if best is None or total < best - 1e-9:
+                    best, best_move = total, m
+            nxt[s], pick[s] = best, best_move
+        value = nxt
+        choice.append(pick)
+    choice.reverse()
+    soc, path, cost = start, [], 0.0
+    for slot, pick in zip(slots, choice):
+        move = pick[soc]
+        pence, grid = _mpc_step(slot, move * kwh_per_pct, wear)
+        cost += pence
+        net = slot["load_kwh"] - slot["solar_kwh"]
+        tol = kwh_per_pct / 2  # one SOC step can overshoot the load by up to 1%
+        if move > 0 and grid > max(0.0, net) + tol:
+            action = "grid_charge"
+        elif move < 0 and grid < -tol:
+            action = "export"
+        elif move < 0:
+            action = "discharge"
+        elif move > 0:
+            action = "solar_charge"
+        else:
+            action = "hold"
+        soc += move
+        path.append({"time": f"{slot['minute'] // 60:02d}:{slot['minute'] % 60:02d}", "day": slot["day"],
+                     "soc": soc, "grid_kwh": round(grid, 2), "action": action})
+    return {"cost_gbp": round(cost / 100, 2), "start_soc": start, "slots": path}
+
+
+def mpc_summary(plan: dict[str, Any] | None) -> dict[str, Any]:
+    """The rule-comparable parts of an MPC plan: next action, SOC at the next 05:00, kWh by action."""
+    if not plan:
+        return {}
+    slots = plan["slots"]
+    soc_0500 = next((s["soc"] for s in slots if s["time"] == "04:30"), None)
+    grid_charge = sum(max(0.0, s["grid_kwh"]) for s in slots if s["action"] == "grid_charge")
+    offpeak_charge = sum(max(0.0, s["grid_kwh"]) for s in slots
+                         if s["action"] == "grid_charge" and "02:00" <= s["time"] < "05:00")
+    return {
+        "cost_gbp": plan["cost_gbp"],
+        "first_action": slots[0]["action"],
+        "first_soc": slots[0]["soc"],
+        "soc_0500": soc_0500,
+        "grid_charge_kwh": round(grid_charge, 2),
+        "offpeak_charge_kwh": round(offpeak_charge, 2),
+        "day_charge_kwh": round(grid_charge - offpeak_charge, 2),
+        "export_kwh": round(-sum(s["grid_kwh"] for s in slots if s["action"] == "export"), 2),
+        "horizon_slots": len(slots),
+    }
+
+
+def _segment_end(start: str) -> str:
+    """The `_BASELINE_SEGMENTS` end for a segment start."""
+    return next(end for s, end, _b, _sunny in _BASELINE_SEGMENTS if s == start)
+
+
+def mpc_backtest_day(
+    snapshots: dict[str, dict[str, Any]],
+    prices_pence: dict[str, float | None],
+    export_bands: list[tuple[int, int, float]],
+    capacity_kwh: float,
+    charge_kw: float,
+) -> dict[str, float | None]:
+    """02:00-22:00 of a logged day: metered cost vs the MPC with hindsight on the same load and solar.
+
+    Each segment's load and solar (as phase 37 derives them) are spread evenly
+    over its half-hours; both sides credit the 22:00 SOC above the floor at the
+    off-peak refill price, so the gap is the planner's headroom (an upper
+    bound: the MPC sees the day perfectly). No wear on either side. Negative when the meters
+    imply better battery efficiency than the model's. Missing data → all None.
+    """
+    empty = {"actual_gbp": None, "mpc_gbp": None, "headroom_gbp": None}
+    flows = _day_flows(snapshots, capacity_kwh)
+    soc_start, soc_end = _snap(snapshots, "02:00", "soc"), _snap(snapshots, "22:00", "soc")
+    offpeak = prices_pence.get("offpeak")
+    if flows is None or soc_start is None or soc_end is None or offpeak is None:
+        return empty
+    terminal = offpeak / CHARGE_EFFICIENCY
+    slots, actual = [], 0.0
+    ends = [hhmm_to_minutes(end) for _s, end, _b, _sunny in _BASELINE_SEGMENTS]
+    for (start, band, load, solar), end_min in zip(flows[1:], ends[1:]):
+        start_min = hhmm_to_minutes(start)
+        n = (end_min - start_min) // MPC_SLOT_MINUTES
+        import_p, export_p = prices_pence.get(band), price_at(export_bands, start_min)
+        if import_p is None:
+            return empty
+        for i in range(n):
+            slots.append({"minute": start_min + i * MPC_SLOT_MINUTES, "day": 0, "import_p": import_p,
+                          "export_p": 0.0 if export_p is None else export_p,
+                          "load_kwh": load / n, "solar_kwh": solar / n})
+        imp = _seg_value(snapshots, start, _segment_end(start), "grid_import_kwh")
+        exp = _seg_value(snapshots, start, _segment_end(start), "grid_export_kwh")
+        actual += imp * import_p - exp * (0.0 if export_p is None else export_p)
+    actual -= max(0.0, soc_end - BATTERY_LOW_SOC) / 100 * capacity_kwh * terminal
+    plan = mpc_solve(slots, soc_start, capacity_kwh, charge_kw, terminal_pence=terminal)
+    if plan is None:
+        return empty
+    mpc = plan["cost_gbp"] * 100 - max(0, plan["slots"][-1]["soc"] - BATTERY_LOW_SOC) / 100 * capacity_kwh * terminal
+    return {"actual_gbp": round(actual / 100, 2), "mpc_gbp": round(mpc / 100, 2),
+            "headroom_gbp": round((actual - mpc) / 100, 2)}
