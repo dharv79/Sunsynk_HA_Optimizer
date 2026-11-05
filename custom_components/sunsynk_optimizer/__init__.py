@@ -18,6 +18,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
+from .card_resource import async_register_card
 from .const import DOMAIN, PLATFORMS, REMOVED_ENTITY_KEYS
 from .coordinator import SunsynkOptimizerCoordinator
 
@@ -32,6 +33,7 @@ def _optimizer(hass: HomeAssistant):
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
+    await async_register_card(hass)
 
     async def _set_target(call: ServiceCall) -> None:
         await _optimizer(hass).async_service_override(soc=call.data["soc"])

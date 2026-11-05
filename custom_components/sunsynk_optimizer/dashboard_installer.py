@@ -10,8 +10,8 @@
 """Dynamic dashboard installer for Sunsynk Optimizer.
 
 Six views built from Home Assistant's own sections-view cards (heading badges,
-tiles, gauges, markdown, statistics), plus two HACS cards:
-custom:sunsynk-power-flow-card and custom:apexcharts-card (the attribute charts).
+tiles, gauges, markdown, statistics), plus the bundled custom:sunsynk-optimizer-flow-card
+and the HACS custom:apexcharts-card (the attribute charts).
 """
 
 from __future__ import annotations
@@ -229,75 +229,38 @@ _SPARE_SOLAR_POINTS = (
 # --------------------------------------------------------------------------- #
 
 
-def _power_flow_card(s) -> dict[str, Any]:
+def _power_flow_card(s, forecast_sensor: str) -> dict[str, Any]:
+    """The bundled flow card (www/sunsynk-optimizer-flow-card.js, served by card_resource)."""
     return {
-        "type": "custom:sunsynk-power-flow-card",
-        "cardstyle": "full",
-        "wide": False,
-        "large_font": False,
-        "show_solar": True,
-        "show_battery": True,
-        "show_grid": True,
-        "center_no_grid": True,
-        "card_height": "100%",
-        "card_width": "100%",
-        "decimal_places": 2,
-        "decimal_places_energy": 1,
-        "dynamic_line_width": True,
-        "max_line_width": 4,
-        "min_line_width": 1,
-        "inverter": {"modern": True, "autarky": "no", "model": "sunsynk", "colour": "#000000", "auto_scale": False},
-        "battery": {
-            "shutdown_soc": 20, "show_daily": True, "count": 1, "dynamic_colour": True, "linear_gradient": True,
-            "show_remaining_energy": False, "remaining_energy_to_shutdown": True, "charge_colour": "#ffd505",
-            "animate": True, "energy": 10, "auto_scale": False,
-        },
-        "battery2": {
-            "energy": 0, "shutdown_soc": 20, "soc_end_of_charge": 100, "invert_power": False, "hide_soc": False,
-            "colour": "#ffc0cb", "show_remaining_energy": True, "remaining_energy_to_shutdown": False,
-            "show_absolute": False, "auto_scale": True, "dynamic_colour": True, "linear_gradient": True,
-            "animate": True, "path_threshold": 100, "navigate": "", "invert_flow": False,
-        },
-        "solar": {"show_daily": True, "mppts": 2, "dynamic_colour": True, "pv1_name": "Ext", "pv2_name": "Main", "auto_scale": False},
-        "load": {
-            "show_daily": True, "dynamic_colour": True, "dynamic_icon": True, "invert_load": False, "show_aux": True,
-            "aux_type": "mdi:car-battery", "aux_name": "UPS", "max_colour": "#000000", "off_colour": "#000000",
-            "essential_name": "Home", "aux_dynamic_colour": True, "show_daily_aux": False,
-        },
-        "grid": {
-            "show_daily_buy": True, "show_daily_sell": True, "show_nonessential": False, "grid_name": "Octopus Energy",
-            "export_colour": "#54d11f", "grid_off_colour": "#000000", "no_grid_colour": "#000000",
-        },
+        "type": "custom:sunsynk-optimizer-flow-card",
+        "pv1_name": "Ext",
+        "pv2_name": "Main",
+        "reserve_soc": 20,
         "entities": {
-            "inverter_voltage_154": s("inverter_voltager_phase_0"),
-            "load_frequency_192": s("load_frequency"),
-            "inverter_current_164": s("inverter_current_phase_0"),
-            "inverter_power_175": s("load_total_power"),
-            "grid_connected_status_194": s("grid_status"),
-            "inverter_status_59": s("runstatus"),
-            "day_battery_charge_70": s("battery_etoday_charge"),
-            "day_battery_discharge_71": s("battery_etoday_discharge"),
-            "battery_voltage_183": s("battery_voltage"),
-            "battery_soc_184": s("battery_soc"),
-            "battery_power_190": s("battery_power"),
-            "battery_current_191": s("battery_current"),
-            "day_grid_import_76": s("grid_etoday_from"),
-            "day_grid_export_77": s("grid_etoday_to"),
-            "day_load_energy_84": s("load_daily_used"),
-            "essential_power": "sensor.sunsynk_essential_power",
-            "day_pv_energy_108": s("pv_etoday"),
-            "pv1_power_186": s("pv_mppt0_power"),
-            "pv2_power_187": s("pv_mppt1_power"),
-            "pv1_voltage_109": s("pv_mppt0_voltage"),
-            "pv1_current_110": s("pv_mppt0_current"),
-            "pv2_voltage_111": s("pv_mppt1_voltage"),
-            "pv2_current_112": s("pv_mppt1_current"),
-            "grid_ct_power_172": s("grid_pac"),
-            "aux_power_166": s("load_ups_total_power"),
-            "battery_temp_182": s("battery_temperature"),
-            "battery_rated_capacity": s("battery_capacity"),
-            "battery_status": s("battery_status"),
-            "grid_power_169": s("grid_pac"),
+            "pv1_power": s("pv_mppt0_power"),
+            "pv2_power": s("pv_mppt1_power"),
+            "load_power": s("load_total_power"),
+            "aux_power": s("load_ups_total_power"),
+            "grid_power": s("grid_pac"),
+            "grid_status": s("grid_status"),
+            "battery_soc": s("battery_soc"),
+            "battery_power": s("battery_power"),
+            "battery_capacity": "sensor.battery_capacity_estimate",
+            "solar_today": s("pv_etoday"),
+            "load_today": s("load_daily_used"),
+            "grid_import_today": s("grid_etoday_from"),
+            "grid_export_today": s("grid_etoday_to"),
+            "battery_charge_today": s("battery_etoday_charge"),
+            "battery_discharge_today": s("battery_etoday_discharge"),
+        },
+        "extras": {
+            "target_soc": "sensor.current_soc_target",
+            "import_window": "sensor.next_import_window",
+            "price_now": "sensor.cost_of_1_kwh_now",
+            "forecast": forecast_sensor,
+            "evening_export": "sensor.flux_2_action",
+            "grid_outage": "binary_sensor.grid_outage",
+            "inverter_fault": "binary_sensor.inverter_fault",
         },
     }
 
@@ -347,7 +310,7 @@ def _overview(s, forecast_sensor: str) -> dict[str, Any]:
             _badge("binary_sensor.evening_export_disabled", "orange", when_on=True),
         ]),
         *alerts,
-        _power_flow_card(s),
+        _power_flow_card(s, forecast_sensor),
     )
 
     tonight = _section(
@@ -843,7 +806,7 @@ def _controls(api_plant_id: str, serial: str, weather_entity: str, forecast_sens
         _md(
             f"| | |\n|:--|--:|\n| Plant ID | {api_plant_id} |\n| Inverter S/N | {serial} |\n"
             f"| Weather | {weather_entity} |\n| Solar forecast | {forecast_sensor} |\n\n"
-            "<small>Needs the HACS frontend cards **sunsynk-power-flow-card** and **apexcharts-card**."
+            "<small>Needs the HACS frontend card **apexcharts-card** (the power-flow card ships with the integration)."
             " Press **Update dashboard** after an upgrade that changes the layout.</small>",
             macros=False,
         ),
@@ -923,7 +886,7 @@ lovelace:
       icon: mdi:battery-heart-variant
       show_in_sidebar: true
 
-The dashboard needs two HACS frontend cards: sunsynk-power-flow-card and apexcharts-card.
+The dashboard needs one HACS frontend card, apexcharts-card; the power-flow card ships with the integration.
 
 Dashboard file written to:
 {dst}
