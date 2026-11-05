@@ -4,7 +4,6 @@
  * Missing / unavailable values show "—" and stop the flow; they are never treated as 0. */
 (() => {
   const TAG = "sunsynk-optimizer-flow-card";
-  if (customElements.get(TAG)) return;
 
   const IDLE_W = 15; // below this a flow is considered idle
   const NODE = {
@@ -408,11 +407,18 @@
     }
   }
 
-  customElements.define(TAG, SunsynkOptimizerFlowCard);
-  window.customCards = window.customCards || [];
-  window.customCards.push({
-    type: TAG,
-    name: "Sunsynk Optimizer flow card",
-    description: "Animated power flow with the optimizer's plan, price and forecast.",
-  });
+  // The frontend swaps in a scoped custom-element registry while it boots. An element defined
+  // before that is invisible to it and the card renders "Configuration error" (a load-order race),
+  // so define once the app shell exists. The timeout covers pages without <home-assistant>.
+  const define = () => {
+    if (customElements.get(TAG)) return;
+    customElements.define(TAG, SunsynkOptimizerFlowCard);
+    window.customCards = window.customCards || [];
+    window.customCards.push({
+      type: TAG,
+      name: "Sunsynk Optimizer flow card",
+      description: "Animated power flow with the optimizer's plan, price and forecast.",
+    });
+  };
+  Promise.race([customElements.whenDefined("home-assistant"), new Promise((r) => setTimeout(r, 10000))]).then(define);
 })();

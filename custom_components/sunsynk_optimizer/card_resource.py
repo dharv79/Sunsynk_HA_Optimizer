@@ -1,4 +1,4 @@
-"""Serve the bundled Lovelace card so the generated dashboard needs no manual resource."""
+"""Serve the bundled Lovelace cards so the generated dashboard needs no manual resource."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from pathlib import Path
 
 _LOGGER = logging.getLogger(__name__)
 
-CARD_FILE = "sunsynk-optimizer-flow-card.js"
-CARD_URL = "/sunsynk_optimizer_static/" + CARD_FILE
+STATIC_URL = "/sunsynk_optimizer_static"
+CARD_FILES = ("sunsynk-optimizer-flow-card.js", "sunsynk-optimizer-day-chart.js")
 
 
-def card_url(version: str) -> str:
+def card_url(file: str, version: str) -> str:
     """Versioned URL so a new release is never served from the browser cache."""
-    return f"{CARD_URL}?v={version}"
+    return f"{STATIC_URL}/{file}?v={version}"
 
 
 def _version() -> str:
@@ -25,14 +25,15 @@ def _version() -> str:
 
 
 async def async_register_card(hass) -> None:
-    """Expose www/<card>.js and load it in every dashboard. Never raises: the card is cosmetic."""
+    """Expose www/ and load each card in every dashboard. Never raises: the cards are cosmetic."""
     try:
         from homeassistant.components.frontend import add_extra_js_url
         from homeassistant.components.http import StaticPathConfig
 
-        path = Path(__file__).parent / "www" / CARD_FILE
-        await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), False)])
+        www = Path(__file__).parent / "www"
+        await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(www), False)])
         version = await hass.async_add_executor_job(_version)  # file read: keep it off the event loop
-        add_extra_js_url(hass, card_url(version))
+        for file in CARD_FILES:
+            add_extra_js_url(hass, card_url(file, version))
     except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("Could not register the Sunsynk Optimizer flow card: %s", err)
+        _LOGGER.warning("Could not register the Sunsynk Optimizer cards: %s", err)

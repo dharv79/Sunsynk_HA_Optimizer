@@ -38,7 +38,8 @@ def test_dashboard_has_expected_top_level_shape(dashboard):
     assert dashboard["title"]
     views = dashboard["views"]
     assert len(views) >= 6
-    assert all(v["type"] == "sections" and v["sections"] for v in views)
+    assert all(v["type"] == "sections" and v["sections"] for v in views if v["path"] != "day-chart")
+    assert next(v for v in views if v["path"] == "day-chart")["type"] == "panel"
     paths = [v["path"] for v in views]
     assert len(paths) == len(set(paths))
     # Existing sidebar links and bookmarks open the first view.
@@ -164,7 +165,7 @@ def test_dashboard_surfaces_optimizer_entities(dashboard):
 
 def test_only_documented_custom_cards(dashboard):
     custom = {c["type"] for c in _cards(dashboard) if str(c["type"]).startswith("custom:")}
-    assert custom == {"custom:sunsynk-optimizer-flow-card", "custom:apexcharts-card"}
+    assert custom == {"custom:sunsynk-optimizer-flow-card", "custom:sunsynk-optimizer-day-chart", "custom:apexcharts-card"}
 
 
 def test_actions_use_perform_action_and_confirm_writes(dashboard):
@@ -252,3 +253,34 @@ def test_free_event_times_are_formatted_not_raw_iso(dashboard):
 
     walk(dashboard)
     assert rows and all(row.get("format") == "datetime" for row in rows)
+
+
+def _day_chart(dashboard):
+    return next(c for c in _cards(dashboard) if c["type"] == "custom:sunsynk-optimizer-day-chart")
+
+
+def test_day_chart_tab_follows_overview_with_real_entities(dashboard):
+    assert [v["path"] for v in dashboard["views"]][:2] == ["sunsynk-optimizer", "day-chart"]
+    ents = _day_chart(dashboard)["entities"]
+    assert ents["grid_power"].endswith("_grid_pac") and ents["battery_soc"].endswith("_battery_soc")
+    assert ents["solar_today"].endswith("_pv_etoday")
+
+
+def test_day_chart_file_defines_element_and_reads_every_key(dashboard):
+    from pathlib import Path
+
+    js = (Path(__file__).parent.parent / "custom_components" / "sunsynk_optimizer" / "www"
+          / "sunsynk-optimizer-day-chart.js").read_text("utf-8")
+    assert 'const TAG = "sunsynk-optimizer-day-chart"' in js and "customElements.define(TAG" in js
+    assert "history/history_during_period" in js and "recorder/statistics_during_period" in js
+    for key in _day_chart(dashboard)["entities"]:
+        assert f"e.{key}" in js or f'"{key}"' in js, key
+
+
+def test_card_resource_serves_every_bundled_card():
+    from pathlib import Path
+
+    www = Path(__file__).parent.parent / "custom_components" / "sunsynk_optimizer" / "www"
+    src = (www.parent / "card_resource.py").read_text("utf-8")
+    for js in www.glob("*.js"):
+        assert f'"{js.name}"' in src, js.name
