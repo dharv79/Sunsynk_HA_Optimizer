@@ -79,3 +79,49 @@ def test_nothing_mutates_the_cached_config():
             if node.func.attr in _MUTATORS and is_cfg(node.func.value):
                 bad.append(node.lineno)
     assert bad == []
+
+
+# HA timer helper → position of its callback argument.
+_TIMER_HELPERS = {
+    "async_call_later": 2, "async_track_point_in_time": 1, "async_track_point_in_utc_time": 1,
+    "async_track_time_change": 1, "async_track_time_interval": 1, "async_track_state_change_event": 2,
+}
+
+
+def test_timer_callbacks_are_coroutines():
+    """A plain lambda or sync method given to an HA timer runs in a worker thread, so update_state there
+    writes entity state off the event loop (HA raises). Every callback must be an async def (or a partial of one)."""
+    cls = _class(ast.parse(OPTIMIZER.read_text()), "SunsynkOptimizer")
+    async_methods = {n.name for n in cls.body if isinstance(n, ast.AsyncFunctionDef)}
+    tree = ast.parse(OPTIMIZER.read_text())
+    local_async = {n.name for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)}
+    bad = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _TIMER_HELPERS):
+            continue
+        pos = _TIMER_HELPERS[node.func.id]
+        cb = node.args[pos] if len(node.args) > pos else None
+        if cb is None:
+            continue
+        if isinstance(cb, ast.Call) and isinstance(cb.func, ast.Name) and cb.func.id == "partial":
+            cb = cb.args[0]
+        if isinstance(cb, ast.Attribute) and isinstance(cb.value, ast.Name) and cb.value.id == "self":
+            ok = cb.attr in async_methods
+        elif isinstance(cb, ast.Name) and cb.id == "callback":
+            ok = True  # the daily schedule table, checked below
+        elif isinstance(cb, ast.Name):
+            ok = cb.id in local_async
+        else:
+            ok = False
+        if not ok:
+            bad.append(node.lineno)
+    assert bad == []
+    daily = next(
+        n.value for n in ast.walk(tree)
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "daily" for t in n.targets)
+    )
+    scheduled = {
+        n.attr for n in ast.walk(daily)
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "self"
+    }
+    assert scheduled and scheduled <= async_methods

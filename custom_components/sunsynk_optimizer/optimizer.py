@@ -556,7 +556,7 @@ class SunsynkOptimizer:
 
         self.coordinator.update_state(operation_mode=self.operation_mode)
         self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
-        self.unsubs.append(async_call_later(self.hass, 90, lambda _now: self._refresh_spare_solar()))
+        self.unsubs.append(async_call_later(self.hass, 90, self._async_spare_solar_startup))
         if capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
             self.unsubs.append(async_call_later(self.hass, 120, self._async_initial_capacity_estimate))
 
@@ -3147,6 +3147,10 @@ class SunsynkOptimizer:
         result["date"] = now.date().isoformat()
         self.coordinator.update_state(spare_solar=result)
         return result
+
+    async def _async_spare_solar_startup(self, _now) -> None:
+        """90 s after startup: first spare-solar estimate. A coroutine so HA runs it on the event loop."""
+        self._refresh_spare_solar()
 
     async def _async_spare_solar_morning(self, _now) -> None:
         """06:05: refresh the estimate and, if the option is set, tell the user when to run appliances."""
