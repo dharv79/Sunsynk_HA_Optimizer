@@ -18,7 +18,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 |---|---|
 | `__init__.py` | Entry setup: builds coordinator → optimizer, forwards platforms |
 | `coordinator.py` | `OptimizerState` (single source of truth), `Store` persistence, `update_state`, 13-month log pruning |
-| `optimizer.py` | Business logic + HA listeners (01:55, 02:20, 06:00, 06:10 tariff check, 18:00 Sun, 22:00, 02/05/16/19:00 meter snapshots, 16:00 peak export, 30-min (incl. daytime import alert), 2-h drift check, SOC change) |
+| `optimizer.py` | Business logic + HA listeners (01:55, 02:20, 06:00, 06:05 spare solar, 06:10 tariff check, 06:20 data audit, 18:00 full-charge day + monthly reports, 22:00, 22:05 Agile shadow, 02/05/16/19:00 meter snapshots, 16:00 peak export + 17/18:00 re-check, 30-min (incl. daytime import alert), 2-h drift check, SOC change, grid voltage change) |
 | `planning.py` | HA-free planning maths (target SOC tree, charge rate, Flux 1 window, scoring, cost helpers) |
 | `data_logger.py` | Monthly JSONL logging, pairing, adaptive `compute_*` corrections |
 | `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST, inverter settings read/write |
@@ -26,6 +26,8 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 | `octopus_public.py` | Octopus public API (no key): historic Agile rates for the tariff comparison |
 | `sensor.py` / `binary_sensor.py` / `button.py` / `switch.py` / `datetime.py` / `number.py` | Entities (event-driven, no polling) |
 | `dashboard_installer.py` | Generates Lovelace YAML |
+| `card_resource.py` / `www/*.js` | Serves and registers the bundled flow card and day chart (no HACS card needed) |
+| `entity.py` / `diagnostics.py` / `services.yaml` | Shared device info; HA diagnostics download; service action definitions |
 | `tools/backtest.py` (repo root) | Offline HA-free replay of logged nights with alternative parameters |
 | `config_flow.py` / `const.py` | Multi-step config/options flow; constants and defaults |
 
