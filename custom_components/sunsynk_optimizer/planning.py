@@ -3774,6 +3774,15 @@ def string_ratio_anomaly(history: list[float], today: float | None) -> dict[str,
     }
 
 
+PV_STRING_ATTRIBUTE_KEYS = ("date", "median", "streak", "weaker", "mppt0_kwh", "mppt1_kwh")
+
+
+def pv_string_attributes(pv_strings: Any) -> dict[str, Any]:
+    """PV string sensor attributes: every key always present (None until the first 22:00 capture)."""
+    data = pv_strings if isinstance(pv_strings, dict) else {}
+    return {k: data.get(k) for k in PV_STRING_ATTRIBUTE_KEYS}
+
+
 def string_streak(prev_streak: int, prev_weaker: str | None, result: dict[str, Any] | None) -> tuple[int, str | None]:
     """Consecutive anomalous days on the same weak string. A normal day resets; an unknown day holds."""
     if result is None:

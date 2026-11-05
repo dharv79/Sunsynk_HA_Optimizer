@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .data_logger import DataLogger
 from .entity import optimizer_device_info
-from .planning import KPI_SENSORS, explain_plan, free_event_attributes, kpi_sensor_values, upgrade_options
+from .planning import KPI_SENSORS, explain_plan, free_event_attributes, kpi_sensor_values, pv_string_attributes, upgrade_options
 
 
 _ADAPTIVE_THRESHOLDS = {
@@ -392,7 +392,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return {**_as_dict(plan.get("forecast_quantiles")), "date": plan.get("date"),
                     "raw_forecast_kwh": plan.get("raw_forecast_kwh")}
         if self._sensor_key == "pv_strings":
-            return {k: v for k, v in _as_dict(state.pv_strings).items() if k != "share"}
+            return pv_string_attributes(state.pv_strings)
         if self._sensor_key == "battery_runtime":
             return {k: v for k, v in _as_dict(state.battery_runtime).items() if k != "hours"}
         if self._sensor_key == "data_health":
