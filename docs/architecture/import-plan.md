@@ -288,11 +288,14 @@ The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.me
 ## Native time-of-use slots in shadow (05/11/2026, phase 73)
 
 **Design.** After each 01:55 plan (not the startup plan or the dry run), `async_run_tou_shadow` maps the plan onto the inverter's six system-mode slots with `planning.tou_slots_from_plan`. In a slot the battery discharges no lower than the slot's SOC, and with grid charge on it charges from the grid up to that SOC. The mapping:
-- 00:00 → the evening reserve.
+- 00:00 → the 25% floor (the battery runs the house until the charge).
 - Flux 1 start → target SOC with grid charge on.
-- Flux 1 end → the 25% floor.
+- Flux 1 end → the floor.
 - An optional peak hold (start, SOC) between the charge end and 16:00, for a later peak-cover hand-off.
-- 16:00 → the evening reserve.
+- 16:00 → the evening reserve (the SOC to hold at 19:00).
+- 19:00 → the floor (the reserve then carries the house to 02:00).
+
+The first version (05/11/2026) mapped 00:00 to the reserve and had no 19:00 slot. That would have blocked evening and pre-charge discharge, importing at the day rate. The smoke run caught it before any live use.
 
 Equal neighbours merge, and the longest slot is split on the half-hour until there are exactly six. The run then reads the inverter's settings (read-only, so it also runs in monitor mode) and parses `sellTimeN` / `capN` / `timeNon` with `tou_slots_from_settings` (None if any slot is missing or unreadable). It logs a `tou_shadow` record with the proposed slots, the inverter's slots, `readable`, and the per-slot `diffs` and their count, and stores it in `state.tou_shadow`. `tou_settings_payload` builds the write payload for a later live mode; nothing calls it yet.
 

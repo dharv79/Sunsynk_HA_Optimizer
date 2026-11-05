@@ -4773,6 +4773,7 @@ def dynamic_tariff_summary(
 # would need are logged next to what the inverter holds; nothing is written.
 TOU_SLOT_COUNT = 6
 TOU_PEAK_FROM_MINUTES = 16 * 60
+TOU_PEAK_TO_MINUTES = 19 * 60
 TOU_SLOT_STEP_MINUTES = 30
 
 
@@ -4804,10 +4805,12 @@ def tou_slots_from_plan(
 
     Each slot runs from its start to the next one's. In a slot the battery
     discharges no lower than its SOC, and with grid charge on it charges
-    from the grid up to that SOC. Mapping: midnight → the evening reserve;
-    the charge window → target SOC with grid charge on; after it → the floor
-    (the day uses the battery); an optional peak hold (start, SOC) from
-    phase 59; 16:00 → the evening reserve. Neighbouring slots with the same
+    from the grid up to that SOC. Mapping: midnight → the floor (the battery
+    runs the house to the charge); the charge window → target SOC with grid
+    charge on; after it → the floor (the day uses the battery); an optional
+    peak hold (start, SOC) from phase 59; 16:00 → the evening reserve (the
+    SOC to hold at 19:00); 19:00 → the floor (the reserve then carries the
+    house to 02:00). Neighbouring slots with the same
     settings merge, then the longest slot is split on the half-hour until
     there are exactly six (the inverter always has six). None when the
     charge window or target is missing.
@@ -4817,10 +4820,11 @@ def tou_slots_from_plan(
         return None
     reserve = int(evening_reserve_soc) if _is_number(evening_reserve_soc) else floor_soc
     points: dict[int, tuple[int, bool]] = {
-        0: (reserve, False),
+        0: (floor_soc, False),
         start: (int(round(target_soc)), True),
         end: (floor_soc, False),
         TOU_PEAK_FROM_MINUTES: (reserve, False),
+        TOU_PEAK_TO_MINUTES: (floor_soc, False),
     }
     if peak_hold is not None:
         hold_at = hhmm_to_minutes(peak_hold[0] or "")
@@ -5039,7 +5043,8 @@ def heat_pump_scenario(
         "hp_price_p": hp_price_pence,
         "confidence": "low",
         "assumptions": f"COP {HEAT_PUMP_COP_RANGE[0]:g}–{HEAT_PUMP_COP_RANGE[1]:g} by outside temp, "
-                       f"boiler {BOILER_EFFICIENCY:.0%}, all gas treated as heat, gas standing charge dropped",
+                       f"boiler {BOILER_EFFICIENCY:.0%}, all gas treated as heat, gas standing charge dropped, "
+                       "Cosy all-day mean price (no shifting into cheap windows)",
     }
 
 
@@ -5074,9 +5079,13 @@ def electrification_summary(report: dict[str, Any]) -> list[str]:
     hp = report.get("heat_pump")
     if hp:
         payback = f"; payback ~{hp['payback_years']:g} yrs" if hp.get("payback_years") else ""
+        if hp["saving_gbp"] >= 0:
+            outcome = f"saved £{hp['saving_gbp']:.2f} over {hp['days']} days (~£{hp['annual_gbp']:.0f}/yr"
+        else:
+            outcome = f"cost £{-hp['saving_gbp']:.2f} more over {hp['days']} days (~£{-hp['annual_gbp']:.0f}/yr more"
         lines.append(
-            f"• Heat pump on Cosy instead of gas: saved £{hp['saving_gbp']:.2f} over {hp['days']} days "
-            f"(~£{hp['annual_gbp']:.0f}/yr at the logged season's rate{payback}; low confidence: {hp['assumptions']})"
+            f"• Heat pump on Cosy instead of gas: {outcome} at the logged season's rate{payback}; "
+            f"low confidence: {hp['assumptions']})"
         )
     limit = report.get("export_limit")
     if limit:

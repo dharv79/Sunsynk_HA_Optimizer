@@ -75,3 +75,5 @@ def test_summary_lines():
     lines = planning.electrification_summary(report)
     assert len(lines) == 2 and "Heat pump" in lines[0] and "low confidence" in lines[0]
     assert planning.electrification_summary({}) == []
+    worse = planning.electrification_summary({"heat_pump": planning.heat_pump_scenario(_days(gas=0.3), 6.0, 200.0)})
+    assert "more" in worse[0] and "£-" not in worse[0]
