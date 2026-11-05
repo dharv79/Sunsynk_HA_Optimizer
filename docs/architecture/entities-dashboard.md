@@ -28,7 +28,7 @@ Six sections views, one builder per view (`_overview`, `_plan`, `_energy`, `_sys
 - **Shadow lab**: scorecard, MPC SOC/grid chart, Agile vs Flux, TOU slot check, flex event offer, upgrade advisor.
 - **Controls**: away mode, test plan, one-night full charge / skip (`sunsynk_optimizer.*` actions, always with a confirmation), reset, update dashboard, free event entry, install details.
 
-Attribute values are read in markdown through the `_MACROS` Jinja helpers `a()` / `gbp()`, which print "—" for a missing value (never 0). Entities-card attribute rows are only used for always-present attributes (Spook). Config entity ids interpolated into templates pass `_safe_entity`. Charts of attribute arrays (MPC path, load profile, spare solar by hour) use `custom:apexcharts-card` `data_generator`; the only custom cards are it and `custom:sunsynk-power-flow-card` (`test_only_documented_custom_cards`).
+Attribute values are read in markdown through the `_MACROS` Jinja helpers `a()` / `gbp()`, which print "—" for a missing value (never 0). Entities-card attribute rows are only used for always-present attributes (Spook). Config entity ids interpolated into templates pass `_safe_entity`. Charts of attribute arrays (MPC path, load profile, spare solar by hour) use `custom:apexcharts-card` `data_generator`; the only custom cards are it and the bundled `custom:sunsynk-optimizer-flow-card` (`test_only_documented_custom_cards`).
 
 New diagnostic sensors for the dashboard: `sensor.tou_shadow` (state = slot differences, attributes the phase 73 record), `sensor.flex_event_offer` (state = decision, attributes the phase 77 record) and `sensor.upgrade_advisor` (GBP, best annual saving; attributes `options` from `planning.upgrade_options`, best first). Fixed with it: phase 76 had left `sensor.mpc_plan`'s state as its whole dict and `sensor.dynamic_tariff_shadow` unknown; `test_sensor_states_are_scalars_and_keys_unique` guards both.
 
@@ -107,3 +107,10 @@ The generated file was loaded in HA 2025.10 with the two HACS cards and sample s
 
 All six views then rendered with no error cards, no console errors and no horizontal scroll at both widths. Markdown tables, the charts and the confirmation-guarded actions were checked visually.
 
+
+## Own power-flow card (05/11/2026, phase 79)
+
+- `www/sunsynk-optimizer-flow-card.js` replaces the HACS slipx06 card. `card_resource.async_register_card` (called from `async_setup`) serves it at `/sunsynk_optimizer_static/…js?v=<manifest version>` and loads it on every dashboard with `add_extra_js_url`, so no Lovelace resource is needed. It never raises: a failure only logs a warning. Manifest `dependencies` now list `http` and `frontend`.
+- The card is built once and patched in place on each state change, so the flow animation never restarts. Sign conventions: `grid_pac` > 0 import, < 0 export; `battery_power` > 0 discharge, < 0 charge (`invert_battery`/`invert_grid` flip them). Missing or unavailable readings show "—" and stop the flow, never 0.
+- Config written by `dashboard_installer._power_flow_card`: `entities` (PV1/2, load, UPS, grid, SOC, battery power, capacity estimate, daily meters) and `extras` (tonight's target SOC, charge window, cost of 1 kWh now, forecast, evening export, outage and fault flags). Hub ring = share of the home's load not coming from the grid; battery bar carries a marker at tonight's target and an ETA to full or to the reserve (needs `battery_kwh` or the capacity estimate).
+- Tests: `test_flow_card_*` in `tests/test_dashboard.py` (config keys all read by the JS, element registered). Real-HA check: Chromium at 1440 and 390 px.

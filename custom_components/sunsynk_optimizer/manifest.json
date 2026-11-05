@@ -5,7 +5,7 @@
   "version": "1.0.12b47",
   "documentation": "https://github.com/dharv79/Sunsynk_HA_Optimizer",
   "issue_tracker": "https://github.com/dharv79/Sunsynk_HA_Optimizer/issues",
-  "dependencies": [],
+  "dependencies": ["http", "frontend"],
   "codeowners": [
     "@dharv79"
   ],

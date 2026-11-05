@@ -45,8 +45,7 @@ Install and configure these first.
 1. **[SolarSynkV3](https://github.com/martinville/solarsynkv3)**: inverter sensors, such as `sensor.solarsynkv3_<inverter_serial>_battery_soc`, `_grid_pac`, `_pv_mppt0_power`, `_pv_mppt1_power`, `_pv_etoday` and the daily load and grid meters. Setup checks that `battery_soc` and `grid_pac` exist.
 2. **Forecast.Solar**: daily forecast, for example `sensor.energy_production_today`. A tomorrow forecast sensor and an hourly forecast are optional.
 3. **A weather entity**, for example `weather.forecast_home`, used for full-charge day scoring.
-4. **[Sunsynk Power Flow Card](https://github.com/slipx06/sunsynk-power-flow-card)**: needed by the generated dashboard.
-5. **[ApexCharts Card](https://github.com/RomRider/apexcharts-card)** (HACS frontend): needed by the generated dashboard's charts.
+4. **[ApexCharts Card](https://github.com/RomRider/apexcharts-card)** (HACS frontend): needed by the generated dashboard's charts. The power-flow card is bundled with the integration, so there is nothing else to install.
 
 Optional: **[Home Assistant Octopus Energy](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy)** for real costs, tariff rates and the tariff comparison.
 

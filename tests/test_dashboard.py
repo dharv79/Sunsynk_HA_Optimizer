@@ -164,7 +164,7 @@ def test_dashboard_surfaces_optimizer_entities(dashboard):
 
 def test_only_documented_custom_cards(dashboard):
     custom = {c["type"] for c in _cards(dashboard) if str(c["type"]).startswith("custom:")}
-    assert custom == {"custom:sunsynk-power-flow-card", "custom:apexcharts-card"}
+    assert custom == {"custom:sunsynk-optimizer-flow-card", "custom:apexcharts-card"}
 
 
 def test_actions_use_perform_action_and_confirm_writes(dashboard):
@@ -201,3 +201,32 @@ def test_apexcharts_cards_have_no_unknown_keys(dashboard):
     assert len(charts) == 3
     for chart in charts:
         assert set(chart) <= allowed, set(chart) - allowed
+
+
+def _flow_card(dashboard):
+    return next(c for c in _cards(dashboard) if c["type"] == "custom:sunsynk-optimizer-flow-card")
+
+
+def test_flow_card_config_points_at_real_entities(dashboard):
+    card = _flow_card(dashboard)
+    ents = card["entities"]
+    assert ents["grid_power"].endswith("_grid_pac") and ents["battery_soc"].endswith("_battery_soc")
+    assert card["extras"]["target_soc"] == "sensor.current_soc_target"
+    assert card["extras"]["forecast"] == "sensor.energy_production_today"
+
+
+def test_flow_card_file_defines_element_and_registers():
+    from pathlib import Path
+
+    js = (Path(__file__).parent.parent / "custom_components" / "sunsynk_optimizer" / "www"
+          / "sunsynk-optimizer-flow-card.js").read_text("utf-8")
+    assert 'const TAG = "sunsynk-optimizer-flow-card"' in js and "customElements.define(TAG" in js
+    assert "window.customCards" in js
+    # Every config key the generator writes is read by the card.
+    for key in _flow_card_keys():
+        assert f"e.{key}" in js or f"x.{key}" in js or f"_cfg.{key}" in js, key
+
+
+def _flow_card_keys():
+    card = _flow_card(conftest._dashboard._build_dashboard({"inverter_serial": "1", "plant_id": "2"}))
+    return [k for sect in ("entities", "extras") for k in card[sect]]
