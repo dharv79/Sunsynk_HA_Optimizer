@@ -325,7 +325,7 @@ While selling or charging, the event holds both Flux slots: the import plan, tri
 
 ## 10. Learning from the logs
 
-Records are JSON lines in `{config}/sunsynk_optimizer_data/YYYY-MM.jsonl`, kept for 13 months. Daily record types keep the first record per date. Days are paired by date (plan + actuals, plus morning state if present). Away days are learned separately from home days.
+Records are JSON lines in `{config}/sunsynk_optimizer_data/YYYY-MM.jsonl`, kept for 13 months. Most daily record types keep only the first record per date. The daily cost record is filled in as late Octopus readings arrive, and the newest copy is used. Days are paired by date (plan + actuals, plus morning state if present). Away days are learned separately from home days.
 
 | Correction | Needs | How |
 |---|---|---|
