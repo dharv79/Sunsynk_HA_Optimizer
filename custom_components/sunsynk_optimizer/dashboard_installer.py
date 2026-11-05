@@ -270,6 +270,30 @@ def _power_flow_card(s, forecast_sensor: str) -> dict[str, Any]:
     }
 
 
+def _day_chart(s) -> dict[str, Any]:
+    """Day chart tab: the bundled www/sunsynk-optimizer-day-chart.js, one day at a time with ◀ / ▶."""
+    card = {
+        "type": "custom:sunsynk-optimizer-day-chart",
+        "title": "Power by day",
+        "entities": {
+            "pv1_power": s("pv_mppt0_power"),
+            "pv2_power": s("pv_mppt1_power"),
+            "battery_power": s("battery_power"),
+            "load_power": s("load_total_power"),
+            "grid_power": s("grid_pac"),
+            "battery_soc": s("battery_soc"),
+            "solar_today": s("pv_etoday"),
+            "load_today": s("load_daily_used"),
+            "grid_import_today": s("grid_etoday_from"),
+            "grid_export_today": s("grid_etoday_to"),
+            "battery_charge_today": s("battery_etoday_charge"),
+            "battery_discharge_today": s("battery_etoday_discharge"),
+        },
+    }
+    # Panel view: a sections view with one section stays one column wide (~500 px) on desktop.
+    return {"title": "Day chart", "path": "day-chart", "icon": "mdi:chart-timeline-variant", "type": "panel", "cards": [card]}
+
+
 _ALERTS = (
     ("binary_sensor.grid_outage", "error", "Grid outage",
      "Running on the battery since {{ state_attr('binary_sensor.grid_outage', 'start') or 'just now' }}"
@@ -844,6 +868,7 @@ def _build_dashboard(config: dict) -> dict:
         "title": "Sunsynk Optimizer",
         "views": [
             _overview(s, forecast_sensor),
+            _day_chart(s),
             _plan(s, forecast_sensor, avg_consumption_kw),
             _energy(s),
             _system(s),
