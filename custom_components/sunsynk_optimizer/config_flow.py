@@ -81,6 +81,8 @@ from .const import (
     CONF_OCTOPUS_IMPORT_COST_SENSOR,
     CONF_OCTOPUS_EXPORT_INCOME_SENSOR,
     CONF_OCTOPUS_GAS_COST_SENSOR,
+    CONF_BILL_START_DAY,
+    DEFAULT_BILL_START_DAY,
     CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR,
     CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR,
     CONF_TARIFF_RATE_OVERRIDES,
@@ -354,6 +356,9 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Optional(CONF_OCTOPUS_IMPORT_COST_SENSOR, default=values.get(CONF_OCTOPUS_IMPORT_COST_SENSOR, "")): selector.TextSelector(),
             vol.Optional(CONF_OCTOPUS_EXPORT_INCOME_SENSOR, default=values.get(CONF_OCTOPUS_EXPORT_INCOME_SENSOR, "")): selector.TextSelector(),
             vol.Optional(CONF_OCTOPUS_GAS_COST_SENSOR, default=values.get(CONF_OCTOPUS_GAS_COST_SENSOR, "")): selector.TextSelector(),
+            vol.Optional(CONF_BILL_START_DAY, default=values.get(CONF_BILL_START_DAY, DEFAULT_BILL_START_DAY)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=28, step=1, mode=selector.NumberSelectorMode.BOX)
+            ),
             vol.Optional(CONF_OCTOPUS_IMPORT_RATES_ENTITY, default=values.get(CONF_OCTOPUS_IMPORT_RATES_ENTITY, "")): selector.TextSelector(),
             vol.Optional(CONF_OCTOPUS_EXPORT_RATES_ENTITY, default=values.get(CONF_OCTOPUS_EXPORT_RATES_ENTITY, "")): selector.TextSelector(),
             vol.Optional(CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR, default=values.get(CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR, "")): selector.TextSelector(),

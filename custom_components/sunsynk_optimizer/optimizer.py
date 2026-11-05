@@ -16,7 +16,7 @@ import json
 import logging
 import os
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import date as date_cls, datetime, timedelta
 from functools import partial
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
@@ -93,6 +93,8 @@ from .const import (
     CONF_OCTOPUS_IMPORT_COST_SENSOR,
     CONF_OCTOPUS_EXPORT_INCOME_SENSOR,
     CONF_OCTOPUS_GAS_COST_SENSOR,
+    CONF_BILL_START_DAY,
+    DEFAULT_BILL_START_DAY,
     CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR,
     CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR,
     CONF_TARIFF_RATE_OVERRIDES,
@@ -246,6 +248,7 @@ from .planning import (
     capacity_samples,
     logged_day_cost_gbp,
     reconcile_month,
+    bill_period,
     SPARE_SOLAR_FIRST_HOUR,
     expected_spare_solar,
     manual_free_event_error,
@@ -3598,9 +3601,13 @@ class SunsynkOptimizer:
         await self.async_notify("🔋 Sunsynk: shadow feature scorecard", scorecard_summary(card))
 
     async def async_set_billed_amount(self, billed_gbp: float) -> None:
-        """User entered last month's billed net £ (number entity); reconcile it now (phase 36)."""
-        month = (dt_util.now().date().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
-        self.coordinator.update_state(bill_reconciliation={"month": month, "billed_gbp": billed_gbp})
+        """User entered the latest bill's net £ (number entity); reconcile it now (phase 36).
+
+        The period is the latest complete one before today, from the configured bill start day."""
+        start, end, label = bill_period(dt_util.now().date(), self.cfg.get(CONF_BILL_START_DAY, DEFAULT_BILL_START_DAY))
+        self.coordinator.update_state(bill_reconciliation={
+            "month": label, "start": start.isoformat(), "end": end.isoformat(), "billed_gbp": billed_gbp,
+        })
         await self._guarded(self.async_run_bill_reconciliation, "Bill reconciliation")
 
     async def async_run_bill_reconciliation(self) -> dict[str, Any] | None:
@@ -3609,12 +3616,16 @@ class SunsynkOptimizer:
         month, billed = state.get("month"), state.get("billed_gbp")
         if not month or billed is None:
             return None
-        year, mon = (int(x) for x in month.split("-"))
-        days_in_month = calendar.monthrange(year, mon)[1]
+        if state.get("start") and state.get("end"):
+            start, end = state["start"], state["end"]
+        else:  # stored before bill periods: a calendar month "YYYY-MM"
+            year, mon = (int(x) for x in month.split("-"))
+            start, end = f"{month}-01", f"{month}-{calendar.monthrange(year, mon)[1]:02d}"
+        days_in_month = (date_cls.fromisoformat(end) - date_cls.fromisoformat(start)).days + 1
         include_gas = bool(self._cfg_str(CONF_OCTOPUS_GAS_COST_SENSOR))
         days = {
             d["date"]: d for d in await self.data_logger.async_load_paired_days(days=100)
-            if str(d.get("date", "")).startswith(month)
+            if start <= str(d.get("date", "")) <= end
         }
         result = reconcile_month(
             [logged_day_cost_gbp(d, include_gas) for d in days.values()], days_in_month, float(billed)
@@ -3634,7 +3645,7 @@ class SunsynkOptimizer:
             body = (
                 f"Billed £{result['billed_gbp']:.2f} vs logged £{result['logged_gbp']:.2f} "
                 f"({result['days_logged']}/{days_in_month} days"
-                + (", partial month" if result["partial"] else "")
+                + (", partial period" if result["partial"] else "")
                 + f"): gap £{result['gap_gbp']:+.2f}."
             )
             if result["alert"]:

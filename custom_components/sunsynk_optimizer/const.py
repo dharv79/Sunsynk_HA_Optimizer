@@ -99,6 +99,9 @@ CONF_DATA_REPORT_TARGET = "data_report_target"
 CONF_OCTOPUS_IMPORT_COST_SENSOR = "octopus_import_cost_sensor"
 CONF_OCTOPUS_EXPORT_INCOME_SENSOR = "octopus_export_income_sensor"
 CONF_OCTOPUS_GAS_COST_SENSOR = "octopus_gas_cost_sensor"
+# Bill check: day of the month the Octopus bill's usage period starts (1 = calendar month).
+CONF_BILL_START_DAY = "bill_start_day"
+DEFAULT_BILL_START_DAY = 1
 
 # Phase 28: "previous accumulative consumption" sensors (their `charges` attribute
 # holds 48 half-hourly kWh) and optional tariff-rate overrides (JSON).
