@@ -270,3 +270,17 @@ The 02:00 and 05:00 meter snapshots give the charge power directly (`planning.me
 **Backtest.** `load_profile_backtest` / `tools/backtest.py DATA_DIR --load-profile`: walk-forward 16:00–19:00 MAE of the profile vs the phase 60 day-type median.
 
 **Verification.** `tests/test_load_profile.py`: even and import-shaped slots, 22–24 fill, missing segment → None; min days, day-type choice, away/window filters; heating fit and scaling; backtest, MPC hand-off and CLI.
+
+## Dynamic-tariff shadow: Agile vs Flux (05/11/2026, phase 76)
+
+**Design.** At 22:05 `async_run_dynamic_tariff_shadow` fetches today's and tomorrow's Agile half-hour import prices for the user's region from the Octopus public API (`_async_agile_day_vectors`; region from the `agile_region` override or the import rates entity's tariff code; VAT from `vat_percent`). Tomorrow's prices are published around 16:00. It then solves the same 24 h MPC twice from the same SOC, solar and load: once on the Flux bands, once with `mpc_slots(import_vectors={0: today, 1: tomorrow}, export_flat_p=<agile export rate>)`. Both sides use the same terminal value (off-peak ÷ charge efficiency), so the gap is the price curve and not the end-of-horizon credit. Without tomorrow's prices the Agile horizon stops at midnight.
+
+`planning.cheapest_window_plan` picks the cheapest half-hours from now that cover the Flux plan's grid-charge kWh at the charge rate. Rules: the last slot may be partial; negative-price slots are always taken; slots above `max_price_p` (spike guard) or with no price are never used. Overlapping slots merge into HH:MM windows. `dynamic_tariff_summary` reports `saving_gbp` (Flux − Agile; positive means Agile is cheaper), both costs and grid-charge kWh, Agile export kWh, SOC at 05:00, min/max price, spike slots (≥ 35p), negative slots and the cheapest windows. Standing charges are left out because they are equal in the default rates.
+
+**Use.** Shadow only: control stays on Flux (no `tariff_mode` option yet). Expressing several cheap windows needs native time-of-use slots (phase 73) or a live MPC. A skipped run logs `skipped` (`no_soc` / `no_region` / `no_prices`). Shown on `sensor.dynamic_tariff_shadow` (diagnostic, GBP, state = `saving_gbp`).
+
+**Verification.** `tests/test_dynamic_tariff.py`:
+- Cheapest-first filling, partial last slot and split windows.
+- Spike guard and shortfall; negative slots; `from_slot` across two days; missing prices or rate → None.
+- `mpc_slots` priced from the vectors and stopping where they end, and unchanged without them.
+- The Agile MPC charges only in the cheap run; the summary maths; a missing plan gives None, never 0.

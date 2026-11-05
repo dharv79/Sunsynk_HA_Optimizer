@@ -1,6 +1,6 @@
 # Phase 76 — Dynamic-tariff native mode (Agile / half-hourly prices in the loop)
 
-**Status:** Planned, not built. **Size:** XL. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, shadow only (see As built). **Size:** XL. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,10 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## As built (05/11/2026)
+
+- Feasibility: no locked decision or do-not-break rule touched. Nothing is pushed, so rule 16 holds trivially, and the logic is in `planning.py` (rule 19). The Agile fetch reuses the phase 35 public-API client, which needs no key.
+- `cheapest_window_plan` (cheapest-first, spike guard, negative slots always taken), plus `mpc_slots(import_vectors, export_flat_p)` and `dynamic_tariff_summary`.
+- 22:05 `async_run_dynamic_tariff_shadow` → `dynamic_tariff` record + `state.dynamic_tariff` + `sensor.dynamic_tariff_shadow`.
+- Not built: a `tariff_mode` option that runs control on Agile. It needs multi-window control (phase 73 slots or a live MPC) and a few weeks of shadow `saving_gbp`.

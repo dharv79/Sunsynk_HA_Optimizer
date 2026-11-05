@@ -177,6 +177,11 @@ from .planning import (
     flux_bands_from_charges,
     merge_tariff_rates,
     agile_prices_by_date,
+    cheapest_window_plan,
+    dynamic_tariff_summary,
+    DYNAMIC_SHADOW_MINUTE,
+    MPC_MAX_SLOTS,
+    MPC_SLOT_MINUTES,
     agile_region_override,
     octopus_region,
     tariff_vat_percent,
@@ -527,6 +532,7 @@ class SunsynkOptimizer:
             (17, 0, self._async_peak_export_recheck),
             (18, 0, self._async_peak_export_recheck),
             (19, 0, self._async_meter_snapshot),
+            (DYNAMIC_SHADOW_MINUTE // 60, DYNAMIC_SHADOW_MINUTE % 60, self._async_dynamic_tariff_shadow),  # phase 76
         )
         for hour, minute, callback in daily:
             self.unsubs.append(
@@ -2132,6 +2138,72 @@ class SunsynkOptimizer:
         }
         await self.data_logger.async_log_mpc_plan(**record)
         self.coordinator.update_state(touch=False, mpc_plan={**record, "slots": plan["slots"]})
+
+    async def _async_dynamic_tariff_shadow(self, _now) -> None:
+        await self._guarded(self.async_run_dynamic_tariff_shadow, "Dynamic tariff shadow")
+
+    async def _async_agile_day_vectors(self, region: str, first) -> dict[int, list[float]]:
+        """{0: today's, 1: tomorrow's} 48 Agile p/kWh (VAT applied) from the public API; {} on any failure."""
+        start = dt_util.start_of_local_day(first)
+        end = dt_util.start_of_local_day(first + timedelta(days=2))
+        results = await async_fetch_agile_rates(async_get_clientsession(self.hass), region, start, end)
+        by_date = agile_prices_by_date(results, dt_util.DEFAULT_TIME_ZONE)
+        vat = 1 + tariff_vat_percent(self.cfg.get(CONF_TARIFF_RATE_OVERRIDES)) / 100
+        out = {}
+        for offset in (0, 1):
+            day = by_date.get((first + timedelta(days=offset)).isoformat())
+            if day:
+                out[offset] = [round(p * vat, 3) for p in day]
+        return out
+
+    async def async_run_dynamic_tariff_shadow(self) -> None:
+        """22:05: the next 24 h MPC priced on Agile vs on Flux (phase 76); logs only, never pushes."""
+        cfg = self.cfg
+        now = dt_util.now()
+        overrides = cfg.get(CONF_TARIFF_RATE_OVERRIDES)
+        region = self._agile_region(overrides)
+        base = {"date": now.date().isoformat(), "time": now.strftime("%H:%M"), "region": region}
+        soc = self._essential_state(self.battery_soc_entity)
+        vectors = await self._async_agile_day_vectors(region, now.date()) if region and soc is not None else {}
+        if soc is None or not vectors.get(0):
+            reason = "no_soc" if soc is None else ("no_region" if not region else "no_prices")
+            record = {**base, "skipped": reason}
+            await self.data_logger.async_log_dynamic_tariff(**record)
+            self.coordinator.update_state(touch=False, dynamic_tariff=record)
+            return
+        tomorrow_id = self._cfg_str(CONF_TOMORROW_FORECAST_SENSOR, cfg) or DEFAULT_TOMORROW_FORECAST_SENSOR
+        tomorrow_kwh = self._essential_state(tomorrow_id)
+        hourly_tomorrow = None if tomorrow_kwh is None else (self._synthetic_hourly_forecast(tomorrow_kwh) or {})
+        hourly_today = self._hourly_or_synthetic_forecast(cfg, now)
+        prices, _sources = self._tariff_prices(now.date())
+        export_bands = flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export")
+        loads, profile = self._mpc_loads(cfg), (self._load_profile or {}).get("slots")
+        capacity, charge_kw, wear = self._capacity_kwh(cfg), float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)), self._wear_pence()
+        offpeak = prices.get("offpeak")
+        terminal = None if offpeak is None else offpeak / CHARGE_EFFICIENCY  # same end value on both sides
+        agile_export = merge_tariff_rates(overrides)["agile"]["export"]
+        start = now.hour * 60 + now.minute
+
+        def _solve(agile: bool) -> dict[str, Any] | None:
+            slots = mpc_slots(
+                start, prices, export_bands, hourly_today, hourly_tomorrow, loads, profile,
+                import_vectors=vectors if agile else None, export_flat_p=agile_export if agile else None,
+            )
+            return None if slots is None else mpc_solve(slots, soc, capacity, charge_kw, wear_pence=wear, terminal_pence=terminal)
+
+        flux_plan = await self.hass.async_add_executor_job(_solve, False)
+        agile_plan = await self.hass.async_add_executor_job(_solve, True)
+        horizon = (vectors.get(0) or []) + (vectors.get(1) or [])
+        from_slot = start // MPC_SLOT_MINUTES
+        need = mpc_summary(flux_plan).get("grid_charge_kwh") or 0.0
+        windows = cheapest_window_plan(horizon, need, charge_kw, from_slot=from_slot)
+        record = {
+            **base, "soc": soc,
+            **dynamic_tariff_summary(flux_plan, agile_plan, horizon[from_slot:from_slot + MPC_MAX_SLOTS], windows),
+            "tomorrow_prices": vectors.get(1) is not None,
+        }
+        await self.data_logger.async_log_dynamic_tariff(**record)
+        self.coordinator.update_state(touch=False, dynamic_tariff=record)
 
     async def _async_track_pv_strings(self) -> None:
         """Tally each MPPT string's energy over bright mid-day hours (phase 49); no writes.

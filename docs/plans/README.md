@@ -83,7 +83,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 73. Native inverter time-of-use programming via the six system-mode slots | Planned, not built | L |
 | 74. Local Modbus/RS485 control path as a cloud-outage fallback | Planned, not built | XL |
 | 75. Battery state-of-health and degradation ledger | Done, merged (3b4ddb5, PR #137) | M, ~70k actual |
-| 76. Dynamic-tariff native mode (Agile / half-hourly prices in the loop) | Planned, not built | XL |
+| 76. Dynamic-tariff native mode (Agile / half-hourly prices in the loop) | Done, merged (PENDING76), shadow; control stays on Flux | M, ~40k actual |
 | 77. Flexibility-market export bidding (non-Saving-Sessions VPP) | Planned, not built | L |
 | 78. Household electrification and system-sizing advisor | Planned, not built | L |
 

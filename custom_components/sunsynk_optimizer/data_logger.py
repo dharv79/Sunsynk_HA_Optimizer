@@ -314,6 +314,10 @@ class DataLogger:
         """Shadow MPC plan summary every 30 min (phase 69); never read back by learning."""
         await self._async_append(_record("mpc_plan", **fields))
 
+    async def async_log_dynamic_tariff(self, **fields: Any) -> None:
+        """Nightly Agile-vs-Flux shadow MPC comparison (phase 76): one per date."""
+        await self._async_append(_record("dynamic_tariff", **fields))
+
     async def async_log_pv_strings(self, **fields: Any) -> None:
         """Log the day's per-string PV energy and MPPT0 share (phase 49): one per day."""
         await self._async_append(_record("pv_strings", **fields))
@@ -906,7 +910,7 @@ class DataLogger:
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog", "charge_outcome",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load", "import_causes",
         "half_hourly_import", "half_hourly_export", "capacity_estimate", "pv_strings",
-        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health",
+        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health", "dynamic_tariff",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:
