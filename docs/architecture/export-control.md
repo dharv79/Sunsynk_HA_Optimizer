@@ -237,3 +237,11 @@ Phase 31. `_async_post_with_status` stores the pushed `fluxProducts` in `state.l
 ## Intraday solar scale, shadow (04/11/2026, phase 56)
 
 `planning.intraday_forecast_scale` compares `pv_etoday` with the hourly forecast summed to now. Peak cover logs the scale, the scaled solar to 16:00 and the decision on min(raw, scaled) beside the unchanged live decision; the spare-solar estimate uses the scale (advisory). Low-solar protection never uses a scale above 1.
+
+## Peak cover after a restart: retry while SOC is unreadable (05/11/2026)
+
+**Root cause.** On 04/11 the 09:16 peak-cover hold at 66 % was lost: every restart re-runs the startup plan, which resets Flux 1 to the overnight window and wipes the hold, and the immediate peak-cover re-check returned early because the grid-outage flag was (falsely) set on the b36 restart and, on later restarts, the battery SOC sensor had not polled yet. SOC fell to 39 % by 16:00 and 1.6 kWh came from the grid in the peak.
+
+**Fix.** `_async_initial_refresh` now calls `_async_peak_cover_after_startup`, which runs peak cover and, while `planning.peak_cover_startup_retry_due` holds (inside 09:00-16:00, SOC still None or an outage still flagged, fewer than 5 attempts), retries 60 s later. Peak cover's own once-a-day logging is unchanged.
+
+**Verification.** `tests/test_battery_health.py::test_peak_cover_startup_retry` and the updated `tests/test_code_integrity.py::test_startup_plan_is_followed_by_peak_cover`.

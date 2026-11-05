@@ -3991,3 +3991,15 @@ def ledger_point(date: str, health) -> dict | None:
         "discharge_total_kwh": health.get("discharge_total_kwh"),
     }
 
+
+PEAK_COVER_STARTUP_RETRIES = 5  # 60 s apart, like the initial plan's wait for the first sensor poll
+
+
+def peak_cover_startup_retry_due(minutes: int, soc, outage_active: bool, attempts: int) -> bool:
+    """Re-try peak cover a minute later after a restart (the startup plan wiped its Flux 1 slot).
+
+    Only inside the peak-cover window (09:00-16:00), only while SOC is not yet readable or a grid
+    outage is still flagged, and at most PEAK_COVER_STARTUP_RETRIES times."""
+    in_window = PEAK_COVER_HOLD_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES
+    return in_window and (soc is None or outage_active) and attempts < PEAK_COVER_STARTUP_RETRIES
+

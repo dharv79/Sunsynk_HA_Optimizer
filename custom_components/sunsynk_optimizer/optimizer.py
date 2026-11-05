@@ -259,6 +259,7 @@ from .planning import (
     minutes_to_hhmm,
     net_cost_gbp,
     peak_cover_plan,
+    peak_cover_startup_retry_due,
     explain_plan,
     peak_export_plan,
     peak_export_recheck,
@@ -431,6 +432,7 @@ class SunsynkOptimizer:
         # record. Not persisted: after a restart it re-evaluates (one push a day
         # is re-allowed, harmless — the slot is idempotent).
         self._peak_cover: dict[str, Any] | None = None
+        self._peak_cover_startup_attempts = 0
         self.data_logger = DataLogger(hass)
         self._cfg_cache: tuple | None = None  # (id key, read-only config, data, options): refs keep ids valid
         self._band_price_cache: dict[tuple, dict[str, float | None]] = {}
@@ -1741,9 +1743,22 @@ class SunsynkOptimizer:
         # The startup plan resets Flux 1 to the overnight window, wiping a
         # peak cover top-up (and its unpersisted state) pushed before the
         # restart; re-check now rather than wait for the 30-minute tick,
-        # which may not come before 16:00. No-op outside 12:00-16:00.
-        await self._guarded(self.async_run_peak_cover, "Peak cover")
+        # which may not come before 16:00. No-op outside 09:00-16:00.
+        await self._async_peak_cover_after_startup()
         await self._guarded(self._async_monthly_reports, "Monthly reports")
+
+    async def _async_peak_cover_after_startup(self, _now=None) -> None:
+        """Peak cover straight after a restart, retried a minute later while SOC is unreadable or an
+        outage is still flagged (phase 75 follow-up: 04/11 lost its 66% hold this way)."""
+        await self._guarded(self.async_run_peak_cover, "Peak cover")
+        now = dt_util.now()
+        if peak_cover_startup_retry_due(
+            now.hour * 60 + now.minute, self._essential_state(self.battery_soc_entity),
+            self._outage_active(), self._peak_cover_startup_attempts,
+        ):
+            self._peak_cover_startup_attempts += 1
+            _LOGGER.info("Peak cover after restart deferred — SOC unavailable or outage flagged")
+            self.unsubs.append(async_call_later(self.hass, 60, self._async_peak_cover_after_startup))
 
     async def _async_choose_best_full_charge_day(self, _now) -> None:
         """Time-change callback at 18:00 daily: Sunday weekly pick, then the daily re-check."""

@@ -75,3 +75,13 @@ def test_ledger_point(planning):
         "date": "2026-11-04", "soh_pct": 97.0, "cycles_max": 508.0, "discharge_total_kwh": 4248.6,
     }
     assert planning.ledger_point("2026-11-04", None) is None
+
+
+def test_peak_cover_startup_retry(planning):
+    noon = 12 * 60
+    assert planning.peak_cover_startup_retry_due(noon, None, False, 0) is True  # SOC not polled yet
+    assert planning.peak_cover_startup_retry_due(noon, 50.0, True, 0) is True  # outage still flagged
+    assert planning.peak_cover_startup_retry_due(noon, 50.0, False, 0) is False  # it ran properly
+    assert planning.peak_cover_startup_retry_due(noon, None, False, 5) is False  # gave up
+    assert planning.peak_cover_startup_retry_due(8 * 60, None, False, 0) is False  # before 09:00
+    assert planning.peak_cover_startup_retry_due(16 * 60, None, False, 0) is False  # peak started
