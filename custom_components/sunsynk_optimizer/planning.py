@@ -3276,6 +3276,27 @@ def bill_attributes(state: dict[str, Any] | None) -> dict[str, Any]:
     return {"month": state.get("month"), **{k: result.get(k) for k in BILL_ATTRIBUTE_KEYS}}
 
 
+def bill_period(today: date, start_day: Any = 1) -> tuple[date, date, str]:
+    """The latest complete bill period before ``today``: (first day, last day, label).
+
+    Periods run from ``start_day`` (clamped 1-28) to the day before it next month. Day 1 is the
+    previous calendar month, labelled ``YYYY-MM``; other days are labelled ``YYYY-MM-DD to YYYY-MM-DD``.
+    """
+    try:
+        day = min(28, max(1, int(float(start_day))))
+    except (TypeError, ValueError):
+        day = 1
+
+    def month_start(year: int, month: int) -> date:
+        return date(year + (month - 1) // 12, (month - 1) % 12 + 1, day)
+
+    next_start = month_start(today.year, today.month if today.day >= day else today.month - 1)
+    start = month_start(next_start.year, next_start.month - 1)
+    end = next_start - timedelta(days=1)
+    label = start.strftime("%Y-%m") if day == 1 else f"{start.isoformat()} to {end.isoformat()}"
+    return start, end, label
+
+
 def reconcile_month(
     day_costs: list[float | None],
     days_in_month: int,

@@ -88,6 +88,14 @@ It alerts only for a complete month with |gap| > £2: "⚠️ Sunsynk: bill diff
 Assumes the bill covers a calendar month. Read-only. Tests: `test_reconcile_*` and `test_logged_day_cost` in `tests/test_kpis.py`.
 
 
+## Bill period start day (05/11/2026)
+
+**Root cause.** Octopus bills don't cover calendar months. The user's bill shows usage from 8 Sep to 7 Oct (the account period is printed as 9 Sep – 8 Oct), so a calendar-month check compared different days.
+
+**Design.** New option `CONF_BILL_START_DAY` (`bill_start_day`, 1–28, default 1). `planning.bill_period(today, start_day)` returns the latest complete period before today, from `start_day` to the day before it next month, with a label: `YYYY-MM` for day 1 (unchanged), otherwise `YYYY-MM-DD to YYYY-MM-DD`. Setting `number.billed_last_month` stores `month` (the label) plus `start`/`end`. The reconciliation sums the logged days from `start` to `end`, and `days_in_month` is the period length. A stored state without `start`/`end` is still read as a calendar month. The dashboard shows "Latest bill, net of export (£)" with a "Bill period" column. Use the first date in the bill's "We have charged you" lines as the start day. The billed figure is the bill's "Total charges for bill" (charges minus export credit, including gas when a gas cost sensor is set). Weekend Happy Hour credits are listed separately and are not in that total.
+
+**Verification.** `tests/test_kpis.py::test_bill_period_calendar_month_and_start_day` (the user's 8 Sep – 7 Oct bill, the start day itself, year wrap, clamping).
+
 ## Monthly report catch-up (01/11/2026, phase 57)
 
 The monthly tariff comparison, battery value and capacity estimate now run through `_async_monthly_reports`, called daily at 18:00 and at startup. `planning.monthly_report_due` makes them run once per month after the first Sunday, so a Sunday missed while HA was down is sent at the next 18:00 or restart. `last_monthly_report_month` (persisted) prevents duplicates. Sunsynk API calls now time out after 30 s.

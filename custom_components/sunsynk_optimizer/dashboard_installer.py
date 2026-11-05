@@ -571,9 +571,9 @@ def _energy(s) -> dict[str, Any]:
             )
         ),
         {"type": "entities", "title": "Bill check", "show_header_toggle": False,
-         "entities": [{"entity": "number.billed_last_month", "name": "Billed last month (£)"}]},
+         "entities": [{"entity": "number.billed_last_month", "name": "Latest bill, net of export (£)"}]},
         _md(
-            "| Month | Logged | Gap | Days |\n|:--|--:|--:|--:|\n"
+            "| Bill period | Logged | Gap | Days |\n|:--|--:|--:|--:|\n"
             "| {{ a('number.billed_last_month', 'month') }} | {{ gbp('number.billed_last_month', 'logged_gbp') }}"
             " | {{ gbp('number.billed_last_month', 'gap_gbp') }} | {{ a('number.billed_last_month', 'days_logged') }} |"
         ),

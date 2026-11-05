@@ -841,3 +841,20 @@ def test_self_sufficiency_clamped_and_week_mean_of_both():
     w = planning.week_kpis([{"self_sufficiency_pct": 80.0, "grid_independence_pct": 20.0}, {}])
     assert w["week_self_sufficiency_pct"] == 80.0
     assert w["week_grid_independence_pct"] == 20.0
+
+
+def test_bill_period_calendar_month_and_start_day(planning):
+    from datetime import date
+    # Day 1 keeps the previous calendar month.
+    assert planning.bill_period(date(2026, 11, 5), 1) == (date(2026, 10, 1), date(2026, 10, 31), "2026-10")
+    assert planning.bill_period(date(2026, 1, 1), 1)[:2] == (date(2025, 12, 1), date(2025, 12, 31))
+    # The user's bill: usage 8 Sep - 7 Oct, entered on 5 Nov (before the 8th) or 9 Oct.
+    sep = (date(2026, 9, 8), date(2026, 10, 7), "2026-09-08 to 2026-10-07")
+    assert planning.bill_period(date(2026, 10, 9), 8) == sep
+    assert planning.bill_period(date(2026, 11, 5), 8) == sep
+    # On the start day itself the period that just ended counts.
+    assert planning.bill_period(date(2026, 11, 8), 8)[:2] == (date(2026, 10, 8), date(2026, 11, 7))
+    # Year wrap, clamping and bad input.
+    assert planning.bill_period(date(2027, 1, 3), 8)[:2] == (date(2026, 11, 8), date(2026, 12, 7))
+    assert planning.bill_period(date(2026, 3, 30), 31)[:2] == (date(2026, 2, 28), date(2026, 3, 27))
+    assert planning.bill_period(date(2026, 11, 5), None)[2] == "2026-10"
