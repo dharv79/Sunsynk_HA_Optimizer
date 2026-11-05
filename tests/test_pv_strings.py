@@ -40,3 +40,11 @@ def test_streak(planning):
     assert planning.string_streak(*s, None) == (2, "mppt0")  # unknown day holds
     assert planning.string_streak(*s, {"weaker": "mppt1"}) == (1, "mppt1")
     assert planning.string_streak(*s, {"weaker": None}) == (0, None)
+
+
+def test_attributes_always_have_every_key(planning):
+    empty = planning.pv_string_attributes({})
+    assert set(empty) == set(planning.PV_STRING_ATTRIBUTE_KEYS) and empty["weaker"] is None
+    assert planning.pv_string_attributes(None)["streak"] is None
+    full = planning.pv_string_attributes({"share": 50.0, "weaker": "mppt1", "streak": 2})
+    assert full["weaker"] == "mppt1" and full["streak"] == 2 and "share" not in full
