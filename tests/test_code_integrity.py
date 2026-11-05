@@ -51,8 +51,13 @@ def test_startup_plan_is_followed_by_peak_cover():
     cls = _class(ast.parse(OPTIMIZER.read_text()), "SunsynkOptimizer")
     fn = next(n for n in cls.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_async_initial_refresh")
     calls = _awaited_calls(fn)
-    assert "async_run_import_plan" in calls and "async_run_peak_cover" in calls
-    assert calls.index("async_run_peak_cover") > calls.index("async_run_import_plan")
+    assert "async_run_import_plan" in calls and "_async_peak_cover_after_startup" in calls
+    assert calls.index("_async_peak_cover_after_startup") > calls.index("async_run_import_plan")
+    # The wrapper runs peak cover and retries it while SOC is unreadable or an outage is flagged.
+    wrapper = next(
+        n for n in cls.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_async_peak_cover_after_startup"
+    )
+    assert "async_run_peak_cover" in _awaited_calls(wrapper)
 
 
 _MUTATORS = {"append", "extend", "insert", "pop", "popitem", "remove", "clear", "update", "setdefault", "sort"}
