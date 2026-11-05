@@ -64,6 +64,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_user_override.py` | Phase 46 next plan date and override application |
 | `tests/test_event_probe.py` | Phase 43 probe route list, tolerant realtime-event parser and dedup, cloud grid notices, fault counts |
 | `tests/test_battery_health.py` | Phase 75 register-snapshot parser (real trimmed record), fault words, BMS stall hints, SOH trend and measured wear; peak-cover restart retry |
+| `tests/test_upgrade_advisor.py` | Phase 50 upgrade advisor: `simulate_system` matches the phase 37 no-battery baseline at 0 kWh, size/PV/charge-rate/wear behaviour, `upgrade_advisor` scenarios, payback and `backtest.py --upgrade` |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
 | `tests/test_dashboard.py` | Dashboard YAML structure |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening) |

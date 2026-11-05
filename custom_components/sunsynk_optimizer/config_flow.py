@@ -43,6 +43,9 @@ from .const import (
     CONF_PEAK_EXPORT_LIVE,
     CONF_BATTERY_COST_GBP,
     CONF_BATTERY_LIFETIME_KWH,
+    CONF_UPGRADE_PRICE_PER_KWH,
+    CONF_PV_KWP,
+    CONF_PV_UPGRADE_PRICE_PER_KWP,
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_FULL_WINDOW_LIVE,
     CONF_EVENING_LOAD_LIVE,
@@ -263,6 +266,24 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 description={"suggested_value": values.get(CONF_BATTERY_LIFETIME_KWH)},
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=1000000, step=100, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWh")
+            ),
+            vol.Optional(
+                CONF_UPGRADE_PRICE_PER_KWH,
+                description={"suggested_value": values.get(CONF_UPGRADE_PRICE_PER_KWH)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=5000, step=10, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="£/kWh")
+            ),
+            vol.Optional(
+                CONF_PV_KWP,
+                description={"suggested_value": values.get(CONF_PV_KWP)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=100, step=0.1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWp")
+            ),
+            vol.Optional(
+                CONF_PV_UPGRADE_PRICE_PER_KWP,
+                description={"suggested_value": values.get(CONF_PV_UPGRADE_PRICE_PER_KWP)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=10000, step=10, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="£/kWp")
             ),
             vol.Optional(
                 CONF_SPARE_SOLAR_NOTIFY_KWH,

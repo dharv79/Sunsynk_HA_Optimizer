@@ -155,6 +155,10 @@ GENTLE_CHARGE_SETTING = "sdBatteryCurrent"
 # Battery wear cost (phase 24). Blank = no wear term. Wear p/kWh = cost / lifetime throughput.
 CONF_BATTERY_COST_GBP = "battery_cost_gbp"
 CONF_BATTERY_LIFETIME_KWH = "battery_lifetime_kwh"
+# Upgrade advisor (phase 50): optional prices for the payback line and the installed PV size.
+CONF_UPGRADE_PRICE_PER_KWH = "upgrade_price_per_kwh"
+CONF_PV_KWP = "pv_kwp"
+CONF_PV_UPGRADE_PRICE_PER_KWP = "pv_upgrade_price_per_kwp"
 CONF_SPARE_SOLAR_NOTIFY_KWH = "spare_solar_notify_kwh"  # blank = no morning notification
 
 # Overnight baseload alert (phase 26): 05:00 notification when 00:00-05:00 house load is well above normal.
