@@ -111,3 +111,7 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## Load profile fields (05/11/2026, phase 71)
 
 `day_kpis` gains `outside_temp_c` (mean of the 30-min weather-entity samples that day; None after a restart with no samples) and `evening_reserve_soc_profile`; `peak_cover` gains `peak_load_kwh_profile`; `mpc_plan` gains `load_profile_days`. The heating fit reads `outside_temp_c` back from `day_kpis`.
+
+## Dynamic tariff record (05/11/2026, phase 76)
+
+`dynamic_tariff` (22:05, deduped by date and time, never read back): date, time, region, soc, flux_cost_gbp, agile_cost_gbp, saving_gbp, flux/agile_grid_charge_kwh, agile_export_kwh, agile_soc_0500, horizon_slots, min_p, max_p, spike_slots, negative_slots, cheapest_windows, cheapest_avg_p, tomorrow_prices. When the run is skipped it carries only date, time, region and `skipped`. See `import-plan.md`.

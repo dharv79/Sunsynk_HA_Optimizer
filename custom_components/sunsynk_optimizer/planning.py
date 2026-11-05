@@ -4223,6 +4223,8 @@ def mpc_slots(
     hourly_tomorrow: dict[int, float] | None,
     loads: dict[str, float],
     load_profile: list[float] | None = None,
+    import_vectors: dict[int, list[float]] | None = None,
+    export_flat_p: float | None = None,
 ) -> list[dict[str, Any]] | None:
     """Half-hour slots from `start_minute` (rounded down) for up to 24 h.
 
@@ -4230,6 +4232,9 @@ def mpc_slots(
     the horizon stops at the next 06:00 (before tomorrow's solar matters).
     `load_profile` (48 kWh values by slot of day, phase 71) overrides `loads`.
     A slot with no import price → None (no plan); no export price exports for 0p.
+    `import_vectors` ({day offset: 48 p/kWh}, phase 76) prices import per slot
+    instead of the Flux bands; the horizon stops where the vectors end.
+    `export_flat_p` overrides the export bands with one rate.
     """
     start = (start_minute // MPC_SLOT_MINUTES) * MPC_SLOT_MINUTES
     slots = []
@@ -4239,10 +4244,16 @@ def mpc_slots(
         hourly = hourly_today if day == 0 else hourly_tomorrow
         if day == 1 and hourly_tomorrow is None and minute >= MPC_DAY_FROM_MINUTES:
             break
-        import_p = prices_pence.get(band_key_at(minute))
+        if import_vectors is not None:
+            vector = import_vectors.get(day)
+            if not vector or len(vector) != HALF_HOURS_PER_DAY:
+                break
+            import_p = vector[minute // MPC_SLOT_MINUTES]
+        else:
+            import_p = prices_pence.get(band_key_at(minute))
         if import_p is None:
             return None
-        export_p = price_at(export_bands, minute)
+        export_p = export_flat_p if export_flat_p is not None else price_at(export_bands, minute)
         if load_profile is not None and len(load_profile) == 48:
             load = float(load_profile[minute // MPC_SLOT_MINUTES])
         else:
@@ -4661,3 +4672,98 @@ def load_profile_backtest(
     n = len(errors["profile"])
     mae = (lambda k: round(sum(errors[k]) / n, 3) if n else None)
     return {"days": n, "profile_mae_kwh": mae("profile"), "median_mae_kwh": mae("median")}
+
+
+# Dynamic-tariff native mode (phase 76). Shadow only: the MPC re-run on Agile half-hourly prices
+# next to the Flux plan; logged, never pushed. Control stays on Flux.
+AGILE_SPIKE_PENCE = 35.0  # a slot at or above this is a price spike worth flagging
+DYNAMIC_SHADOW_MINUTE = 22 * 60 + 5  # after tomorrow's Agile prices (~16:00) and the 22:00 snapshot
+
+
+def cheapest_window_plan(
+    prices: list[float | None] | None,
+    need_kwh: float,
+    rate_kw: float,
+    from_slot: int = 0,
+    max_price_p: float | None = None,
+) -> dict[str, Any] | None:
+    """Cheapest half-hours from `from_slot` to put `need_kwh` into the battery at `rate_kw`.
+
+    `prices` are p/kWh by half-hour (index 0 = 00:00 of the first day; may
+    span two days). Slots with no price or above `max_price_p` (the spike
+    guard) are never used. Negative-price slots are always taken (paid to
+    import), even past the need. Slots are filled cheapest first; the last
+    one may be partial. Returns the chosen slots, merged HH:MM windows, kWh,
+    cost and the shortfall when not enough slots qualify; None without
+    prices or a charge rate.
+    """
+    if not prices or not _is_number(rate_kw) or rate_kw <= 0:
+        return None
+    per_slot = rate_kw * MPC_SLOT_MINUTES / 60
+    usable = [
+        (float(p), i) for i, p in enumerate(prices)
+        if i >= from_slot and _is_number(p) and (max_price_p is None or p <= max_price_p)
+    ]
+    usable.sort()
+    need = max(0.0, float(need_kwh or 0.0))
+    chosen: dict[int, float] = {}
+    got = cost = 0.0
+    for price, i in usable:
+        if got >= need - 1e-9 and price >= 0:
+            break
+        kwh = per_slot if price < 0 else min(per_slot, need - got)
+        chosen[i] = kwh
+        got += kwh
+        cost += kwh * price
+    idx = sorted(chosen)
+    windows: list[list[str]] = []
+    for i in idx:
+        start, end = minutes_to_hhmm((i * MPC_SLOT_MINUTES) % 1440), minutes_to_hhmm(((i + 1) * MPC_SLOT_MINUTES) % 1440)
+        if windows and windows[-1][1] == start and i - 1 in chosen:
+            windows[-1][1] = end
+        else:
+            windows.append([start, end])
+    return {
+        "slots": idx,
+        "windows": windows,
+        "kwh": round(got, 2),
+        "cost_p": round(cost, 1),
+        "avg_p": round(cost / got, 2) if got > 0 else None,
+        "short_kwh": round(max(0.0, need - got), 2),
+        "plunge_slots": sum(1 for i in idx if prices[i] < 0),
+    }
+
+
+def dynamic_tariff_summary(
+    flux_plan: dict[str, Any] | None,
+    agile_plan: dict[str, Any] | None,
+    agile_prices: list[float] | None,
+    windows: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Shadow comparison of the same MPC horizon priced on Flux bands vs Agile half-hours.
+
+    `saving_gbp` is Flux cost − Agile cost (positive = Agile cheaper);
+    None when either plan is missing. Standing charges are left out (equal
+    in the default rates). Price stats cover the Agile slots in the horizon.
+    """
+    flux, agile = mpc_summary(flux_plan), mpc_summary(agile_plan)
+    priced = [float(p) for p in agile_prices or [] if _is_number(p)]
+    saving = None
+    if flux.get("cost_gbp") is not None and agile.get("cost_gbp") is not None:
+        saving = round(flux["cost_gbp"] - agile["cost_gbp"], 2)
+    return {
+        "flux_cost_gbp": flux.get("cost_gbp"),
+        "agile_cost_gbp": agile.get("cost_gbp"),
+        "saving_gbp": saving,
+        "agile_grid_charge_kwh": agile.get("grid_charge_kwh"),
+        "flux_grid_charge_kwh": flux.get("grid_charge_kwh"),
+        "agile_export_kwh": agile.get("export_kwh"),
+        "agile_soc_0500": agile.get("soc_0500"),
+        "horizon_slots": agile.get("horizon_slots"),
+        "min_p": round(min(priced), 2) if priced else None,
+        "max_p": round(max(priced), 2) if priced else None,
+        "spike_slots": sum(1 for p in priced if p >= AGILE_SPIKE_PENCE),
+        "negative_slots": sum(1 for p in priced if p < 0),
+        "cheapest_windows": (windows or {}).get("windows"),
+        "cheapest_avg_p": (windows or {}).get("avg_p"),
+    }

@@ -135,6 +135,8 @@ class OptimizerState:
     upgrade_advisor: dict[str, Any] = field(default_factory=dict)  # phase 50 monthly report
     # Latest shadow MPC plan (phase 69): summary fields + per-slot path; never pushed.
     mpc_plan: dict[str, Any] = field(default_factory=dict)
+    # Nightly Agile-vs-Flux shadow comparison (phase 76); never pushed.
+    dynamic_tariff: dict[str, Any] = field(default_factory=dict)
     # Learned half-hourly load profile (phase 71): 48 slots, days, day_type, temp_scale, peak/evening/day bands.
     load_profile: dict[str, Any] = field(default_factory=dict)
     # Month (YYYY-MM) the monthly reports last covered; None until the first send (phase 57).

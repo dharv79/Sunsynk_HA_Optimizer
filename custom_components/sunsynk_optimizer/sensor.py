@@ -95,6 +95,10 @@ async def async_setup_entry(
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.mpc_plan",
             ),
             SunsynkOptimizerSensor(
+                coordinator, entry, "dynamic_tariff", "Agile vs Flux saving (shadow)",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.dynamic_tariff_shadow",
+            ),
+            SunsynkOptimizerSensor(
                 coordinator, entry, "solar_forecast_p50", "Solar forecast P50 (learned)",
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.solar_forecast_p50",
             ),
@@ -186,6 +190,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return "p/kWh"
         if self._sensor_key == "battery_runtime":
             return "h"
+        if self._sensor_key == "dynamic_tariff":
+            return "GBP"
         if self._sensor_key in ("pv_strings", "battery_soh"):
             return "%"
         if self._sensor_key in ("battery_capacity_estimate", "solar_forecast_p50", "load_profile"):
@@ -246,7 +252,12 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return _as_dict(_as_dict(state.battery_health).get("latest")).get("soh_pct")
 
         if self._sensor_key == "mpc_plan":
-            return _as_dict(state.mpc_plan).get("first_action")
+            return _as_dict(state.mpc_plan)
+        if self._sensor_key == "dynamic_tariff":
+            return _as_dict(state.dynamic_tariff).get("first_action")
+
+        if self._sensor_key == "dynamic_tariff":
+            return _as_dict(state.dynamic_tariff).get("saving_gbp")
 
         if self._sensor_key == "solar_forecast_p50":
             return _as_dict(_as_dict(state.last_import_plan).get("forecast_quantiles")).get("p50_kwh")
