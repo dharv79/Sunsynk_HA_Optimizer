@@ -17,6 +17,21 @@ All entities extend `CoordinatorEntity` and read state from `coordinator.state` 
 
 `dashboard_installer.py` generates a Lovelace YAML file by building a Python dict and serialising it with `json.dumps`. All SolarSynkV3 entity IDs are constructed from `inverter_serial` via the local `s()` helper. The file is written to `{hass.config.config_dir}/sunsynk_optimizer_{entry_id}.yaml` via `async_add_executor_job` (to avoid blocking the event loop), and a persistent HA notification shows the `configuration.yaml` snippet to add.
 
+### Dashboard revamp (05/11/2026)
+
+Six sections views, one builder per view (`_overview`, `_plan`, `_energy`, `_system`, `_shadow`, `_controls`) on small card helpers (`_tile`, `_heading`, `_badge`, `_md`, `_apex`):
+
+- **Overview** (path `sunsynk-optimizer`, kept so existing links work): view badges, alert cards shown only while their condition holds (grid outage, inverter fault, monitor-only, away, last error, free event), power flow, tonight's gauges and plan explanation, today's tiles, quick actions.
+- **Plan**: "Why this plan?" table, P10/P50/P90 solar, learned load profile, adaptive learning.
+- **Energy & cost**: today's meters, consumption windows, settled and year-to-date cost, import causes, bill check, KPI statistics graphs, 48 h history.
+- **Battery & system**: SOH/BMS detail, capacity, runtime, system health, live inverter values, logbook.
+- **Shadow lab**: scorecard, MPC SOC/grid chart, Agile vs Flux, TOU slot check, flex event offer, upgrade advisor.
+- **Controls**: away mode, test plan, one-night full charge / skip (`sunsynk_optimizer.*` actions, always with a confirmation), reset, update dashboard, free event entry, install details.
+
+Attribute values are read in markdown through the `_MACROS` Jinja helpers `a()` / `gbp()`, which print "—" for a missing value (never 0). Entities-card attribute rows are only used for always-present attributes (Spook). Config entity ids interpolated into templates pass `_safe_entity`. Charts of attribute arrays (MPC path, load profile, spare solar by hour) use `custom:apexcharts-card` `data_generator`; the only custom cards are it and `custom:sunsynk-power-flow-card` (`test_only_documented_custom_cards`).
+
+New diagnostic sensors for the dashboard: `sensor.tou_shadow` (state = slot differences, attributes the phase 73 record), `sensor.flex_event_offer` (state = decision, attributes the phase 77 record) and `sensor.upgrade_advisor` (GBP, best annual saving; attributes `options` from `planning.upgrade_options`, best first). Fixed with it: phase 76 had left `sensor.mpc_plan`'s state as its whole dict and `sensor.dynamic_tariff_shadow` unknown; `test_sensor_states_are_scalars_and_keys_unique` guards both.
+
 ### Spare solar (phase 25, 13/10/2026)
 
 `planning.expected_spare_solar` (corrected hourly solar − house load, battery refilled first from the earliest surplus, 08:00–16:00) feeds `sensor.spare_solar_today` (kWh; attributes best 3-hour window start/end/kWh and a per-hour list). Refreshed ~90 s after startup and at 06:05; the 06:05 run sends "🔋 Sunsynk: spare solar today" only if `spare_solar_notify_kwh` is set and the total reaches it (blank = off). No forecast → total `None`, never 0. Read-only: no inverter writes. Tests: `tests/test_kpis.py`. Not refreshed on forecast change (06:05 and restart only).
@@ -75,6 +90,7 @@ The dashboard's "Bill check and battery health" card (Consumption column, after 
 - **Others.** `sensor.data_health` (45), `binary_sensor.grid_outage` and `sensor.battery_runtime` (48), `sensor.pv_string_share` (49).
 - **Battery SOH (75).** `sensor.battery_soh` (%, diagnostic) is the BMS state of health from the cloud register snapshot; attributes carry packs, cycles, capacity, cell spread/temperature, BMS limits, fault words and the SOH trend.
 - **MPC plan (69).** `sensor.mpc_plan` (diagnostic): state is the shadow MPC's next half-hour action (`grid_charge`, `solar_charge`, `discharge`, `export`, `hold`); attributes carry the summary, the rule plan's target and the 24 h per-slot SOC path.
+- **TOU check (73), flex offer (77), upgrade advisor (50/78).** `sensor.tou_shadow`, `sensor.flex_event_offer`, `sensor.upgrade_advisor` (diagnostic); see the dashboard revamp section.
 - **Agile vs Flux (76).** `sensor.dynamic_tariff_shadow` (diagnostic, GBP): state is the nightly shadow saving of the same 24 h MPC on Agile half-hour prices compared with Flux (positive = Agile cheaper). Attributes hold both costs, price min/max, spike and negative slots, and the cheapest charge windows.
 - **Solar forecast P50 (70).** `sensor.solar_forecast_p50` (kWh, diagnostic): today's learned median solar from the last plan; attributes carry the P10/P90, ratios, bin, days and raw forecast.
 - **Load forecast (71).** `sensor.load_profile` (kWh, diagnostic): today's learned house load total; attributes carry the 48 half-hour slots, days used, day type, temperature scale and the peak/evening/day bands.

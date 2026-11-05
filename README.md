@@ -46,6 +46,7 @@ Install and configure these first.
 2. **Forecast.Solar**: daily forecast, for example `sensor.energy_production_today`. A tomorrow forecast sensor and an hourly forecast are optional.
 3. **A weather entity**, for example `weather.forecast_home`, used for full-charge day scoring.
 4. **[Sunsynk Power Flow Card](https://github.com/slipx06/sunsynk-power-flow-card)**: needed by the generated dashboard.
+5. **[ApexCharts Card](https://github.com/RomRider/apexcharts-card)** (HACS frontend): needed by the generated dashboard's charts.
 
 Optional: **[Home Assistant Octopus Energy](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy)** for real costs, tariff rates and the tariff comparison.
 
@@ -171,7 +172,7 @@ Sunday 18:00 scores Monday–Friday: `100 − cloud − 0.7 × rain`, with +25 s
 | `sensor.spare_solar_today` | Expected spare midday solar (kWh) |
 | `sensor.cost_of_1_kwh_now` | What using 1 kWh now costs (p/kWh) |
 | `sensor.operation_mode` | `auto` or `monitor` |
-| Diagnostic sensors | Forecast correction, drain adjustment, evening SOC adjustment, effective charge rate, battery capacity estimate, last error, last updated |
+| Diagnostic sensors | Forecast correction, drain adjustment, evening SOC adjustment, effective charge rate, battery capacity estimate, battery state of health, MPC plan, Agile vs Flux saving, inverter TOU differences, flex event offer, upgrade advisor best saving, last error, last updated |
 | `binary_sensor.evening_export_disabled`, `binary_sensor.monitor_only_mode` | Status flags |
 | `switch.away_mode` | Away (holiday) profile |
 | `datetime` Free event start / end | Manual free-event entry |
@@ -197,6 +198,17 @@ lovelace:
 ```
 
 3. Restart Home Assistant.
+
+The dashboard has six tabs:
+
+| Tab | Shows |
+|---|---|
+| Overview | Power flow, alerts (only when something needs attention), tonight's target and why, today's best time for big loads, quick actions |
+| Plan | The full "why this plan?" table, P10/P50/P90 solar, learned vs actual house load, what the system has learned |
+| Energy & cost | Today's meters, overnight/peak/day use, settled and year-to-date cost, import causes, bill check, 30-day KPI trends |
+| Battery & system | State of health and BMS detail, measured capacity, runtime left, grid/inverter/data health, live values |
+| Shadow lab | Scorecard, MPC plan chart, Agile vs Flux, inverter TOU check, flex event offer, upgrade advisor (nothing here writes to the inverter) |
+| Controls | Away mode, test plan, one-night full charge or skip (each asks to confirm), free event entry |
 
 Press **Update dashboard** again after an update that changes the layout.
 

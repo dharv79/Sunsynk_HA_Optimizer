@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .data_logger import DataLogger
 from .entity import optimizer_device_info
-from .planning import KPI_SENSORS, explain_plan, free_event_attributes, kpi_sensor_values
+from .planning import KPI_SENSORS, explain_plan, free_event_attributes, kpi_sensor_values, upgrade_options
 
 
 _ADAPTIVE_THRESHOLDS = {
@@ -97,6 +97,18 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(
                 coordinator, entry, "dynamic_tariff", "Agile vs Flux saving (shadow)",
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.dynamic_tariff_shadow",
+            ),
+            SunsynkOptimizerSensor(
+                coordinator, entry, "tou_shadow", "Inverter TOU differences (shadow)",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.tou_shadow",
+            ),
+            SunsynkOptimizerSensor(
+                coordinator, entry, "flex_event", "Flex event offer (shadow)",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.flex_event_offer",
+            ),
+            SunsynkOptimizerSensor(
+                coordinator, entry, "upgrade_advisor", "Upgrade advisor best saving",
+                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.upgrade_advisor",
             ),
             SunsynkOptimizerSensor(
                 coordinator, entry, "solar_forecast_p50", "Solar forecast P50 (learned)",
@@ -190,7 +202,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return "p/kWh"
         if self._sensor_key == "battery_runtime":
             return "h"
-        if self._sensor_key == "dynamic_tariff":
+        if self._sensor_key in ("dynamic_tariff", "upgrade_advisor"):
             return "GBP"
         if self._sensor_key in ("pv_strings", "battery_soh"):
             return "%"
@@ -252,12 +264,20 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return _as_dict(_as_dict(state.battery_health).get("latest")).get("soh_pct")
 
         if self._sensor_key == "mpc_plan":
-            return _as_dict(state.mpc_plan)
-        if self._sensor_key == "dynamic_tariff":
-            return _as_dict(state.dynamic_tariff).get("first_action")
+            return _as_dict(state.mpc_plan).get("first_action")
 
         if self._sensor_key == "dynamic_tariff":
             return _as_dict(state.dynamic_tariff).get("saving_gbp")
+
+        if self._sensor_key == "tou_shadow":
+            return _as_dict(state.tou_shadow).get("diff_count")
+
+        if self._sensor_key == "flex_event":
+            return _as_dict(state.flex_event).get("decision")
+
+        if self._sensor_key == "upgrade_advisor":
+            options = upgrade_options(_as_dict(state.upgrade_advisor))
+            return options[0]["annual_gbp"] if options else None
 
         if self._sensor_key == "solar_forecast_p50":
             return _as_dict(_as_dict(state.last_import_plan).get("forecast_quantiles")).get("p50_kwh")
@@ -354,6 +374,17 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return _as_dict(state.shadow_scorecard)
         if self._sensor_key == "mpc_plan":
             return _as_dict(state.mpc_plan)
+        if self._sensor_key == "dynamic_tariff":
+            return _as_dict(state.dynamic_tariff)
+        if self._sensor_key in ("tou_shadow", "flex_event"):
+            return _as_dict(getattr(state, self._sensor_key))
+        if self._sensor_key == "upgrade_advisor":
+            report = _as_dict(state.upgrade_advisor)
+            options = upgrade_options(report)
+            return {
+                "date": report.get("date"), "days": report.get("days"), "months": report.get("months"),
+                "best_option": options[0]["name"] if options else None, "options": options,
+            }
         if self._sensor_key == "load_profile":
             return _as_dict(state.load_profile)
         if self._sensor_key == "solar_forecast_p50":

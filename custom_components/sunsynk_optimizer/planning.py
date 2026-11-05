@@ -5094,3 +5094,26 @@ def electrification_summary(report: dict[str, Any]) -> list[str]:
             f"£{limit['saving_gbp']:.2f} (~£{limit['annual_gbp']:.0f}/yr)"
         )
     return lines
+
+
+def upgrade_options(report: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Every priced option in an upgrade advisor report as flat rows, best annual £ first (dashboard).
+
+    Rows: {name, annual_gbp, saving_gbp, payback_years, days, confidence}. Battery/PV
+    scenarios, the heat pump (phase 78) and the inverter limit; missing ones are skipped.
+    """
+    if not isinstance(report, dict):
+        return []
+    rows = [
+        {"name": s.get("name"), "annual_gbp": s.get("annual_gbp"), "saving_gbp": s.get("saving_gbp"),
+         "payback_years": s.get("payback_years"), "days": report.get("days"), "confidence": "upper bound"}
+        for s in report.get("scenarios") or [] if isinstance(s, dict)
+    ]
+    for key, name in (("heat_pump", "Heat pump (Cosy) vs gas"), ("export_limit", "Higher inverter limit")):
+        block = report.get(key)
+        if isinstance(block, dict):
+            rows.append({"name": name, "annual_gbp": block.get("annual_gbp"), "saving_gbp": block.get("saving_gbp"),
+                         "payback_years": block.get("payback_years"), "days": block.get("days"),
+                         "confidence": block.get("confidence")})
+    rows = [r for r in rows if _is_number(r["annual_gbp"])]
+    return sorted(rows, key=lambda r: -r["annual_gbp"])
