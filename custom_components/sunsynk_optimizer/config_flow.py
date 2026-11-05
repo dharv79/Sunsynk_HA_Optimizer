@@ -49,6 +49,7 @@ from .const import (
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_FULL_WINDOW_LIVE,
     CONF_EVENING_LOAD_LIVE,
+    CONF_LOAD_PROFILE_LIVE,
     CONF_MEASURED_RATE_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
@@ -99,6 +100,7 @@ from .const import (
     DEFAULT_PEAK_EXPORT_LIVE,
     DEFAULT_FULL_WINDOW_LIVE,
     DEFAULT_EVENING_LOAD_LIVE,
+    DEFAULT_LOAD_PROFILE_LIVE,
     DEFAULT_MEASURED_RATE_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
@@ -208,6 +210,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Required(
                 CONF_EVENING_LOAD_LIVE,
                 default=values.get(CONF_EVENING_LOAD_LIVE, DEFAULT_EVENING_LOAD_LIVE),
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_LOAD_PROFILE_LIVE,
+                default=values.get(CONF_LOAD_PROFILE_LIVE, DEFAULT_LOAD_PROFILE_LIVE),
             ): selector.BooleanSelector(),
             vol.Required(
                 CONF_PEAK_COVER_LIVE,

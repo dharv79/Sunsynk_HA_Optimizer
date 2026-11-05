@@ -107,3 +107,7 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## MPC plan record (05/11/2026, phase 69)
 
 `mpc_plan` (every 30 min, not deduped, never read back by learning): date, time, soc, cost_gbp, first_action, first_soc, soc_0500, grid_charge_kwh, offpeak_charge_kwh, day_charge_kwh, export_kwh, horizon_slots, rule_plan_date, rule_target_soc, loads_kw, tomorrow_solar_kwh. See `import-plan.md`.
+
+## Load profile fields (05/11/2026, phase 71)
+
+`day_kpis` gains `outside_temp_c` (mean of the 30-min weather-entity samples that day; None after a restart with no samples) and `evening_reserve_soc_profile`; `peak_cover` gains `peak_load_kwh_profile`; `mpc_plan` gains `load_profile_days`. The heating fit reads `outside_temp_c` back from `day_kpis`.

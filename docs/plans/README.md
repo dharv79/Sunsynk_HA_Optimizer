@@ -57,7 +57,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 47. KPI and money sensors with long-term statistics | Done, merged (79562e0, PR #122); weekly sensors and dashboard card not built | S, ~25k actual |
 | 48. Grid outage detection, runtime sensor and outage log | Done, merged (0f86a4a, PR #123); needs a live `grid_status` sample | S, ~30k actual |
 | 49. PV string health monitor (MPPT0 vs MPPT1) | Done, merged (d2cf87c, PR #124) | S, ~25k actual |
-| 50. Battery and PV upgrade advisor | Planned, not built | M |
+| 50. Battery and PV upgrade advisor | Done, merged (5765373, PR #140), report only | M, ~45k actual |
 | 51. Free events: DST-safe timers, a watch_from guard and sold-energy split | Done, merged (0708689, PR #107) | S, ~45k actual |
 | 52. Self-sufficiency KPI that excludes battery grid-charging and free import | Done, merged (32376c0, PR #91) | XS, ~30k actual |
 | 53. Measure overnight drain from the 05:00 snapshot SOC, not target_soc | Done, merged (5b70e67, PR #94) | S |
@@ -76,9 +76,9 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 66. Re-check the peak export plan at 17:00 and 18:00 using the observed peak load | Done, merged (27b831a, PR #102; peak export live option off) | S |
 | 67. Cache config and tariff parsing on the SOC-change path | Done, merged (2eeaebf, PR #109) | S, ~40k actual |
 | 68. Replace the weekly full-charge day with 'days since the last 100%' | Done, merged (643fd4c, PR #118), shadow (`full_charge_skip_live` off) | S, ~25k actual |
-| 69. Receding-horizon MPC planner (48 h, half-hourly) in shadow | Planned, not built | XL |
-| 70. Self-learned probabilistic solar forecast (own P10/P50/P90) | Planned, not built | L |
-| 71. Half-hourly household load forecaster (weather and calendar aware) | Planned, not built | L |
+| 69. Receding-horizon MPC planner (48 h, half-hourly) in shadow | Done, merged (f860226, PR #141), shadow; 24 h horizon, `mpc_live` not built | L, ~55k actual |
+| 70. Self-learned probabilistic solar forecast (own P10/P50/P90) | Done, merged (f5a86eb, PR #142), shadow; no weather bins | M, ~35k actual |
+| 71. Half-hourly household load forecaster (weather and calendar aware) | In progress (PR open) | M, ~45k |
 | 72. Full digital twin: replay every subsystem on half-hourly history | Planned, not built | XL |
 | 73. Native inverter time-of-use programming via the six system-mode slots | Planned, not built | L |
 | 74. Local Modbus/RS485 control path as a cloud-outage fallback | Planned, not built | XL |

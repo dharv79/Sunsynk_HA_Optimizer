@@ -4508,3 +4508,156 @@ def scale_hourly(hourly: dict[int, float] | None, ratio: float | None) -> dict[i
     if hourly is None or not _is_number(ratio):
         return hourly
     return {h: kwh * ratio for h, kwh in hourly.items()}
+
+
+# Half-hourly household load forecaster (phase 71). Shadow unless load_profile_live.
+LOAD_PROFILE_WINDOW_DAYS = 28
+LOAD_PROFILE_MIN_DAYS = 7
+LOAD_PROFILE_IMPORT_SHARE = 0.9  # import ≥ 90% of a segment's load → it's the shape (battery/solar idle)
+HEATING_BASE_C = 15.5
+HEATING_MIN_DAYS = 14
+HEATING_SCALE_BOUNDS = (0.7, 1.5)
+# (snapshot start, snapshot end, first slot, slot count); 22:00-24:00 has no snapshot.
+_PROFILE_SEGMENTS = (
+    ("00:00", "02:00", 0, 4), ("02:00", "05:00", 4, 6), ("05:00", "16:00", 10, 22),
+    ("16:00", "19:00", 32, 6), ("19:00", "22:00", 38, 6),
+)
+
+
+def day_load_slots(
+    snapshots: dict[str, dict[str, Any]], import_slots: list[float] | None = None
+) -> list[float] | None:
+    """48 half-hour house-load kWh for one logged day.
+
+    Each segment's metered load (SolarSynk snapshots) is spread over its
+    half-hours: in the shape of the smart-meter import when import covered
+    ≥90% of that load (the battery and solar were idle, so import ≈ load),
+    otherwise evenly. 22:00-24:00 repeats the 19:00-22:00 rate. Any missing
+    segment → None.
+    """
+    hh = import_slots if isinstance(import_slots, list) and len(import_slots) == 48 else None
+    out = [0.0] * 48
+    for start, end, first, count in _PROFILE_SEGMENTS:
+        load = _seg_value(snapshots, start, end, "load_kwh")
+        if load is None:
+            return None
+        weights = [1.0 / count] * count
+        if hh is not None:
+            seg = [max(0.0, float(v)) if _is_number(v) else 0.0 for v in hh[first:first + count]]
+            total = sum(seg)
+            if total > 0 and total >= LOAD_PROFILE_IMPORT_SHARE * load:
+                weights = [v / total for v in seg]
+        for i, w in enumerate(weights):
+            out[first + i] = load * w
+    rate = sum(out[38:44]) / 6
+    out[44:48] = [rate] * 4
+    return out
+
+
+def heating_scale(points: list[tuple[float, float]], temp_now: float | None) -> float | None:
+    """Load multiplier for today's temperature from (daily load kWh, mean °C) history.
+
+    Least squares of load on heating degrees max(0, 15.5 − °C); applied only
+    with ≥14 points, a positive slope and some spread in heating degrees.
+    Scale = fitted load now ÷ fitted load at the history's mean, clamped
+    0.7-1.5. None when it can't be fitted (no temperature effect assumed).
+    """
+    if temp_now is None or len(points) < HEATING_MIN_DAYS:
+        return None
+    xs = [max(0.0, HEATING_BASE_C - t) for _, t in points]
+    ys = [load for load, _ in points]
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    var = sum((x - mx) ** 2 for x in xs)
+    if var < 1.0:
+        return None
+    slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / var
+    if slope <= 0 or my <= 0:
+        return None
+    now = my + slope * (max(0.0, HEATING_BASE_C - temp_now) - mx)
+    return round(max(HEATING_SCALE_BOUNDS[0], min(HEATING_SCALE_BOUNDS[1], now / my)), 3)
+
+
+def load_profile(
+    snapshot_days: dict[str, dict[str, dict[str, Any]]],
+    half_hourly_import: dict[str, list[float]],
+    today: date,
+    weekend: bool,
+    skip_dates: set[str] | frozenset[str] = frozenset(),
+    temps: dict[str, float] | None = None,
+    temp_now: float | None = None,
+    window_days: int = LOAD_PROFILE_WINDOW_DAYS,
+    min_days: int = LOAD_PROFILE_MIN_DAYS,
+) -> dict[str, Any] | None:
+    """Per-slot median house load for today's day type, temperature-scaled; None below ``min_days``.
+
+    Uses days in the window before today (away days skipped) of the same
+    day type when there are ``min_days`` of them, else all. Summary bands:
+    peak 16:00-19:00 kWh, evening kW over 19:00-02:00 (wrapping into the
+    early slots), day kW over 05:00-16:00.
+    """
+    days: list[tuple[list[float], bool, str]] = []
+    for day_str, snaps in snapshot_days.items():
+        if day_str in skip_dates:
+            continue
+        try:
+            day = date.fromisoformat(day_str)
+        except (TypeError, ValueError):
+            continue
+        if not 0 < (today - day).days <= window_days:
+            continue
+        slots = day_load_slots(snaps, half_hourly_import.get(day_str))
+        if slots is not None:
+            days.append((slots, day.weekday() >= 5, day_str))
+    matching = [d for d in days if d[1] == weekend]
+    day_type = ("weekend" if weekend else "weekday") if len(matching) >= min_days else "all"
+    if day_type != "all":
+        days = matching
+    if len(days) < min_days:
+        return None
+    profile = [_median([d[0][i] for d in days]) for i in range(48)]
+    points = [(sum(d[0]), temps[d[2]]) for d in days if temps and _is_number(temps.get(d[2]))]
+    scale = heating_scale(points, temp_now)
+    if scale is not None:
+        profile = [v * scale for v in profile]
+    return {
+        "slots": [round(v, 3) for v in profile],
+        "days": len(days),
+        "day_type": day_type,
+        "temp_scale": scale,
+        "total_kwh": round(sum(profile), 2),
+        "peak_kwh": round(sum(profile[32:38]), 2),
+        "evening_kw": round((sum(profile[38:48]) + sum(profile[0:4])) / EVENING_RESERVE_HOURS, 3),
+        "day_kw": round(sum(profile[10:32]) / 11.0, 3),
+    }
+
+
+def load_profile_backtest(
+    snapshot_days: dict[str, dict[str, dict[str, Any]]],
+    half_hourly_import: dict[str, list[float]],
+) -> dict[str, Any]:
+    """Walk-forward 16:00-19:00 load error: the profile vs the phase 60 day-type median, per day.
+
+    Each day is predicted from earlier days only. MAE in kWh for both;
+    None until a day can be scored by both.
+    """
+    errors: dict[str, list[float]] = {"profile": [], "median": []}
+    for day_str in sorted(snapshot_days):
+        actual = _snap_delta(snapshot_days[day_str], "16:00", "19:00", "load_kwh")
+        try:
+            day = date.fromisoformat(day_str)
+        except ValueError:
+            continue
+        if actual is None:
+            continue
+        prior = {d: s for d, s in snapshot_days.items() if d < day_str}
+        profile = load_profile(prior, half_hourly_import, day, day.weekday() >= 5)
+        samples = [(d, v) for d, s in prior.items() if (v := _snap_delta(s, "16:00", "19:00", "load_kwh")) is not None]
+        if profile is None or not samples:
+            continue
+        median, _source, _margin = peak_load_estimate_split(samples[-14:], 0.0, day.weekday() >= 5)
+        errors["profile"].append(abs(profile["peak_kwh"] - actual))
+        errors["median"].append(abs(median - actual))
+    n = len(errors["profile"])
+    mae = (lambda k: round(sum(errors[k]) / n, 3) if n else None)
+    return {"days": n, "profile_mae_kwh": mae("profile"), "median_mae_kwh": mae("median")}

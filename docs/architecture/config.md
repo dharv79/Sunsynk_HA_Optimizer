@@ -44,3 +44,7 @@ The options flow is multi-step: `init` → `charges_1` (import tariff rows 1–4
 ## Automatic away mode (13/10/2026, phase 27)
 
 Optional: `auto_away_persons` (comma-separated `person.*`), `auto_away_calendar` + `auto_away_keyword`, `auto_away_min_hours` (default 24). `planning.auto_away` returns True/False/None; `optimizer._async_auto_away` runs at 22:00 and before the 01:55 plan, sets `away_mode` via `update_state` only on a change, and notifies. Anyone home → home at once; away needs all known persons away ≥ N hours (from the state's `last_changed`) or an active matching calendar event. Unavailable persons are ignored; no signal (None) leaves the manual switch alone. No config → no-op.
+
+## Options added 05/11/2026 (phases 50, 71)
+
+`upgrade_price_per_kwh`, `pv_kwp`, `pv_upgrade_price_per_kwp` (optional, upgrade advisor payback and PV scenario) and `load_profile_live` (default off: evening reserve and peak cover from the learned half-hourly profile).

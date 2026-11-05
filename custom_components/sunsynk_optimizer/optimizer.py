@@ -64,6 +64,7 @@ from .const import (
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_FULL_WINDOW_LIVE,
     CONF_EVENING_LOAD_LIVE,
+    CONF_LOAD_PROFILE_LIVE,
     CONF_MEASURED_RATE_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
@@ -93,6 +94,7 @@ from .const import (
     CONF_OCTOPUS_IMPORT_RATES_ENTITY,
     CONF_OCTOPUS_EXPORT_RATES_ENTITY,
     CONF_WEATHER_ENTITY,
+    DEFAULT_WEATHER_ENTITY,
     CONF_TOMORROW_FORECAST_SENSOR,
     DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_WEEKEND_AVG_CONSUMPTION_KW,
@@ -108,6 +110,7 @@ from .const import (
     DEFAULT_PEAK_EXPORT_LIVE,
     DEFAULT_FULL_WINDOW_LIVE,
     DEFAULT_EVENING_LOAD_LIVE,
+    DEFAULT_LOAD_PROFILE_LIVE,
     DEFAULT_MEASURED_RATE_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_PEAK_COVER_LIVE,
@@ -207,6 +210,7 @@ from .planning import (
     forecast_quantiles,
     forecast_ratio_samples,
     scale_hourly,
+    load_profile,
     mpc_solve,
     mpc_summary,
     upgrade_summary,
@@ -407,6 +411,9 @@ class SunsynkOptimizer:
         self._import_causes: dict[str, Any] = {}
         # Phase 55: learned 16:00-22:00 load (kW), refreshed by the 01:55 plan; unpersisted.
         self._evening_load_kw: float | None = None
+        # Phase 71: learned half-hourly load profile (refreshed with the plan) and today's outside-temp samples.
+        self._load_profile: dict[str, Any] | None = None
+        self._outside_temp: dict[str, Any] = {}
         # Phase 40: today's daytime grid_pac samples and whether it alerted; unpersisted.
         self._daytime_import: dict[str, Any] = {}
         # Cost-aware export-disable shadow-mode tally (v1.0.11 Part 3). Counts
@@ -2064,6 +2071,7 @@ class SunsynkOptimizer:
         await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         await self._guarded(self._async_daytime_import_check, "Daytime import check")
         await self._guarded(self._async_refresh_marginal_cost, "Cost of 1 kWh now")
+        await self._guarded(self._async_track_outside_temp, "Outside temperature")
         await self._guarded(self.async_run_mpc_shadow, "MPC shadow plan")
 
     def _mpc_loads(self, cfg: dict[str, Any]) -> dict[str, float]:
@@ -2095,7 +2103,7 @@ class SunsynkOptimizer:
         def _solve(ratio: float | None) -> dict[str, Any] | None:
             slots = mpc_slots(
                 now.hour * 60 + now.minute, prices, export_bands, scale_hourly(hourly_today, ratio),
-                scale_hourly(hourly_tomorrow, ratio), loads,
+                scale_hourly(hourly_tomorrow, ratio), loads, (self._load_profile or {}).get("slots"),
             )
             return None if slots is None else mpc_solve(
                 slots, soc, capacity, charge_kw, wear_pence=wear, terminal_pence=terminal
@@ -2119,7 +2127,8 @@ class SunsynkOptimizer:
         record = {
             "date": now.date().isoformat(), "time": now.strftime("%H:%M"), "soc": soc, **mpc_summary(plan), **spread,
             "rule_plan_date": rule.get("date"), "rule_target_soc": rule.get("target_soc"),
-            "loads_kw": loads, "tomorrow_solar_kwh": tomorrow_kwh,
+            "loads_kw": loads, "load_profile_days": (self._load_profile or {}).get("days"),
+            "tomorrow_solar_kwh": tomorrow_kwh,
         }
         await self.data_logger.async_log_mpc_plan(**record)
         self.coordinator.update_state(touch=False, mpc_plan={**record, "slots": plan["slots"]})
@@ -2504,6 +2513,12 @@ class SunsynkOptimizer:
             "evening_reserve_soc": self._evening_reserve_soc(),
             "evening_load_kw_learned": self._evening_load_kw,
             "evening_reserve_soc_learned": self._evening_reserve_pair()[1],
+            # Phase 71: the profile's reserve (shadow unless load_profile_live) and today's mean outside °C.
+            "evening_reserve_soc_profile": evening_reserve_soc(
+                self._load_profile["evening_kw"], self._capacity_kwh(cfg)
+            ) if self._load_profile else None,
+            "outside_temp_c": round(self._outside_temp["sum"] / self._outside_temp["n"], 1)
+            if self._outside_temp.get("date") == date and self._outside_temp.get("n") else None,
             "wear_cost_p": self._wear_pence(),
             # Phase 37: what the day cost with vs without the battery.
             **no_battery_baseline(
@@ -2924,11 +2939,51 @@ class SunsynkOptimizer:
         days = await self.data_logger.async_load_snapshot_days(30)
         skip = {d["date"] for d in paired_days if d.get("away") and d.get("date")}
         self._evening_load_kw, _n = learned_evening_load_kw(days, today, weekend, skip)
+        await self._guarded(lambda: self._refresh_load_profile(days, today, weekend, skip), "Load profile")
+
+    async def _refresh_load_profile(self, days, today, weekend: bool, skip: set[str]) -> None:
+        """Phase 71: per-slot median load for today's day type, scaled by today's outside temperature."""
+        half_import, _export = await self.data_logger.async_load_half_hourly(30)
+        temps = {
+            r["date"]: r["outside_temp_c"] for r in await self.data_logger.async_load_records(30)
+            if r.get("type") == "day_kpis" and r.get("date") and isinstance(r.get("outside_temp_c"), (int, float))
+        }
+        self._load_profile = load_profile(days, half_import, today, weekend, skip, temps, self._outside_temp_now())
+        self.coordinator.update_state(
+            touch=False, load_profile={**(self._load_profile or {}), "date": today.isoformat()}
+        )
+
+    def _outside_temp_now(self) -> float | None:
+        """Current outside °C from the weather entity's temperature attribute; None when unavailable."""
+        state = self.hass.states.get(self._cfg_str(CONF_WEATHER_ENTITY) or DEFAULT_WEATHER_ENTITY)
+        value = state.attributes.get("temperature") if state is not None else None
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    async def _async_track_outside_temp(self) -> None:
+        """30-min: running mean of today's outside temperature, logged on day_kpis (phase 71)."""
+        temp = self._outside_temp_now()
+        today = dt_util.now().date().isoformat()
+        if self._outside_temp.get("date") != today:
+            self._outside_temp = {"date": today, "sum": 0.0, "n": 0}
+        if temp is not None:
+            self._outside_temp["sum"] += temp
+            self._outside_temp["n"] += 1
+
+    def _profile_live(self) -> dict[str, Any] | None:
+        """The load profile when `load_profile_live` is on and one has been learned; else None."""
+        if not bool(self.cfg.get(CONF_LOAD_PROFILE_LIVE, DEFAULT_LOAD_PROFILE_LIVE)):
+            return None
+        return self._load_profile
 
     def _evening_reserve_pair(self, hours: float | None = None) -> tuple[int, int | None]:
         """(reserve in force, learned-load reserve or None); learned only in force when live."""
         cfg = self.cfg
         kwargs = {} if hours is None else {"hours": hours}
+        profile = self._profile_live()
+        if profile is not None:  # phase 71 live: the profile's 19:00-02:00 rate wins
+            return evening_reserve_choice(
+                self._plan_load_kw(cfg), profile["evening_kw"], self._capacity_kwh(cfg), True, **kwargs
+            )
         return evening_reserve_choice(
             self._plan_load_kw(cfg), self._evening_load_kw, self._capacity_kwh(cfg),
             bool(cfg.get(CONF_EVENING_LOAD_LIVE, DEFAULT_EVENING_LOAD_LIVE)), **kwargs,
@@ -4233,6 +4288,9 @@ class SunsynkOptimizer:
         peak_load_kwh, peak_load_source, peak_margin = peak_load_estimate_split(
             await self.data_logger.async_recent_peak_load_days(), 3.0 * load_kw, now.weekday() >= 5
         )
+        profile_peak_kwh = (self._load_profile or {}).get("peak_kwh")
+        if self._profile_live() is not None and profile_peak_kwh is not None:  # phase 71 live
+            peak_load_kwh, peak_load_source, peak_margin = profile_peak_kwh, "load_profile", 1.0
         # Pessimistic solar, like the low-solar decisions: the raw (uncorrected) forecast.
         hourly = self._hourly_or_synthetic_forecast(cfg, now)
         solar_kwh = solar_until_kwh(hourly, now.hour + now.minute / 60.0)
@@ -4290,6 +4348,7 @@ class SunsynkOptimizer:
             "load_source": load_source,
             "peak_load_kwh": peak_load_kwh,
             "peak_load_source": peak_load_source,
+            "peak_load_kwh_profile": profile_peak_kwh,
             "peak_margin": peak_margin,
             "wear_cost_p": self._wear_pence(),
             "day_pence": prices["day"],
