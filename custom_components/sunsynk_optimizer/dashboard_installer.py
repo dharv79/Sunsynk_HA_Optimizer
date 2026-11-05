@@ -41,7 +41,12 @@ _MACROS = (
     "{%- else -%}{{ x }}{{ u }}{%- endif -%}{%- endmacro -%}"
     "{%- macro gbp(e, k) -%}{%- set x = state_attr(e, k) -%}"
     "{%- if x is number and x is not boolean -%}{{ '-' if x < 0 else '' }}£{{ '%.2f' | format(x | abs) }}"
-    "{%- else -%}—{%- endif -%}{%- endmacro -%}\n"
+    "{%- else -%}—{%- endif -%}{%- endmacro -%}"
+    # ISO timestamp attribute -> local "Sun 08:00" (fmt='%H:%M' for time only); unparsable shows raw.
+    "{%- macro when(e, k, fmt='%a %H:%M') -%}{%- set x = state_attr(e, k) -%}"
+    "{%- set d = as_datetime(x | string, none) if x else none -%}"
+    "{%- if not x -%}—{%- elif d is none -%}{{ x }}{%- else -%}{{ as_local(d).strftime(fmt) }}"
+    "{%- endif -%}{%- endmacro -%}\n"
 )
 
 _PLAN = "sensor.import_plan_end"
@@ -297,7 +302,7 @@ def _overview(s, forecast_sensor: str) -> dict[str, Any]:
     alerts.append({
         **_md(
             '<ha-alert alert-type="success" title="Free electricity event: {{ states(\'sensor.free_event\') }}">'
-            "{{ a('sensor.free_event', 'free_start') }} → {{ a('sensor.free_event', 'free_end') }}"
+            "{{ when('sensor.free_event', 'free_start') }} → {{ when('sensor.free_event', 'free_end', '%H:%M') }}"
             " · sell {{ a('sensor.free_event', 'sell_status') }}</ha-alert>"
         ),
         "visibility": [{"condition": "state", "entity": "sensor.free_event", "state_not": "none"}],
@@ -790,8 +795,8 @@ def _controls(api_plant_id: str, serial: str, weather_entity: str, forecast_sens
         {"type": "entities", "title": "Status", "show_header_toggle": False,
          "entities": [
              {"entity": "sensor.free_event", "name": "Phase"},
-             {"entity": "sensor.free_event", "type": "attribute", "attribute": "free_start", "name": "Free start"},
-             {"entity": "sensor.free_event", "type": "attribute", "attribute": "free_end", "name": "Free end"},
+             {"entity": "sensor.free_event", "type": "attribute", "attribute": "free_start", "name": "Free start", "format": "datetime"},
+             {"entity": "sensor.free_event", "type": "attribute", "attribute": "free_end", "name": "Free end", "format": "datetime"},
              {"entity": "sensor.free_event", "type": "attribute", "attribute": "sell_status", "name": "Sell"},
              {"entity": "sensor.free_event", "type": "attribute", "attribute": "sell_floor_soc", "name": "Sell floor SOC (%)"},
              {"entity": "sensor.free_event", "type": "attribute", "attribute": "expected_export_kwh", "name": "Expected export (kWh)"},
