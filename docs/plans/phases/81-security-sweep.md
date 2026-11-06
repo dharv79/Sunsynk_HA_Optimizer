@@ -1,6 +1,6 @@
 # Phase 81 — Vulnerability and security sweep
 
-**Status:** Planned, not built. **Size:** M, ~50-80k est. **Category:** user request (06/11/2026, out of the idea sweep).
+**Status:** Done (see the plan index for the merge). **Size:** M, ~50-80k est. **Category:** user request (06/11/2026, out of the idea sweep).
 
 ## Goal
 
@@ -54,3 +54,23 @@ Read each area, list the findings with severity (high, medium, low, info), and c
 - Tests cover each fix: redaction of every secret key, rejected bad service inputs, safe override parsing, dashboard escaping, card served-file allow-list.
 - The CI changes are in: pinned actions and minimal permissions, plus any static check added.
 - py_compile, pyflakes and pytest all pass. The README and docs are updated if behaviour changes.
+
+## Findings (06/11/2026)
+
+| # | Area | Finding | Severity | Fix / reason not fixed |
+|---|---|---|---|---|
+| 1 | API | `plant_id` and `inverter_sn` went into URL paths unquoted, so a value with `/`, `?` or `..` could send the bearer token to a different route on the Sunsynk host | Medium | `api._seg()` quotes every id; `planning.url_segment` for the probe routes |
+| 2 | Secrets | `redact_config` did not look inside lists, so a secret in a list of dicts would reach the diagnostics download | Low | Recurses into lists and tuples |
+| 3 | API | Bandit B324: MD5 for the nonce signature | Info (false positive) | The Sunsynk API requires MD5 signing; marked `usedforsecurity=False` |
+| 4 | Workflows | Actions pinned to moving tags (`@v4`, `@v5`) | Medium | Pinned to commit SHAs; Dependabot keeps them current |
+| 5 | Workflows | `tests.yml` had the default token permissions | Low | `permissions: contents: read` |
+| 6 | Workflows | Release tag came from the branch name without a format check (it was already quoted, so no injection) | Low | Refuses anything that isn't `N.N.N` or `N.N.NbN` |
+| 7 | CI | Test tools unpinned; no static security scan | Low | Pinned pytest, pyflakes, bandit; bandit (medium+) runs in CI |
+| 8 | Secrets | Password, token and username never reach logs, notifications or attributes; the options flow doesn't echo the password; `SunsynkApiError` text holds only error bodies | None | No change |
+| 9 | API / Octopus | TLS verification is on everywhere and every request has a timeout | None | No change; a test guards against `ssl=False` |
+| 10 | Inputs | Service schemas check types and the 20-100% range; `_service_guard` refuses writes in monitor mode or while slots are held; overrides JSON uses `json.loads` (no `eval`) and junk becomes `{}` | None | Tests added for junk overrides |
+| 11 | Files | The dashboard filename uses the HA entry id; the Agile cache path uses a region checked as A-P; pruning deletes only `YYYY-MM.jsonl` | None | No change |
+| 12 | Dashboard | The serial, plant id and entity ids are reduced to safe characters before they reach Jinja; the file is written with `json.dumps` | None | No change |
+| 13 | Cards | `innerHTML` holds only static markup, constant colours and numbers; names and states use `textContent`; `www/` holds only the two registered cards | None | Tests added |
+| 14 | Dependencies | `requirements: []` (HA bundles `cryptography`); `pip-audit` on the test tools is clean; no secrets in git history | None | No change |
+| 15 | Config | Bandit B105: the `CONF_PASSWORD = "password"` constant | Info (false positive) | Not a secret |

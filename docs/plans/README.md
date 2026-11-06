@@ -88,7 +88,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 78. Household electrification and system-sizing advisor | Done, merged (1291c33, PR #151), report only | M, ~30k actual |
 | 79. Own Sunsynk power-flow card (replaces slipx06; user request 05/11/2026) | Done, merged (1101fb0, PR #156) | L, ~120k actual |
 | 80. Day chart tab with previous/next day navigation (user request 05/11/2026) | Done, merged (93af8a5, PR #159) | M |
-| 81. Vulnerability and security sweep (user request 06/11/2026) | Planned, not built | M, ~50-80k |
+| 81. Vulnerability and security sweep (user request 06/11/2026) | Done, merged (PENDING) | M, ~60k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 

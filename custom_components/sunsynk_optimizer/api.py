@@ -14,6 +14,7 @@ import base64
 import hashlib
 import time
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 from cryptography.hazmat.primitives import serialization
@@ -26,6 +27,11 @@ CLIENT_ID = "csp-web"  # required OAuth client identifier for the web portal flo
 _BASE_HEADERS = {"accept": "application/json", "origin": BASE_WEB, "referer": f"{BASE_WEB}/"}
 _TIMEOUT = aiohttp.ClientTimeout(total=30)  # phase 57: fail fast so the plan retry gets its chance
 _JSON_HEADERS = {**_BASE_HEADERS, "content-type": "application/json;charset=UTF-8"}
+
+
+def _seg(value: object) -> str:
+    """A config id quoted for one URL path segment or query value, so it can't change the route."""
+    return quote(str(value).strip(), safe="")
 
 
 class SunsynkApiError(Exception):
@@ -49,7 +55,7 @@ class SunsynkApiClient:
     @staticmethod
     def _md5_hex(value: str) -> str:
         """Return lowercase MD5 hex digest — used to sign API nonces."""
-        return hashlib.md5(value.encode("utf-8")).hexdigest()
+        return hashlib.md5(value.encode("utf-8"), usedforsecurity=False).hexdigest()  # API signing, not security
 
     @classmethod
     def _signed_nonce(cls, secret: str) -> tuple[int, str]:
@@ -158,12 +164,12 @@ class SunsynkApiClient:
 
     async def async_post_income(self, plant_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """POST an income/Flux config payload to the Sunsynk API (keyed by plant_id)."""
-        return await self._authorized_json("POST", f"{BASE_API}/api/v1/plant/{plant_id}/income", payload)
+        return await self._authorized_json("POST", f"{BASE_API}/api/v1/plant/{_seg(plant_id)}/income", payload)
 
     async def async_read_flux_products(self, plant_id: str) -> list[dict[str, Any]] | None:
         """Read back the plant's income config; its fluxProducts, or None when the
         response doesn't carry them (the GET twin of async_post_income is undocumented)."""
-        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/plant/{plant_id}/income")
+        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/plant/{_seg(plant_id)}/income")
         body = data.get("data") if isinstance(data, dict) else None
         products = body.get("fluxProducts") if isinstance(body, dict) else None
         return products if isinstance(products, list) else None
@@ -172,7 +178,7 @@ class SunsynkApiClient:
         """Read the inverter's current (realtime) fault/event list (phase 43); [] when healthy.
 
         Captured from the Sunsynk portal's Event tab (04/11/2026). None when the reply has no list."""
-        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/event/{inverter_sn}/realtime?lan=en")
+        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/event/{_seg(inverter_sn)}/realtime?lan=en")
         body = data.get("data") if isinstance(data, dict) else None
         return body if isinstance(body, list) else None
 
@@ -198,7 +204,7 @@ class SunsynkApiClient:
         One record of ~690 named registers (BMS SOH, cycles, cells, fault words); None if unreadable."""
         data = await self._authorized_json(
             "GET",
-            f"{BASE_API}/api/v1/workdata/dynamic?page=1&limit=1&sn={inverter_sn}"
+            f"{BASE_API}/api/v1/workdata/dynamic?page=1&limit=1&sn={_seg(inverter_sn)}"
             f"&dateRange={date},{date}&type=1&lan=en",
         )
         body = data.get("data") if isinstance(data, dict) else None
@@ -207,7 +213,7 @@ class SunsynkApiClient:
 
     async def async_read_settings(self, inverter_sn: str) -> dict[str, Any]:
         """Read the inverter's settings (keyed by the inverter serial, not plant_id)."""
-        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/read")
+        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/common/setting/{_seg(inverter_sn)}/read")
         settings = data.get("data") if isinstance(data, dict) else None
         if not isinstance(settings, dict):
             raise SunsynkApiError(f"Unexpected settings response: {data}")
@@ -217,7 +223,7 @@ class SunsynkApiClient:
         """Write inverter settings. Send the full dict just read with only the
         changed key altered — the portal posts the whole form, so a partial
         body risks blanking the fields it leaves out."""
-        return await self._authorized_json("POST", f"{BASE_API}/api/v1/common/setting/{inverter_sn}/set", settings)
+        return await self._authorized_json("POST", f"{BASE_API}/api/v1/common/setting/{_seg(inverter_sn)}/set", settings)
 
     async def async_probe_events(self, paths: list[str]) -> list[dict[str, Any]]:
         """Phase 43 feasibility probe: read-only GETs of candidate alarm/event routes.

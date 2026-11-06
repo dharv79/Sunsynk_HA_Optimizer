@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from urllib.parse import quote
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -3646,11 +3647,23 @@ def redact_config(data: Mapping[str, Any]) -> dict[str, Any]:
         lowered = str(key).lower()
         if any(part in lowered for part in _AUDIT_REDACT_PARTS):
             out[key] = "**REDACTED**"
-        elif isinstance(value, Mapping):
-            out[key] = redact_config(value)
         else:
-            out[key] = value
+            out[key] = _redact_value(value)
     return out
+
+
+def _redact_value(value: Any) -> Any:
+    """Recurse into mappings and lists/tuples so a secret nested inside a list is still masked."""
+    if isinstance(value, Mapping):
+        return redact_config(value)
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(v) for v in value]
+    return value
+
+
+def url_segment(value: Any) -> str:
+    """A config id made safe for one URL path segment or query value ('/', '?', '&', '..' can't redirect the call)."""
+    return quote(str(value).strip(), safe="")
 
 
 # --------------------------------------------------------------------------- #
@@ -3865,7 +3878,7 @@ EVENT_PROBE_ROUTES = (
 
 def event_probe_paths(inverter_sn: str, plant_id: str, today: str = "2026-01-01", start: str = "2025-12-01") -> list[str]:
     """Candidate read-only GET routes for the cloud's alarm/event list, with ids and dates filled in."""
-    return [r.format(sn=inverter_sn, plant_id=plant_id, today=today, start=start) for r in EVENT_PROBE_ROUTES]
+    return [r.format(sn=url_segment(inverter_sn), plant_id=url_segment(plant_id), today=today, start=start) for r in EVENT_PROBE_ROUTES]
 
 
 _EVENT_TEXT_KEYS = ("eventName", "name", "content", "message", "desc", "description", "alarmName", "title")
