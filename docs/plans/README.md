@@ -93,7 +93,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 83. High grid voltage export guard (feasibility-gated) | Built, tally only (merge SHA pending) | S, ~25-35k |
 | 84. Battery low-SOC floor review (reworked 10/11/2026) | Built, read-only (merge SHA pending) | S, ~20-30k |
 | 85. Prorated bill reconciliation and missing-days alert | Done, merged (728fd3e, PR #176) | XS-S, ~20-30k |
-| 86. Daytime import and reserve-hold review | Planned, low priority | S, ~25-40k |
+| 86. Daytime import and reserve-hold review | Built, shadow only (merge SHA pending) | S, ~25-40k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 

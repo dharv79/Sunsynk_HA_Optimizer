@@ -233,6 +233,8 @@ from .planning import (
     FORECAST_QUANTILE_HISTORY_DAYS,
     FLOOR_CANDIDATE_SOC,
     battery_floor_soc,
+    hourly_profile,
+    reserve_hold_cost,
     VOLTAGE_DERATE_PERIOD_MIN,
     voltage_derate_suspect,
     cloud_bucket,
@@ -435,6 +437,7 @@ class SunsynkOptimizer:
         self._peak_window_start: dict[str, Any] | None = None
         # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
         self._clipped: dict[str, Any] = {}
+        self._hourly: dict[str, Any] = {}  # phase 86: unpersisted timed samples of the day's meters
         self._derated: dict[str, Any] = {}  # phase 83: unpersisted minutes of suspected voltage derating
         # Phase 49 per-string PV energy sampled 10:00-15:00 (date, m0, m1 kWh). Unpersisted:
         # a restart only thins the day's sample; the share is a ratio so it stays valid.
@@ -2132,6 +2135,7 @@ class SunsynkOptimizer:
         await self._guarded(self.async_run_peak_cover, "Peak cover")
         await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
         await self._guarded(self._async_track_voltage_derate, "Voltage derate tracking")
+        self._sample_hourly()
         await self._guarded(self._async_track_pv_strings, "PV string tracking")
         await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         await self._guarded(self._async_daytime_import_check, "Daytime import check")
@@ -2399,6 +2403,31 @@ class SunsynkOptimizer:
         self._clipped["periods"] += 1
         if lost is not None:
             self._clipped["kwh"] = (self._clipped["kwh"] or 0.0) + lost
+
+    def _sample_hourly(self) -> None:
+        """Add a timed sample of SOC and the daily import/load meters to today's buffer (phase 86)."""
+        now = dt_util.now()
+        today = now.date().isoformat()
+        if self._hourly.get("date") != today:
+            self._hourly = {"date": today, "samples": []}
+        if len(self._hourly["samples"]) < 120:
+            self._hourly["samples"].append({
+                "minute": now.hour * 60 + now.minute, "soc": self._essential_state(self.battery_soc_entity),
+                "grid_import_kwh": self._essential_state(self.day_grid_import_entity),
+                "load_kwh": self._essential_state(self.day_load_entity),
+            })
+
+    async def _async_log_hourly_profile(self, date: str) -> dict[str, Any]:
+        """22:00: log the hourly profile and the reserve-hold split (phase 86); shadow, no writes."""
+        self._sample_hourly()
+        samples = self._hourly["samples"] if self._hourly.get("date") == date else []
+        hourly = hourly_profile(samples)
+        if not hourly:
+            return {}
+        prices, _sources = self._tariff_prices(dt_util.parse_date(date))
+        split = reserve_hold_cost(hourly, BATTERY_LOW_SOC, prices)
+        await self.data_logger.async_log_hourly_profile(date=date, hourly=hourly, **split)
+        return {"type": "hourly_profile", "date": date, "hourly": hourly, **split}
 
     async def _async_track_voltage_derate(self) -> None:
         """30-min: tally minutes where high grid voltage looks to be curtailing solar (phase 83); no writes.
@@ -3893,6 +3922,7 @@ class SunsynkOptimizer:
         }
         kpi_rec = await self._async_capture_day_kpis(date)
         floor_rec = await self._async_review_battery_floor(date)
+        hourly_rec = await self._async_log_hourly_profile(date)
         await self._guarded(lambda: self._async_capture_pv_strings(date), "PV string capture")
         # Persisted (not just logged/notified) so the dashboard's Consumption
         # sensor has today's actuals to display, the same way last_morning_state
@@ -3938,7 +3968,7 @@ class SunsynkOptimizer:
                 complete_rec = {}
             lines = "\n".join(
                 json.dumps(r)
-                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, floor_rec, peak_rec, peak_cover_rec, peak_export_rec, cost_rec, complete_rec]
+                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, floor_rec, hourly_rec, peak_rec, peak_cover_rec, peak_export_rec, cost_rec, complete_rec]
                 if r
             )
             await self.async_notify(

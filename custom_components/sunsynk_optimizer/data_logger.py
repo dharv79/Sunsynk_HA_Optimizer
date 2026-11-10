@@ -295,6 +295,10 @@ class DataLogger:
         """Log a cloud grid lost/restored notice (phase 43 follow-up): deduped by the caller on notice id."""
         await self._async_append(_record("grid_notice", **fields))
 
+    async def async_log_hourly_profile(self, **fields: Any) -> None:
+        """Log the day's hourly soc / grid import / load profile (phase 86): one per date (deduped)."""
+        await self._async_append(_record("hourly_profile", **fields))
+
     async def async_log_battery_floor(self, **fields: Any) -> None:
         """Log the inverter low-battery SOC review (phase 84): one per date (deduped)."""
         await self._async_append(_record("battery_floor", **fields))
@@ -927,7 +931,7 @@ class DataLogger:
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog", "charge_outcome",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load", "import_causes",
         "half_hourly_import", "half_hourly_export", "capacity_estimate", "pv_strings",
-        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health", "dynamic_tariff", "tou_shadow", "flex_event", "battery_floor",
+        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health", "dynamic_tariff", "tou_shadow", "flex_event", "battery_floor", "hourly_profile",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:
