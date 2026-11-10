@@ -66,7 +66,8 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_battery_health.py` | Phase 75 register-snapshot parser (real trimmed record), fault words, BMS stall hints, SOH trend and measured wear; peak-cover restart retry |
 | `tests/test_upgrade_advisor.py` | Phase 50 upgrade advisor: `simulate_system` matches the phase 37 no-battery baseline at 0 kWh, size/PV/charge-rate/wear behaviour, `upgrade_advisor` scenarios, payback and `backtest.py --upgrade` |
 | `tests/test_mpc.py` | Phase 69 shadow MPC: `mpc_solve` decisions (arbitrage, hold, wear, floor/rate, solar, export, terminal value), `mpc_slots`, `mpc_summary`, `mpc_backtest_day` and `backtest.py --planner mpc` |
-| `tests/test_forecast_quantiles.py` | Phase 70 learned P10/P50/P90 solar: ratio samples, bin fallback, season wrap, walk-forward coverage, `scale_hourly`, plan field |
+| `tests/test_forecast_quantiles.py` | Phase 70 learned P10/P50/P90 solar: ratio samples, bin fallback, season wrap, walk-forward coverage, `scale_hourly`, plan field; phase 82 cloud buckets, sparse-cell fallback, weather fields, `weather_bins` scorecard entry |
+| `tests/test_battery_floor.py` | Phase 84 inverter low-SOC floor: key detection, floor-day £ saving, away skip, `None` inputs, dedup |
 | `tests/test_load_profile.py` | Phase 71 load profile: `day_load_slots` shaping, `load_profile` day type/filters/summary, `heating_scale`, walk-forward backtest, MPC hand-off, `backtest.py --load-profile` |
 | `tests/test_dynamic_tariff.py` | Phase 76 Agile shadow: `cheapest_window_plan` (ordering, partial slot, spike guard, negative slots, two days), `mpc_slots` price vectors, `dynamic_tariff_summary` |
 | `tests/test_native_tou.py` | Phase 73 TOU shadow: `tou_slots_from_plan` mapping, padding, peak hold, merge, missing inputs; `tou_slots_from_settings` parsing; `tou_diff`; `tou_settings_payload` round trip |

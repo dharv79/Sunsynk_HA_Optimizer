@@ -231,7 +231,10 @@ from .planning import (
     CHARGE_EFFICIENCY,
     mpc_slots,
     FORECAST_QUANTILE_HISTORY_DAYS,
+    FLOOR_CANDIDATE_SOC,
+    battery_floor_soc,
     cloud_bucket,
+    floor_saving_gbp,
     forecast_quantiles,
     forecast_ratio_samples,
     scale_hourly,
@@ -2725,6 +2728,24 @@ class SunsynkOptimizer:
         self.coordinator.update_state(touch=False, last_day_kpis=record)
         return {"type": "day_kpis", **record}
 
+    async def _async_review_battery_floor(self, date: str) -> dict[str, Any]:
+        """22:00: read the inverter's low-battery SOC and log what a lower floor would have saved (phase 84).
+
+        Read-only (also in monitor mode): the setting is never written. When the settings read-back
+        exposes no floor the record still lists the candidate key names, so feasibility is visible."""
+        settings = await self._async_api_read("Battery floor", self.coordinator.api.async_read_settings, self.inverter_serial)
+        floor, key, names = battery_floor_soc(settings)
+        paired = await self.data_logger.async_load_paired_days(days=30)
+        prices, _sources = self._tariff_prices(dt_util.parse_date(date))
+        saving = floor_saving_gbp(paired, floor, FLOOR_CANDIDATE_SOC, self._capacity_kwh(self.cfg), prices)
+        record = {
+            "date": date, "battery_floor_soc": floor, "floor_key": key, "floor_keys": names,
+            "candidate_soc": FLOOR_CANDIDATE_SOC, "window_days": saving["days"], "hit_days": saving["hit_days"],
+            "saving_30d_gbp": saving["saving_gbp"],
+        }
+        await self.data_logger.async_log_battery_floor(**record)
+        return {"type": "battery_floor", **record}
+
     async def _async_peak_export(self, _now) -> None:
         await self._guarded(self.async_run_peak_export, "Peak surplus export")
 
@@ -3845,6 +3866,7 @@ class SunsynkOptimizer:
             "overnight_target_too_high": too_high,
         }
         kpi_rec = await self._async_capture_day_kpis(date)
+        floor_rec = await self._async_review_battery_floor(date)
         await self._guarded(lambda: self._async_capture_pv_strings(date), "PV string capture")
         # Persisted (not just logged/notified) so the dashboard's Consumption
         # sensor has today's actuals to display, the same way last_morning_state
@@ -3890,7 +3912,7 @@ class SunsynkOptimizer:
                 complete_rec = {}
             lines = "\n".join(
                 json.dumps(r)
-                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, peak_rec, peak_cover_rec, peak_export_rec, cost_rec, complete_rec]
+                for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, floor_rec, peak_rec, peak_cover_rec, peak_export_rec, cost_rec, complete_rec]
                 if r
             )
             await self.async_notify(

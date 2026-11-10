@@ -4038,6 +4038,58 @@ def inverter_fault_flag(active_events, counts, health_faults=None) -> bool | Non
     return any(signals) if signals else None
 
 
+# ---- Phase 84: inverter low-battery SOC floor (read-only review) ---------------------------------------
+FLOOR_CANDIDATE_SOC = 15  # what-if floor for the £ estimate; the setting is never written
+FLOOR_HIT_MARGIN = 1.0  # evening SOC within this of the floor counts as a day that sat on it
+_FLOOR_KEY_WORDS = ("cap", "soc", "low", "shutdown", "restart")
+
+
+def battery_floor_soc(settings: Any) -> tuple[float | None, str | None, list[str]]:
+    """(floor %, key it came from, candidate key names) from the settings read-back.
+
+    The key is the first whose lower-cased name contains both "low" and "cap" with a 0-100 value.
+    The candidate names (keys only, never values) are returned so the log shows what the cloud
+    exposes when no floor is found. Not a dict -> (None, None, []).
+    """
+    if not isinstance(settings, dict):
+        return None, None, []
+    names = sorted(str(k) for k in settings if any(w in str(k).lower() for w in _FLOOR_KEY_WORDS))
+    for name in names:
+        lowered = name.lower()
+        if "low" in lowered and "cap" in lowered:
+            try:
+                value = float(settings[name])
+            except (TypeError, ValueError):
+                continue
+            if 0 <= value <= 100:
+                return value, name, names
+    return None, None, names
+
+
+def floor_saving_gbp(
+    days: list[dict[str, Any]],
+    floor_soc: float | None,
+    candidate_soc: float,
+    capacity_kwh: float | None,
+    prices_pence: dict[str, float | None],
+) -> dict[str, Any]:
+    """£ a lower inverter floor would have saved over ``days`` (paired days: evening_soc, away).
+
+    A day counts when its evening SOC sat on the floor (within FLOOR_HIT_MARGIN); each such day
+    would have used (floor - candidate)% more of the battery instead of buying that energy at
+    the day rate, the replacement costing off-peak / CHARGE_EFFICIENCY. Away days are skipped
+    (rule 18). Missing floor, capacity or prices -> saving None (rule 11).
+    """
+    usable = [d for d in days if not d.get("away") and _is_number(d.get("evening_soc"))]
+    hits = [d for d in usable if floor_soc is not None and d["evening_soc"] <= floor_soc + FLOOR_HIT_MARGIN]
+    day, offpeak = prices_pence.get("day"), prices_pence.get("offpeak")
+    saving = None
+    if floor_soc is not None and _is_number(capacity_kwh) and capacity_kwh > 0 and day is not None and offpeak is not None:
+        per_day_kwh = max(0.0, floor_soc - candidate_soc) / 100 * capacity_kwh
+        saving = round(len(hits) * per_day_kwh * (day - offpeak / CHARGE_EFFICIENCY) / 100, 2)
+    return {"days": len(usable), "hit_days": len(hits), "saving_gbp": saving}
+
+
 # ---- Phase 75: battery state of health from the cloud register snapshot ----------------------------
 # Source: GET /api/v1/workdata/dynamic?...&type=1 (portal "Operation data", captured 04/11/2026). Each
 # record is {"<Name>(<unit>)/<register>": "<value>"}; names are matched without the unit/register suffix
