@@ -233,6 +233,8 @@ from .planning import (
     FORECAST_QUANTILE_HISTORY_DAYS,
     FLOOR_CANDIDATE_SOC,
     battery_floor_soc,
+    VOLTAGE_DERATE_PERIOD_MIN,
+    voltage_derate_suspect,
     cloud_bucket,
     floor_saving_gbp,
     forecast_quantiles,
@@ -433,6 +435,7 @@ class SunsynkOptimizer:
         self._peak_window_start: dict[str, Any] | None = None
         # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
         self._clipped: dict[str, Any] = {}
+        self._derated: dict[str, Any] = {}  # phase 83: unpersisted minutes of suspected voltage derating
         # Phase 49 per-string PV energy sampled 10:00-15:00 (date, m0, m1 kWh). Unpersisted:
         # a restart only thins the day's sample; the share is a ratio so it stays valid.
         self._strings: dict[str, Any] = {}
@@ -2128,6 +2131,7 @@ class SunsynkOptimizer:
         await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
         await self._guarded(self.async_run_peak_cover, "Peak cover")
         await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
+        await self._guarded(self._async_track_voltage_derate, "Voltage derate tracking")
         await self._guarded(self._async_track_pv_strings, "PV string tracking")
         await self._guarded(self._async_track_over_limit_import, "Over-limit import tracking")
         await self._guarded(self._async_daytime_import_check, "Daytime import check")
@@ -2395,6 +2399,24 @@ class SunsynkOptimizer:
         self._clipped["periods"] += 1
         if lost is not None:
             self._clipped["kwh"] = (self._clipped["kwh"] or 0.0) + lost
+
+    async def _async_track_voltage_derate(self) -> None:
+        """30-min: tally minutes where high grid voltage looks to be curtailing solar (phase 83); no writes.
+
+        Logged as ``export_derated_min`` on day_actuals so the feasibility scan can count affected
+        days. Missing voltage/PV/load reads are never counted. A restart loses the day's tally."""
+        today = dt_util.now().date().isoformat()
+        if self._derated.get("date") != today:
+            self._derated = {"date": today, "minutes": 0, "seen": False}
+        pv_parts = [self._essential_state(e) for e in (self.pv_mppt0_entity, self.pv_mppt1_entity)]
+        pv_w = sum(p for p in pv_parts if p is not None) if any(p is not None for p in pv_parts) else None
+        voltage = self._essential_state(self.grid_voltage_entity)
+        self._derated["seen"] = self._derated["seen"] or voltage is not None
+        if voltage_derate_suspect(
+            voltage, self._essential_state(self.grid_pac_entity), pv_w,
+            self._essential_state(self.load_power_entity), self._essential_state(self.battery_soc_entity),
+        ):
+            self._derated["minutes"] += VOLTAGE_DERATE_PERIOD_MIN
 
     async def _async_track_over_limit_import(self) -> None:
         """Tally import the battery could not cover (load above the inverter's output); no writes.
@@ -3842,6 +3864,8 @@ class SunsynkOptimizer:
         clipped = self._clipped if self._clipped.get("date") == date else {}
         clipped_kwh = clipped.get("kwh") if clipped.get("periods") else (0.0 if clipped else None)
         too_high = overnight_target_too_high(clipped_kwh, clipped.get("first_full_hour"))
+        derated = self._derated if self._derated.get("date") == date else {}
+        derated_min = derated.get("minutes") if derated.get("seen") else None  # None: voltage never read
         await self.data_logger.async_log_day_actuals(
             date=date,
             evening_soc=soc,
@@ -3852,6 +3876,7 @@ class SunsynkOptimizer:
             day_grid_export_kwh=day_grid_export_kwh,
             clipped_solar_kwh=clipped_kwh,
             overnight_target_too_high=too_high,
+            export_derated_min=derated_min,
         )
         actuals_rec = {
             "type": "day_actuals",
@@ -3864,6 +3889,7 @@ class SunsynkOptimizer:
             "day_grid_export_kwh": round_or_none(day_grid_export_kwh),
             "clipped_solar_kwh": round_or_none(clipped_kwh),
             "overnight_target_too_high": too_high,
+            "export_derated_min": derated_min,
         }
         kpi_rec = await self._async_capture_day_kpis(date)
         floor_rec = await self._async_review_battery_floor(date)

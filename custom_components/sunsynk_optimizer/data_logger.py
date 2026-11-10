@@ -247,6 +247,7 @@ class DataLogger:
         day_grid_export_kwh: float | None = None,
         clipped_solar_kwh: float | None = None,
         overnight_target_too_high: bool | None = None,
+        export_derated_min: int | None = None,
     ) -> None:
         """Log end-of-day actuals captured at 22:00.
 
@@ -266,6 +267,7 @@ class DataLogger:
                 day_grid_export_kwh=round_or_none(day_grid_export_kwh),
                 clipped_solar_kwh=round_or_none(clipped_solar_kwh),
                 overnight_target_too_high=overnight_target_too_high,
+                export_derated_min=export_derated_min,
             )
         )
 

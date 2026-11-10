@@ -90,7 +90,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 80. Day chart tab with previous/next day navigation (user request 05/11/2026) | Done, merged (93af8a5, PR #159) | M |
 | 81. Vulnerability and security sweep (user request 06/11/2026) | Done, merged (a94c43f, PR #170) | M, ~60k |
 | 82. Weather bins for the forecast correction | Built, shadow only (merge SHA pending) | M, ~40-60k |
-| 83. High grid voltage export guard (feasibility-gated) | Planned, not built | S, ~25-35k |
+| 83. High grid voltage export guard (feasibility-gated) | Built, tally only (merge SHA pending) | S, ~25-35k |
 | 84. Battery low-SOC floor review (reworked 10/11/2026) | Built, read-only (merge SHA pending) | S, ~20-30k |
 | 85. Prorated bill reconciliation and missing-days alert | Done, merged (728fd3e, PR #176) | XS-S, ~20-30k |
 | 86. Daytime import and reserve-hold review | Planned, low priority | S, ~25-40k |
