@@ -1,21 +1,22 @@
-# Phase 84 — Learned battery reserve floor
+# Phase 84 — Battery low-SOC floor review
 
-**Status:** Planned, not built. **Size:** S, ~25-35k est. **Origin:** idea sweep 08/11/2026 (idea 11).
+**Status:** Planned, not built. **Size:** S, ~20-30k est. **Origin:** idea sweep 08/11/2026 (idea 11); reworked 10/11/2026 after the Oct-Nov log review.
 
 ## Goal
 
-Tighten the minimum-SOC reserve to the lowest level the house actually reaches, so the overnight charge buys less cushion than needed.
+Find out whether the 25% floor the battery sits at every dark evening is the inverter's own low-battery setting, and show what lowering it would save.
 
-## Vetting (08/11/2026)
+## Evidence (10/11/2026)
 
-- `lowest_soc` is already computed in `planning.py` and phases 55, 60 and 64 size the evening reserve and the bridge, but no step learns the floor itself from `day_actuals` / `morning_state`.
-- Overlaps phase 64 (newsvendor bridge target); re-read it first and merge if the same margin is already covered.
+- `evening_soc` is exactly 25.0 on 10 of the last 12 days: a hard floor, not a learned house minimum. The code's `BATTERY_BOTTOM_SOC` is 20 and nothing reads the inverter's low-battery setting, so a learned 10th percentile (the original design) would just return 25 and save nothing.
+- Usable capacity is about 11.4 kWh (scorecard `capacity`), and the 3 kW night window already fills it on dark days. Each 5 points of floor is about 0.57 kWh a day at roughly 10p (day vs night rate), so 25 → 15% is about £0.11 a day, £15-25 a year on dark days only.
 
 ## Design
 
-- Pure `planning.learned_reserve_floor(history, min_days=21, quantile=0.1)`: the 10th percentile of the lowest SOC reached over home days (away days excluded, do-not-break 18), clamped to the configured reserve and never below the inverter shutdown SOC.
-- Shadow only first: log `reserve_floor_learned` and the kWh it would have saved per night.
+- Feasibility first: check whether the settings API read-back (`api.py`) exposes the low-battery / shutdown SOC. If not, On hold.
+- Read-only. Log `battery_floor_soc` per day, compare with the lowest SOC reached, and report the £ a lower floor would have saved in the weekly summary. Never write the setting (the floor is a safety and warranty choice for the user; rule 16 for monitor mode still applies).
+- Pure `planning.floor_saving_gbp(history, floor_soc, candidate_soc, capacity_kwh, prices)` with a test (rule 19). Away days excluded (rule 18); missing → `None` (rule 11).
 
-## Savings estimate (rough, unproven)
+## Savings estimate
 
-Roughly £5-15/yr. Each 5 points of reserve is about 0.5 kWh a night on a 10 kWh battery, and only some of it is bought at the higher rate.
+£15-25 a year if the user lowers the inverter setting; £0 from the integration itself.
