@@ -1,6 +1,6 @@
 # Phase 86 — Daytime import and reserve-hold review
 
-**Status:** Planned, not built. **Size:** S, ~25-40k est. **Origin:** Octopus statement 9 Oct-9 Nov 2026 and `#sunsynkdebug` review (10/11/2026). Overlaps phases 62, 64 and 84; re-read them first.
+**Status:** Planned, low priority (10/11/2026 review: likely about £0 in winter). **Size:** S, ~25-40k est. **Origin:** Octopus statement 9 Oct-9 Nov 2026 and `#sunsynkdebug` review (10/11/2026). Overlaps phases 62, 64 and 84; re-read them first.
 
 ## Evidence
 
@@ -21,3 +21,7 @@ Is the evening reserve held at 16:00 (about 50%) sized for the right hours, and 
 ## Savings estimate
 
 Unproven. Upper bound about £35 a winter from a lower floor (phase 84) plus a smaller amount if the hold is mis-sized; could be £0 if the current trade-off is right.
+
+## Review note (10/11/2026)
+
+Outside 16:00-19:00 every hour is the same day rate, so a kWh of battery displaces the same 25-28p whether it is used in the morning, afternoon or evening. The reserve hold therefore costs nothing while the battery is cycled fully each day (unused charge 0.0 kWh, floor reached by 22:00). The 5 Nov-9 Nov day-rate import is battery capacity, not scheduling. Build only if the scorecard shows a day where the hold left charge unused at 02:00 or a peak import that cover would have avoided.
