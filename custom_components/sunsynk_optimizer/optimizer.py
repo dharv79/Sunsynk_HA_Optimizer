@@ -231,6 +231,7 @@ from .planning import (
     CHARGE_EFFICIENCY,
     mpc_slots,
     FORECAST_QUANTILE_HISTORY_DAYS,
+    cloud_bucket,
     forecast_quantiles,
     forecast_ratio_samples,
     scale_hourly,
@@ -867,6 +868,25 @@ class SunsynkOptimizer:
                 scores[day_name] = score_full_charge_day(item, day_name)
         return scores
 
+    async def _async_today_cloud_cover(self) -> float | None:
+        """Today's cloud cover % from the daily weather forecast (phase 82); None when unavailable."""
+        entity = self._cfg_str(CONF_WEATHER_ENTITY) or DEFAULT_WEATHER_ENTITY
+        try:
+            response = await self.hass.services.async_call(
+                "weather", "get_forecasts", {"entity_id": entity, "type": "daily"},
+                blocking=True, return_response=True,
+            )
+        except Exception:  # noqa: BLE001 - optional input, degrade to None
+            return None
+        items = ((response or {}).get(entity) or {}).get("forecast") or [] if isinstance(response, dict) else []
+        today = dt_util.now().date()
+        for item in items:
+            when = dt_util.parse_datetime(str(item.get("datetime") or ""))
+            value = item.get("cloud_coverage")
+            if when is not None and dt_util.as_local(when).date() == today:
+                return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        return None
+
     async def async_recheck_full_charge_day(self) -> None:
         """Daily 18:00: move this week's full-charge day to tomorrow when
         Forecast.Solar says tomorrow's PV alone can reach 100% and its weather
@@ -1191,6 +1211,11 @@ class SunsynkOptimizer:
         solar_quantiles = None if forecast_fallback else forecast_quantiles(
             quantile_samples, now.month, band, raw_forecast_kwh
         )
+        # Phase 82 (shadow): the same quantiles binned by today's cloud cover; the target is unchanged.
+        cloud_cover_pct = await self._async_today_cloud_cover()
+        cloud_quantiles = None if forecast_fallback or cloud_bucket(cloud_cover_pct) is None else forecast_quantiles(
+            quantile_samples, now.month, band, raw_forecast_kwh, cloud=cloud_bucket(cloud_cover_pct)
+        )
         # A free event later today should start at its floor: buy only that plus the load until then.
         uncapped_target_soc = target_soc
         free_event = self.coordinator.state.free_event
@@ -1290,6 +1315,9 @@ class SunsynkOptimizer:
             "forecast_correction_weighted_basis": weighted_basis,
             **nv,
             "forecast_quantiles": solar_quantiles,
+            "forecast_quantiles_cloud": cloud_quantiles,
+            "cloud_cover_pct": cloud_cover_pct,
+            "outdoor_temp_c": self._outside_temp_now(),
             "days_since_full": since_full,
             "full_charge_due": full_due,
             "full_charge_skip_would": skip_would,

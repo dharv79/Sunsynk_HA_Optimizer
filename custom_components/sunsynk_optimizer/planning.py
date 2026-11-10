@@ -3508,6 +3508,27 @@ def shadow_scorecard(
         score["error_ratio"] = round(ratio, 3)
         score["verdict"] = "ready" if ratio <= 1 - SCORECARD_ERROR_GAIN else "harmful" if ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
     out["weighted_correction"] = score
+    # 82 weather bins: mean absolute P50 error with the cloud bucket vs without it (shadow, no £ counterfactual).
+    base_err: list[float] = []
+    cloud_err: list[float] = []
+    cloud_dates: list[str] = []
+    for p in plans:
+        actual = (actuals.get(p["date"]) or {}).get("actual_solar_kwh")
+        base = (p.get("forecast_quantiles") or {}).get("p50_kwh")
+        binned = (p.get("forecast_quantiles_cloud") or {}).get("p50_kwh")
+        if None in (actual, base, binned):
+            continue
+        base_err.append(abs(base - actual))
+        cloud_err.append(abs(binned - actual))
+        cloud_dates.append(p["date"])
+    score = _score(len(cloud_dates), 0, None, cloud_dates, "mean absolute P50 error, cloud bins vs band x season")
+    if len(cloud_dates) >= SCORECARD_MIN_DAYS and sum(base_err) > 0:
+        ratio = sum(cloud_err) / sum(base_err)
+        score["changed"] = len(cloud_dates)
+        score["delta_gbp"] = None
+        score["error_ratio"] = round(ratio, 3)
+        score["verdict"] = "ready" if ratio <= 1 - SCORECARD_ERROR_GAIN else "harmful" if ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
+    out["weather_bins"] = score
     # 64 newsvendor ratio: asymmetric p-cost of the solar-scale error, live factor vs newsvendor ratio.
     nv_live: list[float] = []
     nv_shadow: list[float] = []
@@ -4476,6 +4497,17 @@ FORECAST_QUANTILE_LEVELS = (0.1, 0.5, 0.9)
 FORECAST_QUANTILE_MIN_DAYS = 14
 FORECAST_QUANTILE_HISTORY_DAYS = 395  # the 13-month log
 FORECAST_QUANTILE_RATIO_CAP = (0.05, 5.0)
+CLOUD_BUCKET_EDGES = (35.0, 70.0)  # % cloud: below the first is clear, at/above the second overcast (phase 82)
+CLOUD_BIN_MIN_DAYS = 5  # a cloud cell this thin falls back to the band x season bins
+
+
+def cloud_bucket(cloud_pct: Any) -> str | None:
+    """clear / mixed / overcast from a mean cloud-cover percentage; None when missing (never guessed)."""
+    if not _is_number(cloud_pct):
+        return None
+    if cloud_pct < CLOUD_BUCKET_EDGES[0]:
+        return "clear"
+    return "mixed" if cloud_pct < CLOUD_BUCKET_EDGES[1] else "overcast"
 
 
 def _season(month: int) -> set[int]:
@@ -4503,7 +4535,8 @@ def forecast_ratio_samples(paired_days: list[dict[str, Any]]) -> list[dict[str, 
         except ValueError:
             continue
         ratio = max(FORECAST_QUANTILE_RATIO_CAP[0], min(FORECAST_QUANTILE_RATIO_CAP[1], actual / raw))
-        out.append({"date": d["date"], "ratio": ratio, "band": d.get("forecast_band"), "month": month})
+        out.append({"date": d["date"], "ratio": ratio, "band": d.get("forecast_band"), "month": month,
+                    "cloud": cloud_bucket(d.get("cloud_cover_pct"))})
     return out
 
 
@@ -4513,15 +4546,20 @@ def forecast_quantiles(
     band: str | None,
     raw_forecast_kwh: float | None,
     min_days: int = FORECAST_QUANTILE_MIN_DAYS,
+    cloud: str | None = None,
 ) -> dict[str, Any] | None:
     """P10/P50/P90 of actual/raw from the narrowest bin with enough days.
 
-    Bins, narrowest first: forecast band × season (month ± 1), season, band,
-    all. kWh = raw × ratio when a raw forecast is given. None below
-    ``min_days`` in every bin (thin history is not a guess).
+    Bins, narrowest first: [cloud bucket × season, cloud bucket (phase 82, only
+    when ``cloud`` is given, needing CLOUD_BIN_MIN_DAYS)], forecast band ×
+    season (month ± 1), season, band, all. kWh = raw × ratio when a raw
+    forecast is given. None below ``min_days`` in every bin (thin history is
+    not a guess). Without ``cloud`` the result is the phase 70 one.
     """
     season = _season(month)
     bins = (
+        ("cloud_season", lambda s: s.get("cloud") == cloud and s["month"] in season),
+        ("cloud", lambda s: s.get("cloud") == cloud),
         ("band_season", lambda s: s["band"] == band and s["month"] in season),
         ("season", lambda s: s["month"] in season),
         ("band", lambda s: s["band"] == band),
@@ -4530,8 +4568,10 @@ def forecast_quantiles(
     for name, keep in bins:
         if band is None and name.startswith("band"):
             continue
+        if cloud is None and name.startswith("cloud"):
+            continue
         ratios = sorted(s["ratio"] for s in samples if keep(s))
-        if len(ratios) < min_days:
+        if len(ratios) < (CLOUD_BIN_MIN_DAYS if name.startswith("cloud") else min_days):
             continue
         out: dict[str, Any] = {"bin": name, "days": len(ratios)}
         for q in FORECAST_QUANTILE_LEVELS:

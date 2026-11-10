@@ -1,6 +1,6 @@
 # Phase 82 — Weather bins for the forecast correction
 
-**Status:** Planned, not built. **Size:** M, ~40-60k est. **Origin:** idea sweep 08/11/2026 (ideas 2, 3, 4, 20; the remainder of phase 70's "not built" list).
+**Status:** Built (10/11/2026), shadow only. **Size:** M, ~40-60k est. **Origin:** idea sweep 08/11/2026 (ideas 2, 3, 4, 20; the remainder of phase 70's "not built" list).
 
 ## Goal
 
@@ -27,3 +27,10 @@ Make the overnight target react to the kind of day, not only the forecast total.
 ## Savings estimate (rough, unproven)
 
 Roughly £10-25/yr, mainly on mixed-cloud days where the single factor mis-sizes the charge by 1-2 kWh. Confirm from the scorecard before any live switch. The first winter will be thin.
+
+## Built (10/11/2026)
+
+- `import_plan` now logs `cloud_cover_pct` (today's daily-forecast `cloud_coverage`, `None` when the weather entity lacks it), `outdoor_temp_c` and `forecast_quantiles_cloud` (all in `_IMPORT_PLAN_FIELDS`).
+- `planning.cloud_bucket` (clear <35, mixed 35-70, overcast >=70) and `forecast_quantiles(..., cloud=)` add cloud x season and cloud bins ahead of band x season, needing 5 days each (`CLOUD_BIN_MIN_DAYS`); thinner cells fall back. Without `cloud` the phase 70 result is unchanged.
+- Shadow scorecard feature `weather_bins`: mean absolute P50 error with the cloud bins against the band x season P50. No £ counterfactual; the target and `min(raw, corrected)` are untouched.
+- Cloud cover is a daily figure, not the mean of the forecast hours; revisit if the scorecard shows no gain. The temperature load shift stays in phase 71.
