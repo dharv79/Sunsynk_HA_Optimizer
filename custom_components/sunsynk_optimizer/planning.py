@@ -3555,6 +3555,13 @@ def shadow_scorecard(
         score["error_ratio"] = round(ratio, 3)
         score["verdict"] = "ready" if ratio <= 1 - SCORECARD_ERROR_GAIN else "harmful" if ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
     out["weather_bins"] = score
+    # 86 reserve hold: days that bought day-rate import with charge still in the battery (shadow, no £ counterfactual).
+    holds = win("hourly_profile")
+    flagged = [r for r in holds if (r.get("above_floor_day_import_kwh") or 0) >= RESERVE_HOLD_MIN_KWH]
+    out["reserve_hold"] = _score(
+        len(holds), len(flagged), None, [r["date"] for r in flagged],
+        "day-rate import bought with charge above the floor; review the dates",
+    )
     # 64 newsvendor ratio: asymmetric p-cost of the solar-scale error, live factor vs newsvendor ratio.
     nv_live: list[float] = []
     nv_shadow: list[float] = []
@@ -4062,6 +4069,70 @@ def inverter_fault_flag(active_events, counts, health_faults=None) -> bool | Non
         if known:
             signals.append(any(v > 0 for v in known))
     return any(signals) if signals else None
+
+
+# ---- Phase 86: hourly profile and reserve-hold review (shadow) ------------------------------------------
+RESERVE_HOLD_MARGIN_SOC = 3.0  # within this of the floor counts as "at the floor"
+RESERVE_HOLD_MIN_KWH = 0.5  # a day with at least this much above-floor day import is flagged in the scorecard
+
+
+def _hour_band(hour: int) -> str:
+    """Flux band of a clock hour: night 02-05, peak 16-19, else day."""
+    return "offpeak" if 2 <= hour < 5 else "peak" if 16 <= hour < 19 else "day"
+
+
+def hourly_profile(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per-hour {hour, soc, grid_import_kwh, load_kwh} from timed samples of daily meters.
+
+    ``samples`` are {minute, soc, grid_import_kwh, load_kwh} (the two kWh values are
+    cumulative day counters). The change between consecutive samples belongs to the earlier
+    sample's hour; a missing value or a counter reset (negative step) contributes nothing, and an
+    hour with no usable step reports None, never 0 (rule 11). soc is the hour's first reading.
+    """
+    ordered = sorted((s for s in samples if _is_number(s.get("minute"))), key=lambda s: s["minute"])
+    hours: dict[int, dict[str, Any]] = {}
+    for i, cur in enumerate(ordered):
+        hour = int(cur["minute"]) // 60
+        row = hours.setdefault(hour, {"hour": hour, "soc": cur.get("soc"), "grid_import_kwh": None, "load_kwh": None})
+        if row["soc"] is None:
+            row["soc"] = cur.get("soc")
+        if i + 1 == len(ordered):
+            continue
+        nxt = ordered[i + 1]
+        for key in ("grid_import_kwh", "load_kwh"):
+            a, b = cur.get(key), nxt.get(key)
+            if _is_number(a) and _is_number(b) and b >= a:
+                row[key] = round((row[key] or 0.0) + b - a, 3)
+    return [hours[h] for h in sorted(hours)]
+
+
+def reserve_hold_cost(
+    hourly: list[dict[str, Any]], floor_soc: float, prices_pence: dict[str, float | None]
+) -> dict[str, Any]:
+    """Import bought while the battery still held charge, against import after it ran out.
+
+    Splits each hour's grid import by band and by whether the battery started the hour above the
+    floor (+ RESERVE_HOLD_MARGIN_SOC). ``above_floor_day_import_kwh`` is the figure to watch: day-rate
+    energy bought with charge in hand, which a different hold could have avoided. Missing → None.
+    """
+    out = {"above_floor_day_import_kwh": None, "at_floor_day_import_kwh": None, "peak_import_kwh": None,
+           "above_floor_day_import_gbp": None}
+    for row in hourly:
+        kwh, soc = row.get("grid_import_kwh"), row.get("soc")
+        if not _is_number(kwh) or not _is_number(soc) or kwh <= 0:
+            continue
+        band = _hour_band(int(row["hour"]))
+        if band == "peak":
+            key = "peak_import_kwh"
+        elif band == "day":
+            key = "above_floor_day_import_kwh" if soc > floor_soc + RESERVE_HOLD_MARGIN_SOC else "at_floor_day_import_kwh"
+        else:
+            continue
+        out[key] = round((out[key] or 0.0) + kwh, 3)
+    day = prices_pence.get("day")
+    if out["above_floor_day_import_kwh"] is not None and day is not None:
+        out["above_floor_day_import_gbp"] = round(out["above_floor_day_import_kwh"] * day / 100, 2)
+    return out
 
 
 # ---- Phase 84: inverter low-battery SOC floor (read-only review) ---------------------------------------
