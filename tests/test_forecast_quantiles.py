@@ -59,3 +59,50 @@ def test_plan_field_is_logged():
     from conftest import _data_logger
 
     assert "forecast_quantiles" in _data_logger._IMPORT_PLAN_FIELDS
+
+
+def _cloudy(i, ratio, cloud, **kw):
+    return {**_day(i, ratio, **kw), "cloud_cover_pct": cloud}
+
+
+def test_cloud_bucket_edges_and_missing():
+    b = planning.cloud_bucket
+    assert (b(0), b(34.9), b(35), b(69.9), b(70), b(100)) == ("clear", "clear", "mixed", "mixed", "overcast", "overcast")
+    assert b(None) is None and b("x") is None and b(True) is None
+
+
+def test_cloud_bins_narrowest_first_and_sparse_fallback():
+    days = [_cloudy(i, 0.4, 90) for i in range(6)] + [_cloudy(i, 1.2, 10) for i in range(15)]
+    samples = planning.forecast_ratio_samples(days)
+    q = planning.forecast_quantiles(samples, 10, "shoulder", 8.0, cloud="overcast")
+    assert q["bin"] == "cloud_season" and q["days"] == 6 and q["p50_ratio"] == 0.4
+    # Only 4 mixed days: below CLOUD_BIN_MIN_DAYS, so the band x season bin answers.
+    thin = planning.forecast_ratio_samples([_cloudy(i, 1.0, 50) for i in range(4)] + days)
+    assert planning.forecast_quantiles(thin, 10, "shoulder", 8.0, cloud="mixed")["bin"] == "band_season"
+    # No cloud given: identical to phase 70 (cloud bins skipped).
+    assert planning.forecast_quantiles(samples, 10, "shoulder", 8.0)["bin"] == "band_season"
+    assert planning.forecast_quantiles(samples, 10, "shoulder", 8.0, cloud="clear")["days"] == 15
+
+
+def test_samples_without_weather_have_no_cloud():
+    s = planning.forecast_ratio_samples([_day(0, 1.0)])
+    assert s[0]["cloud"] is None
+
+
+def test_weather_fields_round_trip():
+    from conftest import _data_logger
+
+    for f in ("forecast_quantiles_cloud", "cloud_cover_pct", "outdoor_temp_c"):
+        assert f in _data_logger._IMPORT_PLAN_FIELDS
+
+
+def test_scorecard_weather_bins_entry():
+    recs = []
+    for i in range(8):
+        d = f"2026-11-{i + 1:02d}"
+        recs.append({"type": "import_plan", "date": d, "forecast_quantiles": {"p50_kwh": 8.0},
+                     "forecast_quantiles_cloud": {"p50_kwh": 4.2}})
+        recs.append({"type": "day_actuals", "date": d, "actual_solar_kwh": 4.0})
+    card = planning.shadow_scorecard(recs, "2026-11-09")
+    assert card["weather_bins"]["verdict"] == "ready" and card["weather_bins"]["error_ratio"] < 0.1
+    assert planning.shadow_scorecard([], "2026-11-09")["weather_bins"]["days"] == 0
