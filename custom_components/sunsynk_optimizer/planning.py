@@ -3253,6 +3253,7 @@ def record_for_date(record: dict[str, Any] | None, date: str) -> dict[str, Any]:
 
 # Bill reconciliation (phase 36).
 BILL_GAP_ALERT_GBP = 2.0
+BILL_MIN_COVERAGE = 25 / 30  # under this share of days logged, the projection is not trusted (phase 85)
 
 
 def logged_day_cost_gbp(day: dict[str, Any], include_gas: bool) -> float | None:
@@ -3267,6 +3268,7 @@ def logged_day_cost_gbp(day: dict[str, Any], include_gas: bool) -> float | None:
 
 BILL_ATTRIBUTE_KEYS = (
     "logged_gbp", "billed_gbp", "gap_gbp", "gap_pct", "days_logged", "days_in_month", "partial", "alert", "includes_gas",
+    "projected_logged_gbp", "gap_per_day_pct", "coverage_low",
 )
 
 
@@ -3310,14 +3312,20 @@ def reconcile_month(
     ``day_costs`` is one value per logged day (None = that day's cost is
     missing). ``standing_p_per_day`` is added per day only when the logged
     costs exclude it (None = already included, as the Octopus cost sensors
-    do). A month with missing days is ``partial`` and never alerts; unknown
-    billed → gap None, no alert.
+    do). A partial month is compared on its projected cost (logged / days
+    logged × days in the period, phase 85); with under ``BILL_MIN_COVERAGE``
+    of days logged it is ``coverage_low`` and never alerts. Unknown billed →
+    gap None, no alert.
     """
     values = [c for c in day_costs if _is_number(c)]
     logged = sum(values) + (standing_p_per_day or 0.0) * len(values) / 100 if values else None
     partial = len(values) < days_in_month
     gap = None if logged is None or billed_gbp is None else billed_gbp - logged
     pct = None if gap is None or not billed_gbp else gap / abs(billed_gbp) * 100
+    projected = logged * days_in_month / len(values) if values else None
+    proj_gap = None if projected is None or billed_gbp is None else billed_gbp - projected
+    per_day_pct = None if proj_gap is None or not billed_gbp else proj_gap / abs(billed_gbp) * 100
+    coverage_low = days_in_month > 0 and len(values) / days_in_month < BILL_MIN_COVERAGE
     return {
         "logged_gbp": round_or_none(logged),
         "billed_gbp": round_or_none(billed_gbp),
@@ -3326,7 +3334,10 @@ def reconcile_month(
         "days_logged": len(values),
         "days_in_month": days_in_month,
         "partial": partial,
-        "alert": gap is not None and not partial and abs(gap) > threshold_gbp,
+        "alert": proj_gap is not None and not coverage_low and abs(proj_gap) > threshold_gbp,
+        "projected_logged_gbp": round_or_none(projected),
+        "gap_per_day_pct": round_or_none(per_day_pct, 1),
+        "coverage_low": coverage_low,
     }
 
 

@@ -683,8 +683,25 @@ def test_reconcile_gap_over_threshold(planning):
 
 
 def test_reconcile_missing_days_partial_no_alert(planning):
-    out = planning.reconcile_month([1.0] * 25 + [None], 30, 40.0)
+    out = planning.reconcile_month([1.0] * 25 + [None], 30, 31.0)
     assert out["partial"] and out["days_logged"] == 25 and not out["alert"]
+
+
+def test_reconcile_projects_partial_month(planning):
+    # Real 8 Sep-7 Oct case: £39.39 over 19 of 30 days against a £65.02 bill.
+    out = planning.reconcile_month([39.39 / 19] * 19, 30, 65.02)
+    assert out["projected_logged_gbp"] == 62.19 and out["gap_per_day_pct"] == 4.3
+    assert out["coverage_low"] and not out["alert"]
+
+
+def test_reconcile_projected_gap_alerts_when_coverage_ok(planning):
+    out = planning.reconcile_month([1.0] * 26, 30, 40.0)
+    assert not out["coverage_low"] and out["alert"] and out["projected_logged_gbp"] == 30.0
+
+
+def test_reconcile_no_days_projection_none(planning):
+    out = planning.reconcile_month([], 30, 20.0)
+    assert out["projected_logged_gbp"] is None and out["gap_per_day_pct"] is None and out["coverage_low"]
 
 
 def test_reconcile_billed_unknown(planning):
