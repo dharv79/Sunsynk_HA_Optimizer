@@ -1,6 +1,6 @@
 # Phase 83 — High grid voltage export guard
 
-**Status:** Planned, not built (feasibility-gated). **Size:** S, ~25-35k est. **Origin:** idea sweep 08/11/2026 (idea 7).
+**Status:** Built (10/11/2026), tally only; feasibility decided by the first month of `export_derated_min`. **Size:** S, ~25-35k est. **Origin:** idea sweep 08/11/2026 (idea 7).
 
 ## Goal
 
@@ -19,3 +19,10 @@ Stop planning exports the inverter cannot deliver. When the grid voltage sits ne
 ## Savings estimate (rough, unproven)
 
 Probably £0-10/yr. Worth building only if the feasibility scan finds derated days.
+
+## Built (10/11/2026)
+
+- `planning.voltage_derate_suspect(voltage, grid_pac, pv, load, soc)`: voltage >= 253 V, battery >= 99%, PV >= 500 W and export plus house load under 80% of PV. Any missing input is False (rule 11).
+- 30-min `_async_track_voltage_derate` adds 30 min per suspect sample to an unpersisted per-day tally; 22:00 logs `export_derated_min` on `day_actuals` (`None` when the voltage entity was never readable).
+- The voltage was never logged before, so the planned back-scan was impossible; the tally is the feasibility test. Review after a month: if `export_derated_min` is 0 on nearly every day, put the phase On hold. The shadow "trim instead of hold" decision for `peak_export` is not built and only follows if several days are non-zero.
+- No inverter writes and no change to any decision.

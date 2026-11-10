@@ -2284,6 +2284,32 @@ def is_clipping(soc: float | None, grid_pac_w: float | None, export_limit_w: flo
     return soc >= CLIPPED_SOC_PCT and -grid_pac_w >= CLIPPED_EXPORT_FRACTION * export_limit_w
 
 
+VOLTAGE_DERATE_V = 253.0  # UK statutory upper limit is 253 V; inverters derate or trip export near it
+DERATE_PV_MIN_W = 500.0
+DERATE_USED_FRACTION = 0.8  # export + house load below this share of PV means solar is being curtailed
+VOLTAGE_DERATE_PERIOD_MIN = 30
+
+
+def voltage_derate_suspect(
+    voltage_v: float | None,
+    grid_pac_w: float | None,
+    pv_w: float | None,
+    load_w: float | None,
+    soc: float | None,
+) -> bool:
+    """True when high grid voltage with a full battery looks to be curtailing solar (phase 83).
+
+    Voltage at/above VOLTAGE_DERATE_V, battery full, PV at least DERATE_PV_MIN_W, and export plus
+    house load under DERATE_USED_FRACTION of PV. grid_pac < 0 is export. Any missing input is
+    False, never a guess (rule 11). Distinct from ``is_clipping`` (export pinned at the limit).
+    """
+    if None in (voltage_v, grid_pac_w, pv_w, load_w, soc):
+        return False
+    if voltage_v < VOLTAGE_DERATE_V or soc < CLIPPED_SOC_PCT or pv_w < DERATE_PV_MIN_W:
+        return False
+    return max(0.0, -grid_pac_w) + load_w < DERATE_USED_FRACTION * pv_w
+
+
 def estimate_clipped_kwh(
     forecast_hour_kwh: float | None, actual_pv_w: float | None, period_hours: float = 0.5
 ) -> float | None:
