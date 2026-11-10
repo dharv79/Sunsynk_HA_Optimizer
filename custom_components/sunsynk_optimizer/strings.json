@@ -186,6 +186,10 @@
       "title": "Sunsynk Optimizer: duplicate daily records",
       "description": "{count} per-day records were logged twice: {items}. Check the data folder for a restart that crossed a scheduled capture."
     },
+    "bill_coverage_low": {
+      "title": "Sunsynk Optimizer: too few logged days to check the bill",
+      "description": "Only {logged} of {total} days were logged for the bill period {period}, so the bill check is a projection at best. This clears when a later bill has enough logged days."
+    },
     "data_contradiction": {
       "title": "Sunsynk Optimizer: inconsistent daily figures",
       "description": "{count} days have figures that contradict each other: {items}. The learned corrections may be using a bad input."

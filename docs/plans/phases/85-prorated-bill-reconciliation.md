@@ -1,6 +1,6 @@
 # Phase 85 — Prorated bill reconciliation and missing-days alert
 
-**Status:** Planned, not built. **Size:** XS-S, ~20-30k est. **Origin:** idea sweep 08/11/2026 (ideas 15, 16); follow-up to phase 36 and the 07/11/2026 `#sunsynkdebug` review.
+**Status:** Done (10/11/2026). **Size:** XS-S, ~20-30k est. **Origin:** idea sweep 08/11/2026 (ideas 15, 16); follow-up to phase 36 and the 07/11/2026 `#sunsynkdebug` review.
 
 ## Goal
 

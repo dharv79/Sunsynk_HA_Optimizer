@@ -3632,6 +3632,16 @@ class SunsynkOptimizer:
         )
         result = {"month": month, "includes_gas": include_gas, **result}
         self.coordinator.update_state(bill_reconciliation={**state, "result": result})
+        if result["coverage_low"] and result["days_logged"]:
+            ir.async_create_issue(
+                self.hass, DOMAIN, "bill_coverage_low", is_fixable=False,
+                severity=ir.IssueSeverity.WARNING, translation_key="bill_coverage_low",
+                translation_placeholders={
+                    "logged": str(result["days_logged"]), "total": str(days_in_month), "period": month,
+                },
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, "bill_coverage_low")
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
             await self.async_notify(
@@ -3648,6 +3658,12 @@ class SunsynkOptimizer:
                 + (", partial period" if result["partial"] else "")
                 + f"): gap £{result['gap_gbp']:+.2f}."
             )
+            if result["partial"] and result["projected_logged_gbp"] is not None:
+                body += f" Projected to the full period: £{result['projected_logged_gbp']:.2f}"
+                body += (
+                    " (too few days logged to trust)." if result["coverage_low"]
+                    else f", {result['gap_per_day_pct']:+.1f}% off the bill."
+                )
             if result["alert"]:
                 body += " Over £2: check credits, standing-charge or VAT changes, or a missed day's cost."
         title = "⚠️ Sunsynk: bill differs from logged cost" if result["alert"] else "🔋 Sunsynk: bill check for " + month

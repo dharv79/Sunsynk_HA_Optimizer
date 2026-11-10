@@ -83,7 +83,11 @@ The run sums last month's paired days with `planning.logged_day_cost_gbp` (impor
 
 Standing charges are not added, because the Octopus "previous accumulative cost" sensors already include them; `standing_p_per_day` exists for logs that exclude them.
 
-It alerts only for a complete month with |gap| > £2: "⚠️ Sunsynk: bill differs from logged cost". Otherwise it sends "🔋 Sunsynk: bill check for YYYY-MM". A `bill_reconciliation` JSON line goes to the debug stream. The number's attributes hold the last result.
+It alerts when the projected gap (phase 85) is over £2 and at least 25 of 30 days were logged (a complete month projects to itself): "⚠️ Sunsynk: bill differs from logged cost". Otherwise it sends "🔋 Sunsynk: bill check for YYYY-MM". A `bill_reconciliation` JSON line goes to the debug stream. The number's attributes hold the last result.
+
+### Prorated check (phase 85, 10/11/2026)
+
+A partial period is projected: `projected_logged_gbp` = logged / days logged × days in period, and `gap_per_day_pct` is the projected gap as a % of the bill. Under 25/30 days logged sets `coverage_low` (no alert) and raises the `bill_coverage_low` Repairs issue, cleared by the next bill with enough days. Real case: 8 Sep-7 Oct logged £39.39 over 19 days vs £65.02 billed, a 39% raw gap but 4.3% projected. No Octopus consumption-API backfill (needs a key).
 
 Assumes the bill covers a calendar month. Read-only. Tests: `test_reconcile_*` and `test_logged_day_cost` in `tests/test_kpis.py`.
 
