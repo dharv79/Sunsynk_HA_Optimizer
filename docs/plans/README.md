@@ -89,11 +89,11 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 79. Own Sunsynk power-flow card (replaces slipx06; user request 05/11/2026) | Done, merged (1101fb0, PR #156) | L, ~120k actual |
 | 80. Day chart tab with previous/next day navigation (user request 05/11/2026) | Done, merged (93af8a5, PR #159) | M |
 | 81. Vulnerability and security sweep (user request 06/11/2026) | Done, merged (a94c43f, PR #170) | M, ~60k |
-| 82. Weather bins for the forecast correction | Built, shadow only (merge SHA pending) | M, ~40-60k |
-| 83. High grid voltage export guard (feasibility-gated) | Built, tally only (merge SHA pending) | S, ~25-35k |
-| 84. Battery low-SOC floor review (reworked 10/11/2026) | Built, read-only (merge SHA pending) | S, ~20-30k |
+| 82. Weather bins for the forecast correction | Done, merged (88e32c7, PR #179), shadow only | M, ~40-60k |
+| 83. High grid voltage export guard (feasibility-gated) | Done, merged (fb8c934, PR #181), tally only | S, ~25-35k |
+| 84. Battery low-SOC floor review (reworked 10/11/2026) | Done, merged (fba41c1, PR #180), read-only | S, ~20-30k |
 | 85. Prorated bill reconciliation and missing-days alert | Done, merged (728fd3e, PR #176) | XS-S, ~20-30k |
-| 86. Daytime import and reserve-hold review | Built, shadow only (merge SHA pending) | S, ~25-40k |
+| 86. Daytime import and reserve-hold review | Done, merged (ade154e, PR #182), shadow only | S, ~25-40k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
@@ -107,7 +107,7 @@ Build order (set 04/11/2026, user request): 51 → 67 → 64 → 55 → 56 → 6
 
 Phases 82–85 come from the savings idea sweep of 08/11/2026 (20 ideas, excluding tariff, heat pump and EV ideas, vetted against the code). 14 were already built (phases 13, 17, 20, 23, 24, 25, 26, 27, 29, 37, 40, 49, 56, 61, 62, 66, 70, 71, 75); the immersion/solar diverter idea stays declined (list 2, item 26). The rest became 82–85. Rough savings, unproven: 82 £10-25/yr, 83 £0-10/yr, 84 £5-15/yr, 85 none direct. Suggested order: 85 → 82 → 84 → 83 (superseded by the deploy order below).
 
-**Deploy order for the remaining phases (set 10/11/2026, review of the Oct-Nov statement and logs): 82 → 84 → 83 → 86 → 10 → 72 → 74.** 82 first because it only logs weather fields and its shadow scoring needs weeks of data to accumulate. 84 next: the log review shows the 25% evening floor is a hard limit (probably the inverter's own setting), so the original learned-floor design would save nothing; it is now a read-only check with a £ estimate. 83 is a cheap feasibility scan (On hold if no derated days). 86 is low priority: outside 16:00-19:00 all hours are the same day rate, so reserve timing costs nothing while the battery is cycled fully each day. 10 (Octopus auto-detect) stays parked as tariff-related. 72 then 74 are XL, 74 last because it adds a local write path (81 is done). Further savings found: none big left in software on dark days, because the 11.4 kWh battery is already filled each night by the 3-hour window; the remaining levers are the inverter low-SOC setting (84), promoting peak-export from shadow to live (scorecard ready, +£2.41 over 22 days, but no surplus in winter, so a summer gain), and the winter load itself.
+**Deploy order for the remaining phases (set 10/11/2026, review of the Oct-Nov statement and logs): 82 → 84 → 83 → 86 (all done 10/11/2026) → 10 → 72 → 74.** 82 first because it only logs weather fields and its shadow scoring needs weeks of data to accumulate. 84 next: the log review shows the 25% evening floor is a hard limit (probably the inverter's own setting), so the original learned-floor design would save nothing; it is now a read-only check with a £ estimate. 83 is a cheap feasibility scan (On hold if no derated days). 86 is low priority: outside 16:00-19:00 all hours are the same day rate, so reserve timing costs nothing while the battery is cycled fully each day. 10 (Octopus auto-detect) stays parked as tariff-related. 72 then 74 are XL, 74 last because it adds a local write path (81 is done). Further savings found: none big left in software on dark days, because the 11.4 kWh battery is already filled each night by the 3-hour window; the remaining levers are the inverter low-SOC setting (84), promoting peak-export from shadow to live (scorecard ready, +£2.41 over 22 days, but no surplus in winter, so a summer gain), and the winter load itself.
 
 Phase 81 (security sweep, user request 06/11/2026) is independent and recommended before 72 and 74, because 74 adds a new local write path to the inverter.
 
