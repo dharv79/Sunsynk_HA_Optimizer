@@ -94,7 +94,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 84. Battery low-SOC floor review (reworked 10/11/2026) | Done, merged (fba41c1, PR #180), read-only | S, ~20-30k |
 | 85. Prorated bill reconciliation and missing-days alert | Done, merged (728fd3e, PR #176) | XS-S, ~20-30k |
 | 86. Daytime import and reserve-hold review | Done, merged (ade154e, PR #182), shadow only | S, ~25-40k |
-| 87. Paired-day field fixes (cloud cover and user override) | Planned, not built | XS, ~15-25k |
+| 87. Paired-day field fixes (cloud cover and user override) | Done, merged (PR pending) | XS, ~25k actual |
 | 88. Listener guards, 22:00 ordering and a pure dry run | Planned, not built | S, ~25-40k |
 | 89. Send the debug bundle as whole JSON lines | Planned, not built | XS, ~10-20k |
 | 90. Flux write safety (slot carry-over and serialised decisions) | Planned, not built | S-M, ~35-55k |
