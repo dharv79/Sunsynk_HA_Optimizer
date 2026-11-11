@@ -312,3 +312,36 @@ def test_meter_delta_rejects_reset(dl):
     assert _meter_delta({"load_kwh": 1}, {"load_kwh": 4}, "load_kwh") == 3
     assert _meter_delta({"load_kwh": 5}, {"load_kwh": 1}, "load_kwh") is None
     assert _meter_delta({}, {"load_kwh": 1}, "load_kwh") is None
+
+
+# --------------------------------------------------------------------------- #
+# Phase 87: plan fields read from paired days must survive _pair_records        #
+# --------------------------------------------------------------------------- #
+
+def _pair_one(DataLogger, **plan_fields):
+    logger = object.__new__(DataLogger)
+    plan = {"type": "import_plan", "date": "2026-11-01", "target_soc": 100, "soc": 30.0, **plan_fields}
+    actuals = {"type": "day_actuals", "date": "2026-11-01", "evening_soc": 25.0, "actual_solar_kwh": 2.0}
+    return logger._pair_records([plan, actuals])[0]
+
+
+def test_paired_day_carries_cloud_cover_and_user_override(DataLogger):
+    day = _pair_one(DataLogger, cloud_cover_pct=82.0, user_override={"target_soc": 60})
+    assert day["cloud_cover_pct"] == 82.0
+    assert day["user_override"] == {"target_soc": 60}
+
+
+def test_paired_day_missing_fields_are_none(DataLogger):
+    day = _pair_one(DataLogger)
+    assert day["cloud_cover_pct"] is None and day["user_override"] is None
+
+
+def test_override_night_is_not_a_drain_or_nudge_sample(DataLogger):
+    day = make_day(user_override={"target_soc": 60}, target_soc=60, initial_soc=30.0)
+    assert DataLogger._is_drain_night(day) is False
+
+
+def test_cloud_bucket_reaches_quantile_samples(DataLogger, planning):
+    day = _pair_one(DataLogger, raw_forecast_kwh=3.0, cloud_cover_pct=95.0, forecast_band="winter_like")
+    cloud = planning.forecast_ratio_samples([day])[0]["cloud"]
+    assert cloud is not None and cloud == planning.cloud_bucket(95.0)

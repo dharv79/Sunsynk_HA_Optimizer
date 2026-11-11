@@ -597,6 +597,9 @@ class DataLogger:
                 "is_full_day": plan.get("is_full_day", False),
                 "initial_soc": plan.get("soc"),
                 "flux1_end": plan.get("flux1_end", ""),
+                # Phase 87: read back by the cloud bins (82) and the drain/nudge filters (46).
+                "cloud_cover_pct": plan.get("cloud_cover_pct"),
+                "user_override": plan.get("user_override"),
                 **{key: kpis.get(date, {}).get(key) for key in DAY_KPI_FIELDS},
                 "kpi_version": kpis.get(date, {}).get("kpi_version"),
                 # Phase 17: shadow or live, only days whose 16:00 decision was export.

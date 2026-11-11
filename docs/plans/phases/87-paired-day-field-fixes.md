@@ -1,6 +1,6 @@
 # Phase 87 — Paired-day field fixes (cloud cover and user override)
 
-**Status:** Planned, not built. **Size:** XS, ~15-25k est. **Origin:** code review 11/11/2026.
+**Status:** Built (11/11/2026). **Size:** XS, ~15-25k est. **Origin:** code review 11/11/2026.
 
 ## Goal
 
@@ -20,3 +20,9 @@ Two plan fields are logged but never copied into the paired days, so the code th
 ## Saving
 
 None direct. It makes phase 82's shadow scoring real and stops manual nights skewing the learned target.
+
+## Built (11/11/2026)
+
+- `_pair_records` now copies `cloud_cover_pct` and `user_override`. A scan of every other `_IMPORT_PLAN_FIELDS` entry found no further paired-day readers (the scorecard reads raw plan records).
+- Tests: both fields survive pairing, missing fields are `None`, an override night is not a drain sample, and a logged cloud cover reaches `forecast_ratio_samples`. The pairing tests fail without the fix.
+- Effect after deploy: `forecast_quantiles_cloud` starts to differ from the base quantiles as cloud-tagged days accumulate (only days logged since 2.0.2 carry the field). Override nights drop out of the drain and nudge samples, so the learned buffer may shift slightly if overrides were used.
