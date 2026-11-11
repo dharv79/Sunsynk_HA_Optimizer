@@ -94,6 +94,29 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 84. Battery low-SOC floor review (reworked 10/11/2026) | Done, merged (fba41c1, PR #180), read-only | S, ~20-30k |
 | 85. Prorated bill reconciliation and missing-days alert | Done, merged (728fd3e, PR #176) | XS-S, ~20-30k |
 | 86. Daytime import and reserve-hold review | Done, merged (ade154e, PR #182), shadow only | S, ~25-40k |
+| 87. Paired-day field fixes (cloud cover and user override) | Planned, not built | XS, ~15-25k |
+| 88. Listener guards, 22:00 ordering and a pure dry run | Planned, not built | S, ~25-40k |
+| 89. Send the debug bundle as whole JSON lines | Planned, not built | XS, ~10-20k |
+| 90. Flux write safety (slot carry-over and serialised decisions) | Planned, not built | S-M, ~35-55k |
+| 91. Log read performance | Planned, not built | M, ~50-80k |
+| 92. Fewer state writes on SOC changes | Planned, not built | S, ~25-40k |
+| 93. Options validation and diagnostics redaction | Planned, not built | S, ~25-40k |
+| 94. Stable entity IDs and long-term statistics (feasibility-gated) | Planned, not built | S-M, ~35-50k |
+| 95. Card rendering: redraw only on change | Planned, not built | S, ~20-35k |
+| 96. Release gate (tests and version check before a release) | Planned, not built | XS, ~15-20k |
+| 97. Refactor 1: shared helpers, dead code and missing tests | Planned, not built | S-M, ~40-60k |
+| 98. Refactor 2: split planning.py into a package | Planned, not built | M-L, ~70-110k |
+| 99. Refactor 3: split optimizer.py | Planned, not built | L, ~120-175k |
+| 100. Daily health line and deploy notice | Planned, not built | S, ~25-40k |
+| 101. Cloud API reliability log | Planned, not built | S, ~20-35k |
+| 102. Shiftable-load report | Planned, not built | M, ~40-60k |
+| 103. Measured round-trip efficiency (shadow) | Planned, not built | S, ~30-45k |
+| 104. Weekly digest: import causes, charge shortfalls and shadow results | Planned, not built | S, ~25-40k |
+| 105. Weather-normalised load report | Planned, not built | S-M, ~30-50k |
+| 106. Import heat-map card (hour by day) | Planned, not built | M, ~45-70k |
+| 107. Inverter settings snapshot and change audit | Planned, not built | S, ~25-40k |
+| 108. Notification priorities, quiet hours and a morning brief | Planned, not built | M, ~40-60k |
+| 109. Data export service (CSV) | Planned, not built | S, ~20-35k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
@@ -108,6 +131,8 @@ Build order (set 04/11/2026, user request): 51 → 67 → 64 → 55 → 56 → 6
 Phases 82–85 come from the savings idea sweep of 08/11/2026 (20 ideas, excluding tariff, heat pump and EV ideas, vetted against the code). 14 were already built (phases 13, 17, 20, 23, 24, 25, 26, 27, 29, 37, 40, 49, 56, 61, 62, 66, 70, 71, 75); the immersion/solar diverter idea stays declined (list 2, item 26). The rest became 82–85. Rough savings, unproven: 82 £10-25/yr, 83 £0-10/yr, 84 £5-15/yr, 85 none direct. Suggested order: 85 → 82 → 84 → 83 (superseded by the deploy order below).
 
 **Deploy order for the remaining phases (set 10/11/2026, review of the Oct-Nov statement and logs): 82 → 84 → 83 → 86 (all done 10/11/2026) → 10 → 72 → 74.** 82 first because it only logs weather fields and its shadow scoring needs weeks of data to accumulate. 84 next: the log review shows the 25% evening floor is a hard limit (probably the inverter's own setting), so the original learned-floor design would save nothing; it is now a read-only check with a £ estimate. 83 is a cheap feasibility scan (On hold if no derated days). 86 is low priority: outside 16:00-19:00 all hours are the same day rate, so reserve timing costs nothing while the battery is cycled fully each day. 10 (Octopus auto-detect) stays parked as tariff-related. 72 then 74 are XL, 74 last because it adds a local write path (81 is done). Further savings found: none big left in software on dark days, because the 11.4 kWh battery is already filled each night by the 3-hour window; the remaining levers are the inverter low-SOC setting (84), promoting peak-export from shadow to live (scorecard ready, +£2.41 over 22 days, but no surplus in winter, so a summer gain), and the winter load itself.
+
+Phases 87–109 come from the code review and idea sweep of 11/11/2026 (user request: check the code, optimise, refactor, and 10 new ideas for efficiency, visibility and reporting). 87–96 are review findings, each verified against the code (87's two bugs and 93's bad-time crash were reproduced by running the functions; 90 and 94 are medium confidence and start with a re-vet). 97–99 are the refactor, behaviour-preserving, in three steps. 100–109 are new ideas, checked only for duplicates against phases 1–86 and for the excluded topics (tariff, heat pump, EV, diverter); vet each against the code before building. **Suggested build order: 87 → 89 → 88 → 96 → 90 → 93 → 92 → 91 → 94 → 95 → 97 → 98 → 99 → 100 → 101 → 104 → 103 → 102 → 105 → 107 → 109 → 108 → 106 → 10 → 72 → 74.** 87 first because phase 82 (released in 2.0.2) cannot use its cloud-cover data until it is fixed. The fixes come before the refactor so they are made once; the refactor comes before the new features so those land in the new layout. 101 before 74 because it measures whether the local Modbus path is needed.
 
 Phase 81 (security sweep, user request 06/11/2026) is independent and recommended before 72 and 74, because 74 adds a new local write path to the inverter.
 
