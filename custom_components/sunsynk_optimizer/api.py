@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import time
@@ -51,6 +52,7 @@ class SunsynkApiClient:
         self._username = username
         self._password = password
         self._token: str | None = None
+        self._login_lock = asyncio.Lock()
 
     @staticmethod
     def _md5_hex(value: str) -> str:
@@ -140,6 +142,14 @@ class SunsynkApiClient:
     async def _ensure_login(self) -> None:
         """Log in only if no token is held yet (lazy authentication)."""
         if not self._token:
+            await self._async_relogin(None)
+
+    async def _async_relogin(self, stale: str | None) -> None:
+        """Log in once: skipped when another caller already replaced the `stale` token."""
+        async with self._login_lock:
+            if self._token and self._token != stale:
+                return
+            self._token = None
             await self.async_login()
 
     async def _authorized_json(self, method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -153,12 +163,12 @@ class SunsynkApiClient:
         def _headers() -> dict[str, str]:
             return {**_JSON_HEADERS, "Authorization": f"Bearer {self._token}"}
 
+        used = self._token
         async with self._session.request(method, url, json=payload, headers=_headers(), timeout=_TIMEOUT) as response:
             if response.status != 401:
                 return await self._json_or_raise(response)
         # Token expired mid-session — re-authenticate and retry once.
-        self._token = None
-        await self.async_login()
+        await self._async_relogin(used)
         async with self._session.request(method, url, json=payload, headers=_headers(), timeout=_TIMEOUT) as retry_response:
             return await self._json_or_raise(retry_response)
 

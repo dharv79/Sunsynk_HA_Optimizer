@@ -1022,3 +1022,26 @@ def test_plan_free_event_across_clock_change(planning):
     plan = planning.plan_free_event(start, end, soc=90, capacity_kwh=10, charge_rate_kw=1.0, export_rate_kw=2.0)
     assert plan.sell_floor_soc == 70  # 3 h x 1 kW refill, not 2 h
     assert planning.elapsed_seconds(start, plan.sell_start) == 3600  # 2 kWh at 2 kW
+
+
+# --------------------------------------------------------------------------- #
+# Phase 90: Flux write safety                                                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_carry_held_flux1_keeps_peak_cover_hold(planning):
+    hold = {"startTime": "12:30", "endTime": "16:00", "targetSoc": 60}
+    trim = {"flux_2": {"startTime": "13:00", "endTime": "13:45", "targetSoc": 82}}
+    out = planning.carry_held_flux1(trim, hold, 13 * 60)
+    assert out == {**trim, "flux_1": hold}
+    assert out["flux_1"] is not hold and "flux_1" not in trim            # copies, input untouched
+    assert planning.carry_held_flux1(trim, None, 13 * 60) is trim        # no hold in force
+    assert planning.carry_held_flux1(trim, hold, 16 * 60) is trim        # the hold ends at 16:00
+    plan = {"flux_1": {"startTime": "02:00", "endTime": "04:00", "targetSoc": 90}}
+    assert planning.carry_held_flux1(plan, hold, 13 * 60) is plan        # a push naming Flux 1 wins
+
+
+def test_trim_target_never_sells_below_a_hold(planning):
+    assert planning.trim_target_soc(95, 30, minutes=13 * 60) == 82
+    assert planning.trim_target_soc(95, 30, minutes=13 * 60, hold_soc=90) == 90
+    assert planning.trim_target_soc(88, 30, minutes=13 * 60, hold_soc=90) is None

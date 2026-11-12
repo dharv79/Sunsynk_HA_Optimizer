@@ -265,3 +265,16 @@ The record (`flex_event`: date, start time, entity, hours, soc, price, house loa
 - The offer is capped by the export rate and keeps the reserve floor; it is limited by surplus on a long event.
 - The no_surplus / not_worth_it / no_price / no_soc / slots_held decisions, and wear tipping the decision.
 - Calendar and on/off windows, caps, and naive times.
+
+## Flux write safety (12/11/2026, phase 90)
+
+**Root cause.** `async_push_flux_override` rebuilds every slot it is not given from the config baseline. A Flux 2 only push (trim, export pause, peak export) during a live peak-cover hold reset Flux 1 to the baseline while `_peak_cover["pushed"]` stayed true, so the hold was gone for the day. Separately, the Flux 2 paths read `evening_export_disabled`, awaited the push and only then set the flag, so two decisions could overlap.
+
+**Design.**
+- `planning.carry_held_flux1` adds the active hold slot to any push that names only Flux 2. `_async_push_flux2_action` applies it, so every Flux 2 push is covered. The hold stops being carried at 16:00.
+- `planning.trim_target_soc(hold_soc=…)` floors the trim at the hold target, so a trim never sells energy the hold would buy straight back.
+- Only active holds are carried. Flux 1 otherwise still falls back to the baseline (charge to 100%), which is the safe result if the next 01:55 push fails.
+- `_flux2_lock` (an `asyncio.Lock`) wraps decide-and-push in the Flux 2 check, the 16:00 peak export, its re-checks and the full-charge trim. State is read inside the lock; notifications are sent after it is released.
+- `api.py`: `_async_relogin` takes a login lock and skips the login when another caller has already replaced the stale token.
+
+**Verification.** `tests/test_planning.py`: `test_carry_held_flux1_keeps_peak_cover_hold`, `test_trim_target_never_sells_below_a_hold`. The lock and login paths need HA and the cloud API, so they have no unit test.
