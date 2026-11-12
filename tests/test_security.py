@@ -81,6 +81,8 @@ def test_workflows_pin_actions_and_limit_permissions():
     for wf in (ROOT / ".github" / "workflows").glob("*.yml"):
         text = wf.read_text("utf-8")
         for ref in re.findall(r"uses:\s*(\S+)", text):
+            if ref.startswith("./.github/workflows/"):
+                continue  # same-repo reusable workflow, runs at the same commit
             assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", ref), f"{wf.name}: {ref} not pinned to a SHA"
         assert "permissions:" in text, wf.name
     assert "contents: read" in (ROOT / ".github" / "workflows" / "tests.yml").read_text("utf-8")
