@@ -60,3 +60,15 @@ Optional: `auto_away_persons` (comma-separated `person.*`), `auto_away_calendar`
 ## Bill period start day (2.0.1)
 
 `bill_start_day` (optional, 1–28, default 1). The bill check (`number.billed_last_month`) reconciles the latest complete period before today, from that day to the day before it next month (`planning.bill_period`, values clamped 1–28). Day 1 is the previous calendar month, labelled `YYYY-MM`; other days are labelled `YYYY-MM-DD to YYYY-MM-DD`. A reconciliation stored before this option (month only) is read as a calendar month.
+
+## Options validation and redaction by value (12/11/2026, phase 93)
+
+**Root cause.** Tariff and Flux times were free text. A value such as `16.00` made `kpi_prices_pence` raise on every run and went verbatim into each income POST. Diagnostics masked by key name only, so identifiers inside entity IDs, error URLs and `paired_days` passed through.
+
+**Design.**
+- `planning.time_field_errors` checks every time field against 24-hour `HH:MM`. The options steps `charges_1`, `charges_2` and `flux` re-show the form with `invalid_time` or `same_time`. Start = end is rejected for the Flux windows only: a tariff row of `00:00`-`00:00` is a valid all-day band.
+- Flux targets in the form are 20-100, matching the service action.
+- `optimizer._check_config_times` runs at setup and raises the `config_bad_time` Repairs issue for a bad time that was saved before this check existed; it clears itself once fixed.
+- `planning.redact_diagnostics` masks by key as before, then replaces every sensitive value (`planning.sensitive_values`: values under masked keys, the MPAN and meter-serial parts of Octopus entity IDs, person and calendar entities) in every string of config, state and `paired_days`. Values under 4 characters are not masked by value.
+
+**Verification.** `tests/test_security.py`: `test_time_fields_must_be_hhmm`, `test_config_time_problems_lists_bad_saved_times`, `test_diagnostics_redacts_identifiers_by_value`. The form steps themselves need HA.

@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .flux_helpers import merge_entry_data
-from .planning import redact_config
+from .planning import redact_diagnostics
 
 _PAIRED_DAYS = 7
 
@@ -27,8 +27,5 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     coordinator = hass.data[DOMAIN][entry.entry_id]
     paired = await coordinator.optimizer.data_logger.async_load_paired_days(days=_PAIRED_DAYS + 2)
     state = dict(coordinator.state.__dict__)
-    return {
-        "config": redact_config(merge_entry_data(dict(entry.data), dict(entry.options))),
-        "state": redact_config(state),
-        "paired_days": paired[-_PAIRED_DAYS:],
-    }
+    config = merge_entry_data(dict(entry.data), dict(entry.options))
+    return redact_diagnostics(config, state, paired[-_PAIRED_DAYS:])

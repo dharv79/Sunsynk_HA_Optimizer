@@ -128,7 +128,7 @@ from .const import (
     OPERATION_MODE_OPTIONS,
 )
 from .flux_helpers import default_charges, default_flux_products, merge_entry_data
-from .planning import DEFAULT_BATTERY_VOLTAGE
+from .planning import DEFAULT_BATTERY_VOLTAGE, time_field_errors
 
 _LOGGER = logging.getLogger(__name__)
 STATUS_OPTIONS = ["import", "export"]
@@ -401,12 +401,12 @@ def _flux_schema(flux_products: list[dict[str, Any]]) -> vol.Schema:
             vol.Required("flux_1_start", default=str(flux_products[0]["startTime"])): _time_selector(),
             vol.Required("flux_1_end", default=str(flux_products[0]["endTime"])): _time_selector(),
             vol.Required("flux_1_target", default=int(flux_products[0]["targetSoc"])): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=0, max=100, step=1, mode=selector.NumberSelectorMode.BOX)
+                selector.NumberSelectorConfig(min=20, max=100, step=1, mode=selector.NumberSelectorMode.BOX)
             ),
             vol.Required("flux_2_start", default=str(flux_products[1]["startTime"])): _time_selector(),
             vol.Required("flux_2_end", default=str(flux_products[1]["endTime"])): _time_selector(),
             vol.Required("flux_2_target", default=int(flux_products[1]["targetSoc"])): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=0, max=100, step=1, mode=selector.NumberSelectorMode.BOX)
+                selector.NumberSelectorConfig(min=20, max=100, step=1, mode=selector.NumberSelectorMode.BOX)
             ),
         }
     )
@@ -515,30 +515,51 @@ class SunsynkOptimizerOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_charges_1(self, user_input=None):
         """Step 2 of 4 — tariff rows 1–4 (import and export prices for the first four windows)."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._save_charge_rows(user_input, 0, 4)
-            return await self.async_step_charges_2()
-        return self.async_show_form(step_id="charges_1", data_schema=_charge_schema(self._working[CONF_CHARGES], 0, 4))
+            errors = self._save_charge_rows(user_input, 0, 4)
+            if not errors:
+                return await self.async_step_charges_2()
+        return self.async_show_form(
+            step_id="charges_1", data_schema=_charge_schema(self._working[CONF_CHARGES], 0, 4), errors=errors
+        )
 
     async def async_step_charges_2(self, user_input=None):
         """Step 3 of 4 — tariff rows 5–8 (import and export prices for the remaining windows)."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._save_charge_rows(user_input, 4, 8)
-            return await self.async_step_flux()
-        return self.async_show_form(step_id="charges_2", data_schema=_charge_schema(self._working[CONF_CHARGES], 4, 8))
+            errors = self._save_charge_rows(user_input, 4, 8)
+            if not errors:
+                return await self.async_step_flux()
+        return self.async_show_form(
+            step_id="charges_2", data_schema=_charge_schema(self._working[CONF_CHARGES], 4, 8), errors=errors
+        )
 
     async def async_step_flux(self, user_input=None):
         """Step 4 of 4 — baseline Flux 1 (import) and Flux 2 (export) windows."""
+        errors: dict[str, str] = {}
         if user_input is not None:
+            names = ("flux_1_start", "flux_1_end", "flux_2_start", "flux_2_end")
+            errors = time_field_errors(
+                {name: user_input[name] for name in names},
+                (("flux_1_start", "flux_1_end"), ("flux_2_start", "flux_2_end")),
+            )
+            # Kept in the working copy (saved only on success) so the form re-shows what was typed.
             self._working[CONF_FLUX_PRODUCTS] = [
                 {"provider": 2, "direction": 1, "startTime": user_input["flux_1_start"], "endTime": user_input["flux_1_end"], "targetSoc": int(user_input["flux_1_target"])},
                 {"provider": 2, "direction": 0, "startTime": user_input["flux_2_start"], "endTime": user_input["flux_2_end"], "targetSoc": int(user_input["flux_2_target"])},
             ]
-            return self.async_create_entry(title="", data=self._working)
-        return self.async_show_form(step_id="flux", data_schema=_flux_schema(self._working[CONF_FLUX_PRODUCTS]))
+            if not errors:
+                return self.async_create_entry(title="", data=self._working)
+        return self.async_show_form(
+            step_id="flux", data_schema=_flux_schema(self._working[CONF_FLUX_PRODUCTS]), errors=errors
+        )
 
-    def _save_charge_rows(self, user_input: dict[str, Any], start: int, end: int) -> None:
-        """Parse numbered charge_N_* fields from user_input and write them back to self._working."""
+    def _save_charge_rows(self, user_input: dict[str, Any], start: int, end: int) -> dict[str, str]:
+        """Write the numbered charge_N_* fields to self._working; returns form errors for bad times.
+
+        The working copy is only saved on the last step, and a step with errors is re-shown.
+        """
         charges = self._working[CONF_CHARGES]
         for idx in range(start, end):
             line = idx + 1
@@ -549,3 +570,7 @@ class SunsynkOptimizerOptionsFlow(config_entries.OptionsFlow):
                 "endRange": user_input[f"charge_{line}_end"],
                 "status": user_input[f"charge_{line}_status"],
             }
+        return time_field_errors({
+            f"charge_{idx + 1}_{part}": user_input[f"charge_{idx + 1}_{part}"]
+            for idx in range(start, end) for part in ("start", "end")
+        })

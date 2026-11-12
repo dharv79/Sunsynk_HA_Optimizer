@@ -360,6 +360,7 @@ from .planning import (
     EXPORT_PAUSE_FLUX2_SLOT,
     restore_flux2_slot,
     carry_held_flux1,
+    config_time_problems,
     week_kpis,
     weighted_forecast_correction,
     window_grid_kwh,
@@ -550,8 +551,23 @@ class SunsynkOptimizer:
         """Return current operation mode ('auto' or 'monitor')."""
         return str(self.cfg.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE))
 
+    def _check_config_times(self) -> None:
+        """Phase 93: one Repairs issue while a saved tariff or Flux time is not HH:MM."""
+        cfg = self.cfg
+        problems = config_time_problems(cfg.get(CONF_CHARGES), cfg.get(CONF_FLUX_PRODUCTS))
+        if problems:
+            _LOGGER.warning("Tariff/Flux times are not HH:MM: %s", ", ".join(problems))
+            ir.async_create_issue(
+                self.hass, DOMAIN, "config_bad_time", is_fixable=False,
+                severity=ir.IssueSeverity.ERROR, translation_key="config_bad_time",
+                translation_placeholders={"items": ", ".join(problems[:6])},
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, "config_bad_time")
+
     async def async_setup(self) -> None:
         """Create listeners."""
+        self._check_config_times()
         daily = (
             (18, 0, self._async_choose_best_full_charge_day),  # gated to Sundays in the handler
             (1, 55, self._async_run_import_plan),
