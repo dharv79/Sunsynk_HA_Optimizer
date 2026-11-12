@@ -1,6 +1,6 @@
 # Phase 95 — Card rendering: redraw only on change
 
-**Status:** Planned, not built. **Size:** S, ~20-35k est. **Origin:** code review 11/11/2026.
+**Status:** Done, merged (04cded7, PR #203). **Size:** S, ~20-35k est. **Origin:** code review 11/11/2026.
 
 ## Findings
 

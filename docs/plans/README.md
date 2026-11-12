@@ -102,7 +102,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 92. Fewer state writes on SOC changes | Done, merged (1a0effc, PR #200) | S, ~30k actual |
 | 93. Options validation and diagnostics redaction | Done, merged (02f1444, PR #199) | S, ~40k actual |
 | 94. Stable entity IDs and long-term statistics (feasibility-gated) | Done, merged (c62f699, PR #202) | S, ~40k actual |
-| 95. Card rendering: redraw only on change | Planned, not built | S, ~20-35k |
+| 95. Card rendering: redraw only on change | Done, merged (04cded7, PR #203) | S, ~35k actual |
 | 96. Release gate (tests and version check before a release) | Done, merged (ea89659, PR #196) | XS, ~25k actual |
 | 97. Refactor 1: shared helpers, dead code and missing tests | Planned, not built | S-M, ~40-60k |
 | 98. Refactor 2: split planning.py into a package | Planned, not built | M-L, ~70-110k |

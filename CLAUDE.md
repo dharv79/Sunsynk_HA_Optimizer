@@ -27,7 +27,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 | `sensor.py` / `binary_sensor.py` / `button.py` / `switch.py` / `datetime.py` / `number.py` | Entities (event-driven, no polling) |
 | `dashboard_installer.py` | Generates Lovelace YAML |
 | `card_resource.py` / `www/*.js` | Serves and registers the bundled flow card and day chart (ApexCharts still comes from HACS) |
-| `entity.py` / `diagnostics.py` / `services.yaml` | Shared device info; HA diagnostics download; service action definitions |
+| `entity.py` / `diagnostics.py` / `services.yaml` | Shared device info and entity-ID pinning (`pin_entity_id`); HA diagnostics download; service action definitions |
 | `tools/backtest.py` (repo root) | Offline HA-free replay of logged nights with alternative parameters |
 | `config_flow.py` / `const.py` | Multi-step config/options flow; constants and defaults |
 
