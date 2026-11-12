@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -25,6 +26,8 @@ jobs:
         run: python -m py_compile custom_components/sunsynk_optimizer/*.py
       - name: Lint (undefined names, unused imports)
         run: python -m pyflakes custom_components/sunsynk_optimizer/*.py
+      - name: Card syntax check
+        run: for f in custom_components/sunsynk_optimizer/www/*.js; do node --check "$f"; done
       - name: Run tests
         run: python -m pytest
       - name: Security scan (bandit, medium and high)
