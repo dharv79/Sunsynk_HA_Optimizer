@@ -345,3 +345,104 @@ def test_cloud_bucket_reaches_quantile_samples(DataLogger, planning):
     day = _pair_one(DataLogger, raw_forecast_kwh=3.0, cloud_cover_pct=95.0, forecast_band="winter_like")
     cloud = planning.forecast_ratio_samples([day])[0]["cloud"]
     assert cloud is not None and cloud == planning.cloud_bucket(95.0)
+
+
+# --------------------------------------------------------------------------- #
+# Phase 91: log read performance                                               #
+# --------------------------------------------------------------------------- #
+
+import json
+import os
+from datetime import datetime, timedelta, timezone
+
+
+def _disk_logger(DataLogger, tmp_path):
+    dl = object.__new__(DataLogger)
+    dl._data_dir = str(tmp_path)
+    return dl
+
+
+def _stamp(days_ago: float = 0.0) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+
+
+def test_snapshot_index_matches_the_per_date_scan(_data_logger_module):
+    mod = _data_logger_module
+    records = [
+        {"type": "meter_snapshot", "date": "2026-11-01", "time": "02:00", "soc": 40},
+        {"type": "meter_snapshot", "date": "2026-11-01", "time": "02:00", "soc": 99},   # duplicate: first wins
+        {"type": "meter_snapshot", "date": "2026-11-01", "time": "05:00", "soc": 80},
+        {"type": "meter_snapshot", "date": "2026-11-02", "time": "05:00", "soc": 70},
+        {"type": "meter_snapshot", "date": "2026-11-03"},                                # no time: ignored
+        {"type": "day_actuals", "date": "2026-11-01", "time": "05:00"},
+    ]
+    index = mod.snapshots_by_date(records)
+    for date in ("2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04"):
+        assert index.get(date, {}) == mod.snapshots_for_date(records, date)
+    assert index["2026-11-01"]["02:00"]["soc"] == 40
+
+
+def test_file_is_parsed_once_until_it_changes(DataLogger, tmp_path, monkeypatch):
+    dl = _disk_logger(DataLogger, tmp_path)
+    dl._write_record({"type": "day_kpis", "date": "2026-11-01", "recorded_at": _stamp()})
+    parses = []
+    real = DataLogger._iter_jsonl
+    monkeypatch.setattr(DataLogger, "_iter_jsonl", staticmethod(lambda path: parses.append(path) or real(path)))
+    assert len(dl._read_recent(30)) == 1
+    assert len(dl._read_recent(30)) == 1
+    dl._write_record({"type": "day_kpis", "date": "2026-11-02", "recorded_at": _stamp()})   # kept in step, no re-read
+    assert [r["date"] for r in dl._read_recent(30)] == ["2026-11-01", "2026-11-02"]
+    assert len(parses) <= 1
+    with open(dl._current_month_file(), "a", encoding="utf-8") as fh:                        # changed behind our back
+        fh.write(json.dumps({"type": "day_kpis", "date": "2026-11-03", "recorded_at": _stamp()}) + "\n")
+    assert len(dl._read_recent(30)) == 3
+
+
+def test_read_returns_copies_and_honours_the_window(DataLogger, tmp_path):
+    dl = _disk_logger(DataLogger, tmp_path)
+    dl._write_record({"type": "note", "date": "a", "recorded_at": _stamp(0)})
+    dl._write_record({"type": "note", "date": "b", "recorded_at": _stamp(0).replace("+00:00", "")})  # naive: skipped
+    dl._write_record({"type": "note", "date": "c"})                                                    # no stamp: skipped
+    first = dl._read_recent(30)
+    assert [r["date"] for r in first] == ["a"]
+    first[0]["date"] = "mutated"
+    assert [r["date"] for r in dl._read_recent(30)] == ["a"]
+
+
+def test_dedup_skips_same_type_date_time_and_sees_the_dates_own_month(DataLogger, tmp_path):
+    dl = _disk_logger(DataLogger, tmp_path)
+    snap = {"type": "meter_snapshot", "date": "2026-11-01", "time": "05:00", "recorded_at": _stamp()}
+    dl._write_record(snap)
+    dl._write_record(dict(snap))                                   # duplicate
+    dl._write_record({**snap, "time": "16:00"})                    # other time: kept
+    assert len(dl._read_recent(30)) == 2
+    # A record dated in the previous month, already in that month's file, is not written again.
+    prev = datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)
+    date = prev.date().isoformat()
+    old = {"type": "day_actuals", "date": date, "recorded_at": prev.isoformat()}
+    (tmp_path / f"{prev:%Y-%m}.jsonl").write_text(json.dumps(old) + "\n")
+    before = os.path.getsize(dl._current_month_file())
+    dl._write_record({"type": "day_actuals", "date": date, "recorded_at": _stamp()})
+    assert os.path.getsize(dl._current_month_file()) == before
+
+
+def test_mpc_plan_goes_to_its_own_file_and_is_never_read_back(DataLogger, tmp_path):
+    dl = _disk_logger(DataLogger, tmp_path)
+    dl._write_record({"type": "mpc_plan", "date": "2026-11-01", "recorded_at": _stamp()})
+    dl._write_record({"type": "day_kpis", "date": "2026-11-01", "recorded_at": _stamp()})
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    assert sorted(p.name for p in tmp_path.iterdir()) == [f"{month}.jsonl", f"mpc-{month}.jsonl"]
+    # An mpc_plan line written to the main log by an older version is skipped on read.
+    with open(tmp_path / f"{month}.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"type": "mpc_plan", "date": "2026-11-01", "recorded_at": _stamp()}) + "\n")
+    assert [r["type"] for r in dl._read_recent(30)] == ["day_kpis"]
+
+
+def test_pruner_removes_old_side_files(DataLogger, tmp_path):
+    dl = _disk_logger(DataLogger, tmp_path)
+    for name in ("2020-01.jsonl", "mpc-2020-01.jsonl", "notes.jsonl"):
+        (tmp_path / name).write_text("{}\n")
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    (tmp_path / f"mpc-{month}.jsonl").write_text("{}\n")
+    dl._prune_old_files(13)
+    assert sorted(p.name for p in tmp_path.iterdir()) == [f"mpc-{month}.jsonl", "notes.jsonl"]

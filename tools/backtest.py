@@ -71,6 +71,8 @@ def load_records(data_dir: str) -> list[dict[str, Any]]:
     """Every parseable record in the monthly JSONL files (read-only)."""
     records: list[dict[str, Any]] = []
     for path in sorted(glob.glob(os.path.join(data_dir, "*.jsonl"))):
+        if os.path.basename(path).startswith("mpc-"):
+            continue  # shadow MPC plans live in their own files and are not replayed
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 try:

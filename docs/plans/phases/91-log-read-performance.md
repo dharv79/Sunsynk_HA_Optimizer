@@ -28,3 +28,7 @@ Each step is behaviour-preserving and covered by `test_data_logger.py`; add a te
 ## Saving
 
 None in £. Removes a half-second-plus event-loop stall on each plan and roughly halves log size.
+
+## As built (12/11/2026)
+
+Steps 1, 4 and 5 as designed. Steps 2 and 3 are replaced by a parsed-file cache in `DataLogger._load_file`, which removes the repeat parses without touching any caller. Details: `docs/architecture/data-logging.md`.

@@ -68,6 +68,12 @@ def DataLogger():
 
 
 @pytest.fixture(scope="session")
+def _data_logger_module():
+    """The data_logger module itself, for its module-level helpers."""
+    return _data_logger
+
+
+@pytest.fixture(scope="session")
 def flux_helpers():
     """The flux_helpers module, loaded without a running Home Assistant."""
     return _flux_helpers
