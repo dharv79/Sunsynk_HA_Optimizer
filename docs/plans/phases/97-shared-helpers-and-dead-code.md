@@ -1,6 +1,6 @@
 # Phase 97 — Refactor 1: shared helpers, dead code and missing tests
 
-**Status:** Planned, not built. **Size:** S-M, ~40-60k est. **Origin:** code review 11/11/2026 (refactor).
+**Status:** Built (PR pending merge). **Size:** S-M, ~40-60k est. **Origin:** code review 11/11/2026 (refactor).
 
 ## Goal
 
@@ -26,3 +26,12 @@ Remove the duplicated maths before the files are split (phases 98 and 99), so th
 ## Saving
 
 None. Smaller, safer base for phases 98 and 99.
+
+## Built (12/11/2026)
+
+- `planning.percentile` (optional `default` for an empty list; raises `ValueError` otherwise) and `planning.median`; `_percentile`, `_median` are aliases, `_quantile` and `peak_load_estimate_kwh`/`peak_load_estimate_split` delegate; `data_logger._percentile` delegates and keeps its 0.0-on-empty fallback.
+- Five HH:MM re-parses in `planning.py` now use `hhmm_to_minutes`. `flux_helpers._parse_minutes` and `data_logger._flux1_end_hours` are left (different failure behaviour).
+- `optimizer._mpc_inputs`, `_async_weather_forecast`, `_async_outside_temp_by_date`.
+- `planning.grid_online` and its test removed; `tou_settings_payload` kept for phase 73.
+- `tests/test_shared_helpers.py` covers the six untested functions and pins the shared maths.
+- **Deferred:** the three copies of "window, day-type match, minimum days, median" (`learned_load_kw` feeds the overnight target) and the weighted-ratio builder shared with the newsvendor code. Both need a before/after fixture on real history; take them with phase 98.

@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import INTEGRATION_VERSION
 from .planning import (
+    percentile,
     DAY_KPI_FIELDS,
     MEASURED_RATE_NIGHTS,
     charge_shortfall_suspect,
@@ -759,17 +760,8 @@ class DataLogger:
 
     @staticmethod
     def _percentile(values: list[float], pct: float) -> float:
-        """Return the pct-th percentile (0-100) using linear interpolation between ranks."""
-        if not values:
-            return 0.0
-        ordered = sorted(values)
-        if len(ordered) == 1:
-            return float(ordered[0])
-        rank = (pct / 100.0) * (len(ordered) - 1)
-        low = int(rank)
-        high = min(low + 1, len(ordered) - 1)
-        frac = rank - low
-        return ordered[low] + (ordered[high] - ordered[low]) * frac
+        """Percentile (0-100) via the shared helper; an empty list is 0.0."""
+        return float(percentile(values, pct, default=0.0))
 
     def count_forecast_correction_days(self, paired_days: list[dict[str, Any]]) -> int:
         """Return how many valid paired days exist toward the forecast correction threshold."""

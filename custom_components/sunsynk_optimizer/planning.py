@@ -275,12 +275,35 @@ def measured_charge_kw(
     return round(rate, 2) if rate <= MEASURED_RATE_MAX_KW else None
 
 
-def _percentile(values: list[float], pct: float) -> float:
+_NO_DEFAULT: Any = object()
+
+
+def percentile(values: list[float], pct: float, default: Any = _NO_DEFAULT) -> float:
+    """pct-th percentile (0-100), linear interpolation between ranks; the one copy.
+
+    An empty list returns ``default`` when given, else raises ValueError.
+    """
+    if not values:
+        if default is _NO_DEFAULT:
+            raise ValueError("percentile of an empty list")
+        return default
     ordered = sorted(values)
     pos = (len(ordered) - 1) * pct / 100.0
     lo = int(pos)
     hi = min(lo + 1, len(ordered) - 1)
     return ordered[lo] + (ordered[hi] - ordered[lo]) * (pos - lo)
+
+
+def median(values: list[float]) -> float:
+    """Median (mean of the middle two for an even count); raises ValueError when empty."""
+    if not values:
+        raise ValueError("median of an empty list")
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+_percentile = percentile
 
 
 def learned_measured_rate(
@@ -814,11 +837,10 @@ def drain_pct_to_0500(
         return round(target_soc - soc_0500, 1)
     if drain_0600 is None:
         return None
-    try:
-        hh, mm = str(flux1_end).split(":")[:2]
-        window = 6.0 - (int(hh) + int(mm) / 60.0)
-    except (ValueError, TypeError):
+    end_min = hhmm_to_minutes(flux1_end)
+    if end_min is None:
         return drain_0600
+    window = 6.0 - end_min / 60.0
     if window <= 1.0:
         return drain_0600
     return round(drain_0600 * (window - 1.0) / window, 1)
@@ -838,11 +860,10 @@ def charge_shortfall_suspect(drain_0500: float | None, flux1_end: str | None) ->
     """
     if drain_0500 is None:
         return None
-    try:
-        hh, mm = str(flux1_end).split(":")[:2]
-        hours = max(0.0, 5.0 - (int(hh) + int(mm) / 60.0))
-    except (ValueError, TypeError):
+    end_min = hhmm_to_minutes(flux1_end)
+    if end_min is None:
         return None
+    hours = max(0.0, 5.0 - end_min / 60.0)
     return drain_0500 > SHORTFALL_BASE_PCT + SHORTFALL_PCT_PER_HOUR * hours
 
 
@@ -962,9 +983,7 @@ OVER_LIMIT_MAX_GAP_MIN = 35  # samples further apart (restart) prove nothing
 def kpi_segment(minute: int) -> str | None:
     """The `_BASELINE_SEGMENTS` start ("HH:MM") a minute of the day falls in; None from 22:00."""
     for start, end, _band, _ in _BASELINE_SEGMENTS:
-        sh, sm = (int(x) for x in start.split(":"))
-        eh, em = (int(x) for x in end.split(":"))
-        if sh * 60 + sm <= minute < eh * 60 + em:
+        if hhmm_to_minutes(start) <= minute < hhmm_to_minutes(end):
             return start
     return None
 
@@ -1265,10 +1284,7 @@ IMPORT_FEEDBACK_UNUSED_KWH = 0.5
 IMPORT_FEEDBACK_STEP = 5
 
 
-def _median(values: list[float]) -> float:
-    ordered = sorted(values)
-    mid = len(ordered) // 2
-    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+_median = median
 
 
 def import_feedback_adjustment(
@@ -1698,10 +1714,7 @@ def peak_load_estimate_kwh(recent_kwh: list[float], default_kwh: float) -> tuple
     values = sorted(v for v in recent_kwh if v is not None and v >= 0)
     if len(values) < PEAK_COVER_MIN_PEAK_DAYS:
         return default_kwh, "default"
-    rank = PEAK_COVER_LOAD_PERCENTILE / 100.0 * (len(values) - 1)
-    low = int(rank)
-    high = min(low + 1, len(values) - 1)
-    return round(values[low] + (values[high] - values[low]) * (rank - low), 2), "history"
+    return round(percentile(values, PEAK_COVER_LOAD_PERCENTILE), 2), "history"
 
 
 def peak_load_estimate_split(
@@ -1724,10 +1737,7 @@ def peak_load_estimate_split(
         if is_weekend == weekend and kwh is not None and kwh >= 0:
             same.append(float(kwh))
     if not weekend and len(same) >= PEAK_COVER_MIN_SPLIT_DAYS:
-        same.sort()
-        mid = len(same) // 2
-        median = same[mid] if len(same) % 2 else (same[mid - 1] + same[mid]) / 2.0
-        return round(median, 2), "history_weekday_median", 1.0
+        return round(median(same), 2), "history_weekday_median", 1.0
     kwh, source = peak_load_estimate_kwh([k for _, k in samples], default_kwh)
     return kwh, source, PEAK_COVER_MARGIN
 
@@ -2136,8 +2146,7 @@ def free_event_target_cap(
         return target_soc
     cap = int(floor)
     if _is_number(load_kw) and _is_number(capacity_kwh) and capacity_kwh > 0:
-        hh, mm = CHEAP_WINDOW_END.split(":")
-        cheap_end = int(hh) * 60 + int(mm)
+        cheap_end = hhmm_to_minutes(CHEAP_WINDOW_END)
         bridge_hours = max(0, free_start.hour * 60 + free_start.minute - cheap_end) / 60
         cap += math.ceil(max(0.0, load_kw) * bridge_hours / capacity_kwh * 100)
     return min(target_soc, min(100, cap))
@@ -3937,24 +3946,6 @@ def kpi_sensor_values(record: dict[str, Any] | None) -> dict[str, float | None]:
 OUTAGE_MIN_LOAD_KW = 0.05  # below this the runtime estimate is meaningless (battery idle)
 
 
-def grid_online(value: Any) -> bool | None:
-    """SolarSynkV3 `grid_status` → True (grid present), False (outage) or None (unknown).
-
-    The exact format needs a live sample, so this is deliberately tolerant: words and 0/1.
-    Anything unrecognised or unavailable is None, which is never treated as an outage.
-    """
-    if value is None:
-        return None
-    text = str(value).strip().lower()
-    if text in ("", "unknown", "unavailable", "none"):
-        return None
-    if text in ("0", "false", "off", "no") or any(w in text for w in ("disconnect", "offline", "off-grid", "off grid", "outage", "lost", "fail")):
-        return False
-    if text in ("1", "true", "on", "yes", "ok") or any(w in text for w in ("connect", "online", "normal", "present", "on-grid", "on grid", "ongrid", "grid-tied", "grid tied", "grid mode")):
-        return True
-    return None
-
-
 GRID_ONLINE_MIN_V = 180.0  # at or above: mains present
 GRID_OFFLINE_MAX_V = 100.0  # below: mains lost (between the two: unknown, no change)
 
@@ -4840,11 +4831,8 @@ def _season(month: int) -> set[int]:
 
 
 def _quantile(values: list[float], q: float) -> float:
-    """Linear-interpolated quantile of sorted ``values``."""
-    pos = (len(values) - 1) * q
-    lo = int(pos)
-    hi = min(lo + 1, len(values) - 1)
-    return values[lo] + (values[hi] - values[lo]) * (pos - lo)
+    """Linear-interpolated quantile (0-1) of ``values``."""
+    return percentile(values, q * 100.0)
 
 
 def forecast_ratio_samples(paired_days: list[dict[str, Any]]) -> list[dict[str, Any]]:
