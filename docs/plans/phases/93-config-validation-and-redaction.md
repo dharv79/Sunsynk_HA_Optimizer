@@ -21,3 +21,7 @@ Reject bad times and targets when the options form is saved, and make the diagno
 ## Saving
 
 None. Safety and privacy.
+
+## As built (12/11/2026)
+
+Built as designed, with one change: start = end is rejected for the Flux windows only, because a tariff row of `00:00`-`00:00` is a valid all-day band. Details: `docs/architecture/config.md`.

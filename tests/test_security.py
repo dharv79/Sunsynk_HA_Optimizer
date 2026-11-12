@@ -87,3 +87,54 @@ def test_workflows_pin_actions_and_limit_permissions():
         assert "permissions:" in text, wf.name
     assert "contents: read" in (ROOT / ".github" / "workflows" / "tests.yml").read_text("utf-8")
     assert "Refusing release" in (ROOT / ".github" / "workflows" / "release.yml").read_text("utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# Phase 93: options validation and redaction by value                          #
+# --------------------------------------------------------------------------- #
+
+
+def test_time_fields_must_be_hhmm(planning):
+    assert all(planning.valid_hhmm(t) for t in ("00:00", "09:05", "16:00", "23:59"))
+    assert not any(planning.valid_hhmm(t) for t in ("16.00", "24:00", "9:00", "16:60", "16:00:00", "", None, 1600))
+    fields = {"a_start": "16.00", "a_end": "19:00", "b_start": "02:00", "b_end": "02:00"}
+    assert planning.time_field_errors(fields, (("a_start", "a_end"), ("b_start", "b_end"))) == {
+        "a_start": "invalid_time", "b_end": "same_time",
+    }
+    assert planning.time_field_errors({"s": "02:00", "e": "05:00"}, (("s", "e"),)) == {}
+    assert planning.time_field_errors({"s": "00:00", "e": "00:00"}) == {}   # no pair given: equal is allowed
+
+
+def test_config_time_problems_lists_bad_saved_times(planning):
+    charges = [{"startRange": "02:00", "endRange": "05:00"}, {"startRange": "16.00", "endRange": "19:00"}]
+    flux = [{"startTime": "02:00", "endTime": "04:30"}, {"startTime": "16:00", "endTime": None}]
+    assert planning.config_time_problems(charges, flux) == ["tariff row 2 start '16.00'", "Flux 2 end 'None'"]
+    assert planning.config_time_problems(charges[:1], flux[:1]) == []
+    assert planning.config_time_problems(None, "junk") == []
+
+
+def test_diagnostics_redacts_identifiers_by_value(planning):
+    config = {
+        "plant_id": "2411132500", "inverter_serial": "SN99ABC123", "username": "someone@example.com",
+        "octopus_import_rates_entity": "event.octopus_energy_electricity_21l4567890_1900012345678_current_day_rates",
+        "auto_away_persons": "person.alex, person.sam", "auto_away_calendar": "calendar.family",
+        "charge_rate": 2.5, "weather_entity": "weather.home", "tomorrow_forecast_sensor": "",
+    }
+    state = {
+        "last_error": "API push failed: 500 for https://api.example/api/v1/plant/2411132500/income",
+        "last_api_result": {"ok": False, "error": "GET /common/setting/sn99abc123/read failed"},
+        "last_flux2_action": {"payload": {"id": "2411132500", "fluxProducts": [{"targetSoc": 85}]}},
+        "auto_away": {"home": ["person.alex"], "event": "calendar.family"},
+        "battery_soc": 82,
+    }
+    paired = [{"date": "2026-11-10", "note": "meter 21L4567890", "plan_kwh": 6.6}]
+    out = planning.redact_diagnostics(config, state, paired)
+    text = repr(out).lower()
+    for secret in ("2411132500", "sn99abc123", "someone@example.com", "21l4567890", "1900012345678",
+                   "person.alex", "person.sam", "calendar.family"):
+        assert secret not in text, secret
+    assert out["config"]["charge_rate"] == 2.5 and out["config"]["weather_entity"] == "weather.home"
+    assert out["state"]["battery_soc"] == 82 and out["paired_days"][0]["plan_kwh"] == 6.6
+    assert out["state"]["last_flux2_action"]["payload"]["fluxProducts"] == [{"targetSoc": 85}]
+    assert "octopus_energy_electricity" in out["config"]["octopus_import_rates_entity"]   # only the ids go
+    assert planning.sensitive_values({"plant_id": "12", "charge_rate": 2.5}) == []          # too short to mask safely

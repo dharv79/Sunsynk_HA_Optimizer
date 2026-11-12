@@ -174,7 +174,9 @@
       "grid_pac_not_found": "Grid power (grid_pac) sensor was not found for this inverter serial.",
       "entity_not_found": "Entity was not found.",
       "invalid_service": "Service must be in domain.service format.",
-      "service_not_found": "Service was not found."
+      "service_not_found": "Service was not found.",
+      "invalid_time": "Enter a 24-hour time as HH:MM, for example 16:00.",
+      "same_time": "Start and end cannot be the same time."
     }
   },
   "issues": {
@@ -193,6 +195,10 @@
     "data_contradiction": {
       "title": "Sunsynk Optimizer: inconsistent daily figures",
       "description": "{count} days have figures that contradict each other: {items}. The learned corrections may be using a bad input."
+    },
+    "config_bad_time": {
+      "title": "Sunsynk Optimizer: a tariff or Flux time is not HH:MM",
+      "description": "These saved times are not in 24-hour HH:MM form: {items}. Prices and the evening export check cannot run until they are fixed. Open Configure, correct the time and save."
     }
   },
   "services": {

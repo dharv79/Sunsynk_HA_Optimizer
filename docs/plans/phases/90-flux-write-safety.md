@@ -1,6 +1,6 @@
 # Phase 90 — Flux write safety (slot carry-over and serialised decisions)
 
-**Status:** Planned, not built. **Size:** S-M, ~35-55k est. **Origin:** code review 11/11/2026. Re-vet both findings against live logs before building.
+**Status:** Done, merged (bf2f1da, PR #198). **Size:** S-M, ~35-55k est. **Origin:** code review 11/11/2026. Re-vet both findings against live logs before building.
 
 ## Goal
 
