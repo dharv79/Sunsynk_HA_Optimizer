@@ -1,6 +1,6 @@
 # Phase 98 — Refactor 2: split planning.py into a package
 
-**Status:** Built (PR pending merge). **Size:** M-L, ~70-110k est. **Origin:** code review 11/11/2026 (refactor). After phase 97.
+**Status:** Built, merged (935bbb7, PR #207). **Size:** M-L, ~70-110k est. **Origin:** code review 11/11/2026 (refactor). After phase 97.
 
 ## Goal
 

@@ -48,7 +48,7 @@ def test_update_state_persist_flag_is_only_used_for_derived_fields():
     import re
     from pathlib import Path
     pkg = Path(__file__).resolve().parent.parent / "custom_components" / "sunsynk_optimizer"
-    src = (pkg / "optimizer.py").read_text("utf-8")
+    src = "\n".join(f.read_text("utf-8") for f in [pkg / "optimizer.py", *sorted(pkg.glob("opt_*.py"))])
     calls = re.findall(r"update_state\(([^()]*persist=False[^()]*)", src)
     fields = {name for call in calls for name in re.findall(r"(\w+)=", call)} - {"touch", "persist"}
     assert fields == {"battery_runtime", "import_causes", "marginal_cost"}

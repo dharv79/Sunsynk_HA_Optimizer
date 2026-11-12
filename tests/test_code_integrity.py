@@ -9,11 +9,37 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-OPTIMIZER = Path(__file__).resolve().parents[1] / "custom_components" / "sunsynk_optimizer" / "optimizer.py"
+PKG = Path(__file__).resolve().parents[1] / "custom_components" / "sunsynk_optimizer"
+OPTIMIZER_FILES = [PKG / "optimizer.py", *sorted(PKG.glob("opt_*.py"))]
+
+
+class _Optimizer:
+    """The optimizer's source is split over optimizer.py and opt_*.py mixins (phase 99): read them as one."""
+
+    @staticmethod
+    def read_text() -> str:
+        return "\n".join(f.read_text() for f in OPTIMIZER_FILES)
+
+    parent = PKG
+
+
+OPTIMIZER = _Optimizer()
+
+
+def _parse_optimizer() -> ast.Module:
+    return ast.parse(OPTIMIZER.read_text())
 
 
 def _class(tree: ast.Module, name: str) -> ast.ClassDef:
-    return next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == name)
+    """The class; SunsynkOptimizer is the merge of itself and its mixins' bodies."""
+    classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+    if name == "SunsynkOptimizer":
+        merged = ast.ClassDef(name=name, bases=[], keywords=[], body=[], decorator_list=[])
+        for c in classes:
+            if c.name == name or c.name.endswith("Mixin"):
+                merged.body += c.body
+        return merged
+    return next(n for n in classes if n.name == name)
 
 
 def test_self_attributes_are_defined():
@@ -156,3 +182,27 @@ def test_sensor_states_are_scalars_and_keys_unique():
             assert not (isinstance(call, ast.Call) and getattr(call.func, "id", None) == "_as_dict"), (
                 f"{key}: native_value returns a whole dict"
             )
+
+
+def test_api_writes_only_in_push_helpers():
+    """Do-not-break 5 (phase 99): only _async_post_with_status and _async_write_setting call the API write methods."""
+    allowed = {"async_post_income": "_async_post_with_status", "async_write_settings": "_async_write_setting"}
+    bad = []
+    for f in OPTIMIZER_FILES:
+        tree = ast.parse(f.read_text())
+        for fn in (n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))):
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Attribute) and node.attr in allowed and fn.name != allowed[node.attr]:
+                    bad.append((f.name, fn.name, node.attr))
+                if isinstance(node, ast.Attribute) and node.attr in allowed:
+                    assert f.name == "optimizer.py", f"{node.attr} used outside optimizer.py"
+    assert bad == []
+
+
+def test_mixins_do_not_import_the_optimizer():
+    """Mixins import only opt_common, never optimizer.py or each other (no import cycles)."""
+    for f in OPTIMIZER_FILES[1:]:
+        for node in ast.parse(f.read_text()).body:
+            if isinstance(node, ast.ImportFrom) and node.level == 1:
+                assert node.module not in {"optimizer"} and not (node.module or "").startswith("opt_") or node.module == "opt_common", (
+                    f.name, node.module)
