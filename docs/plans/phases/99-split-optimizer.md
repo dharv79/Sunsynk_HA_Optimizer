@@ -1,6 +1,6 @@
 # Phase 99 — Refactor 3: split optimizer.py
 
-**Status:** Planned, not built. **Size:** L, ~120-175k est. **Origin:** code review 11/11/2026 (refactor). After phases 88, 90, 91 and 98 (so the fixes are not redone in two layouts).
+**Status:** Built (PR pending merge). **Size:** L, ~120-175k est. **Origin:** code review 11/11/2026 (refactor). After phases 88, 90, 91 and 98 (so the fixes are not redone in two layouts).
 
 ## Goal
 
@@ -29,3 +29,9 @@ The largest change in the plan to a live battery controller. Ship as a beta, run
 ## Saving
 
 None in £. Lower token cost and risk for every later phase.
+
+## Built (12/11/2026)
+
+- Done as one mechanical move rather than one PR per mixin: an AST script moved every class member verbatim (all 200 are AST-identical to the original), so the diff is a relocation, not a rewrite. Mixins: `opt_overnight` (40 methods), `opt_daytime` (35), `opt_capture` (22), `opt_events` (23), `opt_monitor` (16), `opt_shadow` (13), `opt_reports` (12); `optimizer.py` keeps construction, config cache, notify, push helpers and `_guarded` (28). `opt_common.py` holds the small shared helpers/constants; mixins import only `opt_common`, never each other or `optimizer.py`.
+- `tests/test_code_integrity.py` and `tests/test_state_update_skip.py` read the merged source of all files. New tests: API write calls only in `_async_post_with_status` / `_async_write_setting` (rule 5); mixins import no sibling optimizer module.
+- Deferred: breaking `async_run_import_plan` into gather/decide/push/notify (a behaviour-adjacent rewrite; needs the characterisation test first); `opt_overnight.py` (~1,170 lines) could split further. Not run on a live HA install: ship as a beta and compare the debug stream in monitor mode.
