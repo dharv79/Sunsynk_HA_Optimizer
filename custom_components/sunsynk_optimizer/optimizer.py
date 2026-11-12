@@ -1148,7 +1148,8 @@ class SunsynkOptimizer:
         # load readings (clamped to 0.5x-2x config); away keeps its config rate.
         learned_kw, learned_load_days = (None, 0) if away else learned_load_kw(paired_days, now.date(), is_weekend)
         avg_consumption_kw, load_source = resolve_load_kw(avg_consumption_kw, learned_kw)
-        await self._refresh_evening_load(paired_days, now.date(), is_weekend, away)
+        if not dry_run:  # rule 17: the refresh assigns learned values and writes state
+            await self._refresh_evening_load(paired_days, now.date(), is_weekend, away)
         forecast_correction = self.data_logger.compute_forecast_correction(paired_days)
         # When the forecast sensor was unavailable we already used yesterday's raw
         # value; don't apply the correction factor a second time on top of values
@@ -2584,7 +2585,7 @@ class SunsynkOptimizer:
             await self._guarded(self._async_overnight_load_check, "Overnight baseload check")
             await self._guarded(self.async_run_charge_outcome, "Charge outcome")
         # Until a first estimate exists, re-measure after each sample-closing snapshot.
-        if time in ("05:00", "22:00") and capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
+        if time == "05:00" and capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
             await self._guarded(lambda: self.async_run_capacity_estimate(notify=False), "Battery capacity estimate")
 
     async def async_run_charge_outcome(self) -> None:
@@ -3075,7 +3076,10 @@ class SunsynkOptimizer:
     async def _async_grid_status_changed(self, event: Event) -> None:
         """Voltage event → outage open/close."""
         new_state = event.data.get("new_state")
-        await self._async_apply_grid_online(grid_online_from_voltage(None if new_state is None else new_state.state))
+        await self._guarded(
+            lambda: self._async_apply_grid_online(grid_online_from_voltage(None if new_state is None else new_state.state)),
+            "Grid status change",
+        )
 
     async def _async_grid_reconcile(self) -> None:
         """At startup, close a persisted outage that the live voltage says is over (or never was)."""
@@ -3277,6 +3281,9 @@ class SunsynkOptimizer:
         return soc
 
     async def _async_battery_soc_changed(self, event: Event) -> None:
+        await self._guarded(lambda: self._async_do_battery_soc_changed(event), "SOC change")
+
+    async def _async_do_battery_soc_changed(self, event: Event) -> None:
         """Handle SOC threshold-based reactions."""
         new_state = event.data.get("new_state")
         if new_state is None:
@@ -3307,6 +3314,9 @@ class SunsynkOptimizer:
                 return
 
             async def _delayed_full_trim(_later) -> None:
+                await self._guarded(_do_full_trim, "Full-charge trim")
+
+            async def _do_full_trim() -> None:
                 self.pending_full_trim_cancel = None
                 current_soc = self._state_float(self.battery_soc_entity, 0)
                 if current_soc < 99.5:
@@ -3414,9 +3424,15 @@ class SunsynkOptimizer:
 
     async def _async_spare_solar_startup(self, _now) -> None:
         """90 s after startup: first spare-solar estimate. A coroutine so HA runs it on the event loop."""
+        await self._guarded(self._async_do_spare_solar, "Spare solar")
+
+    async def _async_do_spare_solar(self) -> None:
         self._refresh_spare_solar()
 
     async def _async_spare_solar_morning(self, _now) -> None:
+        await self._guarded(self._async_do_spare_solar_morning, "Spare solar")
+
+    async def _async_do_spare_solar_morning(self) -> None:
         """06:05: refresh the estimate and, if the option is set, tell the user when to run appliances."""
         result = self._refresh_spare_solar()
         raw = self.cfg.get(CONF_SPARE_SOLAR_NOTIFY_KWH)
@@ -3434,6 +3450,10 @@ class SunsynkOptimizer:
         )
 
     async def _async_capture_morning_state(self, _now) -> None:
+        await self._guarded(self._async_do_capture_morning_state, "Morning capture")
+        await self._guarded(self._async_capture_daily_cost, "Daily cost capture")
+
+    async def _async_do_capture_morning_state(self) -> None:
         """Capture SOC and PV power at 06:00 to measure overnight battery drain.
 
         Also captures the SolarSynkV3 daily load total, which at 06:00 equals
@@ -3463,7 +3483,6 @@ class SunsynkOptimizer:
                 "overnight_load_kwh": round_or_none(overnight_load_kwh),
             },
         )
-        await self._async_capture_daily_cost()
 
     async def _async_capture_daily_cost(self) -> None:
         """Read the optional Octopus cost sensors and log the settled day's cost.
@@ -3880,6 +3899,12 @@ class SunsynkOptimizer:
         )
 
     async def _async_capture_day_actuals(self, _now) -> None:
+        await self._guarded(self._async_do_capture_day_actuals, "Day actuals capture")
+        # Until a first estimate exists, re-measure after the 22:00 snapshot too.
+        if capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
+            await self._guarded(lambda: self.async_run_capacity_estimate(notify=False), "Battery capacity estimate")
+
+    async def _async_do_capture_day_actuals(self) -> None:
         """Capture end-of-day actuals at 22:00 and log them.
 
         Includes the SolarSynkV3 daily load/grid totals alongside SOC and solar,
@@ -3888,7 +3913,6 @@ class SunsynkOptimizer:
         daily load figure is logged directly.
         """
         await self._guarded(self._async_auto_away, "Auto away check")
-        await self._async_capture_daily_cost()
         # Unavailable meters log None, not 0 — a zero would skew learning.
         soc = self._essential_state(self.battery_soc_entity)
         actual_solar_kwh = self._essential_state(self.day_pv_energy_entity)
@@ -3915,6 +3939,8 @@ class SunsynkOptimizer:
             overnight_target_too_high=too_high,
             export_derated_min=derated_min,
         )
+        # After day_actuals is safely logged; before the bundle so its cost lines are fresh.
+        await self._guarded(self._async_capture_daily_cost, "Daily cost capture")
         actuals_rec = {
             "type": "day_actuals",
             "date": date,

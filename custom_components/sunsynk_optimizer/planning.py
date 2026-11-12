@@ -309,7 +309,7 @@ def flux1_end_minutes(energy_needed_kwh: float, charge_rate_kw: float) -> int:
     shorter than 15 minutes isn't worth the API call).
     """
     raw_minutes = (energy_needed_kwh / charge_rate_kw) * 60
-    quarter_slots = int((raw_minutes + 14) // 15)
+    quarter_slots = math.ceil(raw_minutes / 15 - 1e-9)
     return max(2 * 60 + 15, min(5 * 60, 2 * 60 + quarter_slots * 15))
 
 
@@ -1941,7 +1941,7 @@ def plan_free_event(
     when the event is scheduled; the real sell start is decided live on the day
     (free_event_sell_decision). Nothing to sell → skip_sell=True.
     """
-    free_hours = (free_end - free_start).total_seconds() / 3600
+    free_hours = elapsed_seconds(free_end, free_start) / 3600
     refill_kwh = charge_rate_kw * free_hours
     raw_floor = 100 - (refill_kwh / capacity_kwh * 100 if capacity_kwh > 0 else 0)
     sell_floor_soc = int(max(FREE_EVENT_MIN_FLOOR_SOC, min(100, round(raw_floor))))
@@ -1961,7 +1961,7 @@ def plan_free_event(
     headroom_kwh = max(0.0, capacity_kwh - soc_at_free_start / 100 * capacity_kwh)
     expected_refill_kwh = round(min(refill_kwh, headroom_kwh), 2)
 
-    sell_start = free_start - timedelta(hours=sell_hours)
+    sell_start = shift_hours(free_start, -sell_hours)
 
     return FreeEventPlan(
         sell_start=sell_start,

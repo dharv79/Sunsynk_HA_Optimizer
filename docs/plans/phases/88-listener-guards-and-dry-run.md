@@ -1,6 +1,6 @@
 # Phase 88 — Listener guards, 22:00 ordering and a pure dry run
 
-**Status:** Planned, not built. **Size:** S, ~25-40k est. **Origin:** code review 11/11/2026.
+**Status:** Built, in PR. **Size:** S, ~25-40k est. **Origin:** code review 11/11/2026.
 
 ## Goal
 
@@ -25,3 +25,7 @@ Close the gaps against do-not-break rules 6 and 17, and fix four small logic err
 ## Saving
 
 None direct. Protects the daily record and keeps the dry run honest.
+
+## As built (12/11/2026)
+
+All six findings fixed. The dry run skips the evening-load refresh outright (the plan itself reads neither value), rather than computing into locals. No state-identity test: the optimizer has no HA-free harness, so the dry run is covered by the code path only; tests cover the slot rounding and the clock-change case.
