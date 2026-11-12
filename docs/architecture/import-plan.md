@@ -306,3 +306,11 @@ Equal neighbours merge, and the longest slot is split on the half-hour until the
 - Padding stays on the half-hour and keeps the settings.
 - Peak hold and merging; missing inputs → None.
 - The payload round-trips through the settings parser; the diff; parser variants and unreadable settings.
+
+## Marginal-forecast target fix (12/11/2026)
+
+**Root cause.** 12/11 forecast was 7.19 kWh, 0.19 above the 7 kWh low-solar line, so the plan fell from 100% to the bare solar bridge: 45% (40% + 5% drain), window 02:00→03:30. The bridge sized the charge to exactly the learned average load down to the floor at solar start, so the battery hit the 25% floor about 06:40, roughly 3 h before solar, and the morning ran on day-rate import.
+
+**Change (`planning.py`).** `blend_toward_full`: from 7 kWh to `LOW_SOLAR_BLEND_END_KWH` (10), the bridge target is blended linearly toward 100% (reason `solar_bridge_blend`); it never lowers a target. The simple bridge also carries `BRIDGE_LOAD_MARGIN` (1.25) on its energy. The hourly walk and the 05:00 hours-to-solar assumption are unchanged; the learned drain adjustment already covers charge-end to 06:00, so the gap is not counted again.
+
+**Verification.** `tests/test_planning.py`: blend near/mid/far/below the line, margin on the simple bridge, blend never lowers or touches 100%. Live: a 7–10 kWh forecast day should show `target_soc_reason: solar_bridge_blend` and a target above the plain bridge.

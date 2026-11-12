@@ -27,6 +27,11 @@ from typing import Any
 # Below this (pessimistic) daily forecast the plan switches to max import:
 # 95-100% target and the full 02:00-05:00 window.
 LOW_SOLAR_THRESHOLD_KWH = 7.0
+# Between the threshold and this forecast the bridge target is blended toward 100%
+# (linear), so 7.19 kWh does not drop from 100% to a bare-minimum bridge.
+LOW_SOLAR_BLEND_END_KWH = 10.0
+# The simple bridge sizes to the learned average load; real mornings are spikier.
+BRIDGE_LOAD_MARGIN = 1.25
 
 # Hours walked by the solar-bridge models (05:00 up to and including 12:00).
 _BRIDGE_WALK_HOURS = range(5, 13)
@@ -107,6 +112,18 @@ def synthetic_hourly_profile(daily_kwh: float, sunrise_h: float, sunset_h: float
     return {h: s * scale for h, s in shapes.items()}
 
 
+def blend_toward_full(decision: "TargetDecision", forecast_kwh: float) -> "TargetDecision":
+    """Raise a bridge target toward 100% as the forecast falls from the blend end to the low-solar line."""
+    if not (LOW_SOLAR_THRESHOLD_KWH <= forecast_kwh < LOW_SOLAR_BLEND_END_KWH) or decision.target_soc >= 100:
+        return decision
+    frac = (LOW_SOLAR_BLEND_END_KWH - forecast_kwh) / (LOW_SOLAR_BLEND_END_KWH - LOW_SOLAR_THRESHOLD_KWH)
+    blended = min(100, round(decision.target_soc + (100 - decision.target_soc) * frac))
+    if blended <= decision.target_soc:
+        return decision
+    decision.target_soc, decision.reason = blended, "solar_bridge_blend"
+    return decision
+
+
 @dataclass
 class TargetDecision:
     """Outcome of select_target_soc, before drain/evening-nudge adjustments."""
@@ -154,16 +171,17 @@ def select_target_soc(
 
     if hourly_forecast_kwh:
         gap, bridge_hour = walk_bridge_gap(hourly_forecast_kwh, avg_consumption_kw, hourly_correction)
-        return TargetDecision(
+        return blend_toward_full(TargetDecision(
             bridge_soc(gap, battery_capacity_kwh), "solar_bridge_hourly",
             hourly_forecast_used=True, bridge_hour=bridge_hour,
-        )
+        ), low_solar_forecast_kwh)
 
     if hours_to_solar is not None:
         # Simple bridge assumes solar covers load the instant the sun is up; the
         # synthetic ramp tops it up on slow-ramp mornings.
         decision = TargetDecision(
-            bridge_soc(hours_to_solar * avg_consumption_kw, battery_capacity_kwh), "solar_bridge"
+            bridge_soc(hours_to_solar * avg_consumption_kw * BRIDGE_LOAD_MARGIN, battery_capacity_kwh),
+            "solar_bridge",
         )
         if synthetic_profile is not None:
             gap, decision.bridge_hour = walk_bridge_gap(synthetic_profile, avg_consumption_kw)
@@ -172,7 +190,7 @@ def select_target_soc(
                 decision.target_soc = ramp
                 decision.reason = "solar_bridge_ramp"
                 decision.synthetic_ramp = True
-        return decision
+        return blend_toward_full(decision, low_solar_forecast_kwh)
 
     # sun.sun unavailable — band-based fallback.
     return TargetDecision({"winter_like": 95, "summer_like": 80}.get(band, 85), band)
@@ -1175,10 +1193,13 @@ def explain_plan(plan: dict[str, Any] | None, shadow: dict[str, Any] | None = No
             f"Target {target:.0f}%: the pessimistic forecast of {low_txt} is below the "
             f"{LOW_SOLAR_THRESHOLD_KWH:.0f} kWh line, so the battery is filled from cheap import."
         )
-    elif reason in ("solar_bridge_hourly", "solar_bridge", "solar_bridge_ramp"):
+    elif reason in ("solar_bridge_hourly", "solar_bridge", "solar_bridge_ramp", "solar_bridge_blend"):
         hour = plan.get("bridge_hour")
         until = f" until solar covers the house around {int(hour):02d}:00" if isinstance(hour, int) else " until solar takes over"
-        extra = " (raised for a slow-ramp morning)" if reason == "solar_bridge_ramp" else ""
+        extra = {
+            "solar_bridge_ramp": " (raised for a slow-ramp morning)",
+            "solar_bridge_blend": f" (raised toward 100% because the {low_txt} forecast is only just above the {LOW_SOLAR_THRESHOLD_KWH:.0f} kWh line)",
+        }.get(reason, "")
         out.append(f"Target {target:.0f}%: enough charge to bridge the house load{until}{extra}.")
     else:
         out.append(f"Target {target:.0f}%: no solar start time, so the {str(plan.get('forecast_band') or 'seasonal').replace('_', '-')} default is used.")
