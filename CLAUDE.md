@@ -19,7 +19,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 | `__init__.py` | Entry setup: builds coordinator → optimizer, forwards platforms |
 | `coordinator.py` | `OptimizerState` (single source of truth), `Store` persistence, `update_state`, 13-month log pruning |
 | `optimizer.py` | Business logic + HA listeners (01:55, 02:20, 06:00, 06:05 spare solar, 06:10 tariff check, 06:20 data audit, 18:00 full-charge day (Sun: + weekly summary, scorecard, AI insight) + monthly reports, 22:00, 22:05 Agile shadow, 02/05/16/19:00 meter snapshots, 16:00 peak export + 17/18:00 re-check, 30-min (incl. daytime import alert), 2-h drift check, SOC change, grid voltage change) |
-| `planning.py` | HA-free planning maths (target SOC tree, charge rate, Flux 1 window, scoring, cost helpers) |
+| `planning/` | HA-free planning maths, a package re-exporting every name from `planning/__init__.py`: `core` (shared maths/cost), `overnight` (target SOC, charge rate, Flux 1, full-charge day), `forecast`, `load`, `peak`, `events`, `kpis`, `reports`, `battery`, `shadow`, `redact` |
 | `data_logger.py` | Monthly JSONL logging, pairing, adaptive `compute_*` corrections |
 | `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST, inverter settings read/write |
 | `flux_helpers.py` | `fluxProducts` payload, `merge_entry_data`, peak-price helper |
@@ -51,7 +51,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 16. Monitor mode makes no API writes (except undoing its own gentle-charge current); service writes are refused — `optimizer.py` early returns, `_service_guard`.
 17. Test plan button is a pure dry run (no push, log or state) — `async_run_import_plan(dry_run=True)`.
 18. Away days filtered by regime for drain/nudge; excluded from charge rate — `data_logger.py`.
-19. New decision logic goes in `planning.py` with a test.
+19. New decision logic goes in a `planning/` module with a test (`core` imports no sibling module).
 
 ## Conventions
 

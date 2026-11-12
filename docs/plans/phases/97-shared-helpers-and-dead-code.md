@@ -1,6 +1,6 @@
 # Phase 97 — Refactor 1: shared helpers, dead code and missing tests
 
-**Status:** Built (PR pending merge). **Size:** S-M, ~40-60k est. **Origin:** code review 11/11/2026 (refactor).
+**Status:** Built, merged (7c6c1f8, PR #206). **Size:** S-M, ~40-60k est. **Origin:** code review 11/11/2026 (refactor).
 
 ## Goal
 

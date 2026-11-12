@@ -49,7 +49,9 @@ def _install_ha_stubs() -> None:
 
 def _load_module(filename: str, modname: str):
     """Load a single integration source file as sunsynk_optimizer.<modname>."""
-    spec = importlib.util.spec_from_file_location(f"sunsynk_optimizer.{modname}", _PKG / filename)
+    path = _PKG / filename
+    kwargs = {"submodule_search_locations": [str(path.parent)]} if filename.endswith("__init__.py") else {}
+    spec = importlib.util.spec_from_file_location(f"sunsynk_optimizer.{modname}", path, **kwargs)
     module = importlib.util.module_from_spec(spec)
     sys.modules[f"sunsynk_optimizer.{modname}"] = module
     spec.loader.exec_module(module)
@@ -59,7 +61,7 @@ def _load_module(filename: str, modname: str):
 _install_ha_stubs()
 _load_module("const.py", "const")
 _flux_helpers = _load_module("flux_helpers.py", "flux_helpers")
-_planning = _load_module("planning.py", "planning")
+_planning = _load_module("planning/__init__.py", "planning")
 _data_logger = _load_module("data_logger.py", "data_logger")
 _entity = _load_module("entity.py", "entity")
 _dashboard = _load_module("dashboard_installer.py", "dashboard_installer")
