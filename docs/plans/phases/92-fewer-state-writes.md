@@ -23,3 +23,7 @@ Stop every battery SOC change from re-saving the whole state and refreshing ever
 ## Saving
 
 None in £. Less SD-card wear and fewer recorder rows.
+
+## As built (12/11/2026)
+
+Built as designed. The no-trigger branch keeps `touch` and the save when it clears an export pause, so `evening_export_disabled` is never left unsaved. Details: `docs/architecture/entities-dashboard.md`.

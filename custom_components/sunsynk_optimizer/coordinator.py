@@ -184,11 +184,14 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
         # Flush any pending delayed save before a reload re-reads the store.
         await self._async_save_state()
 
-    def update_state(self, touch: bool = True, **kwargs: Any) -> None:
+    def update_state(self, touch: bool = True, persist: bool = True, **kwargs: Any) -> None:
         """Update one or more state fields and persist to storage.
 
         Pass touch=False to skip updating updated_at (used when setting operational
         metadata that shouldn't be surfaced as a user-visible state change).
+        Pass persist=False for derived, live-refreshed fields only (battery runtime,
+        marginal cost, import causes): entities still update, but the storage write
+        waits for the next persisting change (phase 92). Never for decision state.
         """
         if kwargs and not state_fields_changed(self.state, kwargs):
             return  # Nothing differs: no touch, recorder write, storage save or listener notify (phase 67).
@@ -198,6 +201,8 @@ class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):
         if touch:
             self.state.updated_at = datetime.now(timezone.utc).isoformat()
         self.async_set_updated_data(self.state)
+        if not persist:
+            return
         # Bursts of updates (several per callback) coalesce into one write.
         self.storage.async_delay_save(lambda: dict(self.state.__dict__), _SAVE_DELAY_SECONDS)
 

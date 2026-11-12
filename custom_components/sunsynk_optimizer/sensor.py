@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .data_logger import DataLogger
 from .entity import optimizer_device_info
-from .planning import KPI_SENSORS, explain_plan, free_event_attributes, kpi_sensor_values, pv_string_attributes, upgrade_options
+from .planning import KPI_SENSORS, clip_text, explain_plan, free_event_attributes, kpi_sensor_values, pv_string_attributes, upgrade_options
 
 
 _ADAPTIVE_THRESHOLDS = {
@@ -222,7 +222,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         if self._sensor_key in _DIRECT_FIELDS:
             return getattr(state, _DIRECT_FIELDS[self._sensor_key])
         if self._sensor_key == "last_error":
-            return state.last_error or "OK"
+            return clip_text(state.last_error) or "OK"
 
         # Adaptive learning sensors — read from last_import_plan attributes.
         # Default values keep history continuous even before the first plan runs.
@@ -297,16 +297,16 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             target = plan.get("target_soc")
             if end and target is not None:
                 return f"02:00→{end} target {target}%"
-            return str(plan)
+            return clip_text(str(plan))
 
         if self._sensor_key == "flux2_action":
             action = state.last_flux2_action
             if not action:
                 return None
             if isinstance(action, str):
-                return action
+                return clip_text(action)
             if not isinstance(action, dict):
-                return str(action)
+                return clip_text(str(action))
 
             name = action.get("action", "unknown")
             soc = action.get("soc")
@@ -411,6 +411,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             }
         if self._sensor_key == "last_error":
             attrs: dict[str, Any] = {}
+            if state.last_error and clip_text(state.last_error) != state.last_error:
+                attrs["full_error"] = state.last_error
             if state.last_api_result:
                 attrs["last_api_result"] = state.last_api_result
             if state.last_notification:

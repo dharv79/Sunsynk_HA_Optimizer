@@ -128,3 +128,15 @@ All six views then rendered with no error cards, no console errors and no horizo
 - `dashboard_installer._day_chart` adds the "Day chart" tab after Overview as a **panel** view (a one-section sections view stays one column wide on desktop). `card_resource` now serves the whole `www/` folder and adds every file in `CARD_FILES`.
 - **Load race (root cause of the 05/11 "Configuration error" on the flow card):** the frontend swaps in a scoped custom-element registry while it boots; an element defined before that is invisible to it, so the card never upgrades. Both cards now call `customElements.define` only after `customElements.whenDefined("home-assistant")` (10 s fallback). Verified: 10/10 fresh loads define both cards (previously intermittent).
 - Tests: `test_day_chart_*`, `test_card_resource_serves_every_bundled_card`. Real-HA check: HA 2025.10.1 with back-filled recorder rows (today, yesterday, 3 days ago) and imported hourly statistics (15 days ago), Chromium at 1440 and 390 px.
+
+## Fewer state writes (12/11/2026, phase 92)
+
+**Root cause.** Every battery SOC change stored a `battery_runtime` dict that always differed, so the whole state (plans, 48-slot `mpc_plan`, health ledger, the last notification's full text) was re-saved each time. Above 85% SOC the Flux 2 check's no-trigger branch also stamped `updated_at` on every event.
+
+**Design.**
+- `coordinator.update_state(persist=False)` updates the entities but skips the storage write. Used only for `battery_runtime`, `marginal_cost` and `import_causes`, which are rebuilt live; a test pins that list. The values are still saved with the next persisting change.
+- The Flux 2 no-trigger branch stamps and saves only when it clears an export pause.
+- `last_notification` keeps the title, the first 500 characters and `message_chars` (the full length).
+- `planning.clip_text` caps the `last_error`, import plan and Flux 2 action sensor states at 255 characters; the full error is in the `full_error` attribute when it was cut.
+
+**Verification.** `tests/test_state_update_skip.py`: `test_clip_text_fits_the_entity_state_limit`, `test_update_state_persist_flag_is_only_used_for_derived_fields`.

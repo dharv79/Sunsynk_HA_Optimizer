@@ -3876,6 +3876,17 @@ def redact_diagnostics(config: Mapping[str, Any], state: Mapping[str, Any], pair
     )
 
 
+STATE_TEXT_LIMIT = 255  # Home Assistant's limit for an entity state
+NOTIFICATION_KEEP_CHARS = 500
+
+
+def clip_text(value: Any, limit: int = STATE_TEXT_LIMIT) -> Any:
+    """Strings longer than `limit` cut to fit, ending in "…"; anything else unchanged (phase 92)."""
+    if not isinstance(value, str) or len(value) <= limit:
+        return value
+    return value[: limit - 1] + "…"
+
+
 def url_segment(value: Any) -> str:
     """A config id made safe for one URL path segment or query value ('/', '?', '&', '..' can't redirect the call)."""
     return quote(str(value).strip(), safe="")

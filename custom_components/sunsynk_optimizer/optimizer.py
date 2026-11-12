@@ -360,6 +360,8 @@ from .planning import (
     EXPORT_PAUSE_FLUX2_SLOT,
     restore_flux2_slot,
     carry_held_flux1,
+    clip_text,
+    NOTIFICATION_KEEP_CHARS,
     config_time_problems,
     week_kpis,
     weighted_forecast_correction,
@@ -742,7 +744,11 @@ class SunsynkOptimizer:
         """Send a notification via the configured HA notify service."""
         cfg = self.cfg
         service_string = self._cfg_str(CONF_NOTIFY_SERVICE, cfg)
-        record: dict[str, Any] = {"ok": False, "service": service_string, "title": title, "message": message}
+        # Stored state keeps only the start of the text: a debug bundle is several kB (phase 92).
+        record: dict[str, Any] = {
+            "ok": False, "service": service_string, "title": title,
+            "message": clip_text(message, NOTIFICATION_KEEP_CHARS), "message_chars": len(message),
+        }
         if "." not in service_string:
             self.coordinator.update_state(
                 last_error=f"Invalid notify service: {service_string}",
@@ -1723,6 +1729,7 @@ class SunsynkOptimizer:
                 f"{_reserve_note(trim_target, reserve)}.{_api_note(api_ok)}",
             )
 
+        was_paused = bool(self.coordinator.state.evening_export_disabled)
         self.coordinator.update_state(
             last_flux2_action={
                 "action": "none",
@@ -1732,6 +1739,10 @@ class SunsynkOptimizer:
             },
             evening_export_disabled=False,
             operation_mode=self.operation_mode,
+            # Runs on every SOC change above 85%: only a real change (the pause clearing) is
+            # stamped and saved; the live soc/grid_pac in the action still reach the entities.
+            touch=was_paused,
+            persist=was_paused,
         )
         return None
 
@@ -2522,7 +2533,7 @@ class SunsynkOptimizer:
         totals = {k: round(v, 2) for k, v in self._import_causes["kwh"].items()}
         shown = {"date": today, **totals, "total_kwh": round(sum(totals.values()), 2)}
         if shown != self.coordinator.state.import_causes:
-            self.coordinator.update_state(touch=False, import_causes=shown)
+            self.coordinator.update_state(touch=False, persist=False, import_causes=shown)
 
     async def _async_daytime_import_check(self) -> None:
         """05:00-16:00: alert once a day on sustained grid import while the battery should cover the house (phase 40).
@@ -3098,7 +3109,7 @@ class SunsynkOptimizer:
             soc, BATTERY_BOTTOM_SOC, self._capacity_kwh(), None if load_w is None else load_w / 1000
         )
         self.coordinator.update_state(
-            touch=False,
+            touch=False, persist=False,
             battery_runtime={"hours": hours, "soc": soc, "load_kw": None if load_w is None else round(load_w / 1000, 2)},
         )
 
@@ -3436,7 +3447,7 @@ class SunsynkOptimizer:
         result["cheapest_hour_today"] = cheapest_hour_today(now.hour, prices, export_bands, spare_hours)
         result["reserve_soc"] = reserve
         if result != self.coordinator.state.marginal_cost:
-            self.coordinator.update_state(touch=False, marginal_cost=result)
+            self.coordinator.update_state(touch=False, persist=False, marginal_cost=result)
 
     def _refresh_spare_solar(self) -> dict[str, Any] | None:
         """Recompute the spare-solar estimate into state (no inverter writes); None without a forecast."""
