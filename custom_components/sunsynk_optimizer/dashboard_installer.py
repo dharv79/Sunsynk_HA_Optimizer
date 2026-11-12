@@ -24,9 +24,12 @@ from typing import Any
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_AVG_CONSUMPTION_KW, CONF_PLANT_ID, CONF_INVERTER_SERIAL, DEFAULT_AVG_CONSUMPTION_KW
+from .const import CONF_AVG_CONSUMPTION_KW, CONF_PLANT_ID, CONF_INVERTER_SERIAL, DEFAULT_AVG_CONSUMPTION_KW, DOMAIN
+from .entity import DEFAULT_ENTITY_IDS
 from .flux_helpers import merge_entry_data
+from .planning import remap_entity_ids
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -884,6 +887,20 @@ def _render(dashboard: dict) -> str:
     return json.dumps(dashboard, indent=2, ensure_ascii=False)
 
 
+def _registry_id_map(hass: HomeAssistant) -> dict[str, str]:
+    """{dashboard id: the id the entity registry holds} for optimizer entities whose id differs (phase 94).
+
+    Covers installs whose ids were generated with the device-name prefix, and entities the user renamed.
+    """
+    registry = er.async_get(hass)
+    mapping: dict[str, str] = {}
+    for unique_id, default_id in DEFAULT_ENTITY_IDS.items():
+        actual = registry.async_get_entity_id(default_id.split(".", 1)[0], DOMAIN, unique_id)
+        if actual and actual != default_id:
+            mapping[default_id] = actual
+    return mapping
+
+
 async def async_install_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Generate dashboard YAML from config-entry values and notify the user."""
     config = merge_entry_data(dict(entry.data), dict(entry.options))
@@ -892,7 +909,7 @@ async def async_install_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> No
     config_dir = Path(hass.config.config_dir)
     filename = f"sunsynk_optimizer_{entry.entry_id}.yaml"
     dst = config_dir / filename
-    content = _render(dashboard)
+    content = remap_entity_ids(_render(dashboard), _registry_id_map(hass))
     try:
         await hass.async_add_executor_job(dst.write_text, content, "utf-8")
     except Exception as err:

@@ -1,6 +1,6 @@
 # Phase 91 — Log read performance
 
-**Status:** Planned, not built. **Size:** M, ~50-80k est. **Origin:** code review 11/11/2026.
+**Status:** Done, merged (8e9ad86, PR #201). **Size:** M, ~50-80k est. **Origin:** code review 11/11/2026.
 
 ## Goal
 

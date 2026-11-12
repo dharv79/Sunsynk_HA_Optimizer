@@ -284,3 +284,57 @@ def test_card_resource_serves_every_bundled_card():
     src = (www.parent / "card_resource.py").read_text("utf-8")
     for js in www.glob("*.js"):
         assert f'"{js.name}"' in src, js.name
+
+
+# --------------------------------------------------------------------------- #
+# Phase 94: stable entity ids                                                  #
+# --------------------------------------------------------------------------- #
+
+import re
+from pathlib import Path
+
+_PKG = Path(conftest.__file__).resolve().parent.parent / "custom_components" / "sunsynk_optimizer"
+_DOMAINS = ("sensor", "binary_sensor", "button", "switch", "number", "datetime")
+_ID_RE = re.compile(r"\b(?:" + "|".join(_DOMAINS) + r")\.[a-z0-9_]+")
+
+
+def _pinned_ids() -> set[str]:
+    """Ids the platform files give their entities: explicit ids, else <domain>.<slug of the name>."""
+    slug = conftest._planning.entity_slug
+    ids = {f"sensor.{spec[0]}" for spec in conftest._planning.KPI_SENSORS}
+    for domain in _DOMAINS:
+        src = (_PKG / f"{domain}.py").read_text("utf-8")
+        assert "pin_entity_id(self," in src, domain
+        ids.update(_ID_RE.findall(src))
+        ids.update(f"{domain}.{slug(name)}" for name in re.findall(r'coordinator, entry, "\w+", "([^"]+)"', src))
+        ids.update(f"{domain}.{slug(name)}" for name in re.findall(r'pin_entity_id\(self, "\w+", "([^"]+)"', src))
+    return ids
+
+
+def test_every_optimizer_id_in_the_dashboard_is_pinned(dashboard):
+    used = set(_ID_RE.findall(json.dumps(dashboard)))
+    external = {i for i in used if "solarsynkv3" in i} | {_CONFIG["solar_forecast_sensor"], "button.press"}
+    missing = used - external - _pinned_ids()
+    assert not missing, f"dashboard ids with no pinned entity: {sorted(missing)}"
+
+
+def test_pin_entity_id_uses_the_name_or_the_explicit_id():
+    from types import SimpleNamespace
+    entity_mod = conftest._entity
+    a = SimpleNamespace(unique_id="e1_current_soc_target")
+    entity_mod.pin_entity_id(a, "sensor", "Current SOC target")
+    b = SimpleNamespace(unique_id="e1_import_plan_end")
+    entity_mod.pin_entity_id(b, "sensor", "Import plan", "sensor.import_plan_end")
+    assert (a.entity_id, b.entity_id) == ("sensor.current_soc_target", "sensor.import_plan_end")
+    assert entity_mod.DEFAULT_ENTITY_IDS["e1_current_soc_target"] == "sensor.current_soc_target"
+    assert conftest._planning.entity_slug("MPC plan (shadow)") == "mpc_plan_shadow"
+
+
+def test_remap_entity_ids_replaces_whole_ids_only():
+    remap = conftest._planning.remap_entity_ids
+    text = ("entity: sensor.battery_runtime\n{{ states('sensor.battery_runtime') }} {{ states.sensor.battery_runtime.state }}\n"
+            "other: sensor.battery_runtime_left sensor.solarsynkv3_1_battery_runtime x_sensor.battery_runtime")
+    out = remap(text, {"sensor.battery_runtime": "sensor.sunsynk_optimizer_battery_runtime_left", "switch.away_mode": "switch.away_mode"})
+    assert out.count("sensor.sunsynk_optimizer_battery_runtime_left") == 3
+    assert "other: sensor.battery_runtime_left sensor.solarsynkv3_1_battery_runtime x_sensor.battery_runtime" in out
+    assert remap(text, {}) is text

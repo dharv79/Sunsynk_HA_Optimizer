@@ -19,7 +19,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .entity import optimizer_device_info
+from .entity import optimizer_device_info, pin_entity_id
 
 
 async def async_setup_entry(
@@ -48,6 +48,7 @@ class AwayModeSwitch(CoordinatorEntity, SwitchEntity):
         super().__init__(coordinator)
         self._attr_name = "Away mode"
         self._attr_unique_id = f"{entry.entry_id}_away_mode"
+        pin_entity_id(self, "switch", "Away mode")
         self._attr_device_info = optimizer_device_info(entry)
 
     @property

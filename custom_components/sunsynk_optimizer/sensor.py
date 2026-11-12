@@ -23,7 +23,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .data_logger import DataLogger
-from .entity import optimizer_device_info
+from .entity import optimizer_device_info, pin_entity_id
 from .planning import KPI_SENSORS, clip_text, explain_plan, free_event_attributes, kpi_sensor_values, pv_string_attributes, upgrade_options
 
 
@@ -50,6 +50,14 @@ _DIRECT_FIELDS = {
     "next_import_window": "next_import_window",
     "last_updated": "updated_at",
 }
+
+
+# Always a number or unknown, so safe to record as long-term statistics.
+_MEASUREMENT_KEYS = frozenset({
+    "current_soc_target", "forecast_correction", "overnight_drain_adjustment", "evening_soc_adjustment",
+    "effective_charge_rate", "battery_capacity_estimate", "battery_soh", "battery_runtime", "pv_strings",
+    "marginal_cost", "solar_forecast_p50", "load_profile",
+})
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -153,7 +161,7 @@ class KpiSensor(CoordinatorEntity, SensorEntity):
         self._key = key
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self.entity_id = f"sensor.{key}"
+        pin_entity_id(self, "sensor", name, f"sensor.{key}")
         self._attr_native_unit_of_measurement = unit
         self._attr_device_info = optimizer_device_info(entry)
         if kind == "money":
@@ -188,11 +196,12 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         entity_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
-        if entity_id:
-            self.entity_id = entity_id  # used for new installs only; the registry keeps existing ids
         self._sensor_key = sensor_key
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
+        pin_entity_id(self, "sensor", name, entity_id)
+        if sensor_key in _MEASUREMENT_KEYS:
+            self._attr_state_class = SensorStateClass.MEASUREMENT  # long-term statistics (phase 94)
         self._attr_entity_category = entity_category
         self._attr_device_info = optimizer_device_info(entry)
 
@@ -204,8 +213,10 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return "h"
         if self._sensor_key in ("dynamic_tariff", "upgrade_advisor"):
             return "GBP"
-        if self._sensor_key in ("pv_strings", "battery_soh"):
+        if self._sensor_key in ("pv_strings", "battery_soh", "current_soc_target", "overnight_drain_adjustment", "evening_soc_adjustment"):
             return "%"
+        if self._sensor_key == "effective_charge_rate":
+            return "kW"
         if self._sensor_key in ("battery_capacity_estimate", "solar_forecast_p50", "load_profile"):
             return "kWh"
         return "kWh" if self._sensor_key in ("spare_solar", "import_causes") else None

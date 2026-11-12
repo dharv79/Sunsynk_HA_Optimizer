@@ -37,6 +37,9 @@ def _install_ha_stubs() -> None:
     components.persistent_notification = _stub(
         "homeassistant.components.persistent_notification", async_create=lambda *a, **k: None
     )
+    helpers = _stub("homeassistant.helpers")
+    helpers.entity_registry = _stub("homeassistant.helpers.entity_registry", async_get=lambda hass: None)
+    helpers.device_registry = _stub("homeassistant.helpers.device_registry", DeviceInfo=dict)
     # Bare package for sunsynk_optimizer so relative imports (from .const import …)
     # resolve to the submodules we register below — without running __init__.py
     # (which would pull in the full coordinator/optimizer HA import chain).
@@ -58,6 +61,7 @@ _load_module("const.py", "const")
 _flux_helpers = _load_module("flux_helpers.py", "flux_helpers")
 _planning = _load_module("planning.py", "planning")
 _data_logger = _load_module("data_logger.py", "data_logger")
+_entity = _load_module("entity.py", "entity")
 _dashboard = _load_module("dashboard_installer.py", "dashboard_installer")
 
 

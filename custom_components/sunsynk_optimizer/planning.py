@@ -3887,6 +3887,20 @@ def clip_text(value: Any, limit: int = STATE_TEXT_LIMIT) -> Any:
     return value[: limit - 1] + "…"
 
 
+def entity_slug(name: str) -> str:
+    """Lower-case id part for an entity name: runs of other characters become one underscore."""
+    return re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_")
+
+
+def remap_entity_ids(text: str, mapping: Mapping[str, str]) -> str:
+    """Replace whole entity ids in rendered dashboard text (phase 94); a longer id is never part-matched."""
+    wanted = {old: new for old, new in mapping.items() if old and new and old != new}
+    if not wanted:
+        return text
+    pattern = re.compile(r"(?<![\w])(" + "|".join(re.escape(k) for k in sorted(wanted, key=len, reverse=True)) + r")(?![\w])")
+    return pattern.sub(lambda m: wanted[m.group(1)], text)
+
+
 def url_segment(value: Any) -> str:
     """A config id made safe for one URL path segment or query value ('/', '?', '&', '..' can't redirect the call)."""
     return quote(str(value).strip(), safe="")
