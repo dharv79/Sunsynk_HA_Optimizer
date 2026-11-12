@@ -6,7 +6,7 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 
 ### Tests
 
-The pure adaptive-learning logic in `data_logger.py` and the pure planning maths in `planning.py` have unit tests under `tests/` that run **without** a Home Assistant install — `tests/conftest.py` stubs `homeassistant.core` and loads `data_logger.py` directly by file path (bypassing the package `__init__.py` and its coordinator/optimizer import chain). Run them with:
+The pure adaptive-learning logic in `data_logger.py` and the pure planning maths in `planning.py` have unit tests under `tests/` that run **without** a Home Assistant install — `tests/conftest.py` stubs `homeassistant.core` and loads `data_logger.py` and the `planning/` package directly by file path (bypassing the package `__init__.py` and its coordinator/optimizer import chain). Run them with:
 
 ```bash
 pip install pytest && python3 -m pytest
@@ -60,6 +60,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_data_audit.py` | Phase 45 audit rules, summary, config redaction |
 | `tests/test_kpi_sensors.py` | Phase 47 KPI sensor values (None, never 0) |
 | `tests/test_grid_outage.py` | Phase 48 grid voltage parser, runtime, outage record |
+| `tests/test_planning_package.py` | Phase 98 guard: every pre-split `planning` name (`tests/planning_names.txt`) is still exported and listed in `__all__`; `core` imports no sibling |
 | `tests/test_shared_helpers.py` | Phase 97 percentile/median/hhmm characterisation; `band_key_at`, `price_at`, `free_event_sold`, `mpc_load_kw`, `upgrade_scenarios`, `round_or_none` |
 | `tests/test_pv_strings.py` | Phase 49 string share, anomaly, streak |
 | `tests/test_user_override.py` | Phase 46 next plan date and override application |

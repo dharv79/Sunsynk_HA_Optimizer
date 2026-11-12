@@ -53,9 +53,11 @@ def _load(filename: str):
         pkg = types.ModuleType(_PKG)
         pkg.__path__ = [str(_PKG_DIR)]
         sys.modules[_PKG] = pkg
-    name = f"{_PKG}.{filename[:-3]}"
+    name = f"{_PKG}.{filename.split('/')[0].removesuffix('.py')}"
     if name not in sys.modules:
-        spec = importlib.util.spec_from_file_location(name, _PKG_DIR / filename)
+        path = _PKG_DIR / filename
+        kwargs = {"submodule_search_locations": [str(path.parent)]} if filename.endswith("__init__.py") else {}
+        spec = importlib.util.spec_from_file_location(name, path, **kwargs)
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         spec.loader.exec_module(module)
@@ -64,7 +66,7 @@ def _load(filename: str):
 
 const = _load("const.py")
 flux_helpers = _load("flux_helpers.py")
-planning = _load("planning.py")
+planning = _load("planning/__init__.py")
 
 
 def load_records(data_dir: str) -> list[dict[str, Any]]:

@@ -23,9 +23,9 @@ jobs:
       - name: Install test tools (pinned)
         run: pip install pytest==9.2.0 pyflakes==4.1.0 bandit==1.9.4
       - name: Compile check
-        run: python -m py_compile custom_components/sunsynk_optimizer/*.py
+        run: python -m py_compile custom_components/sunsynk_optimizer/*.py custom_components/sunsynk_optimizer/*/*.py
       - name: Lint (undefined names, unused imports)
-        run: python -m pyflakes custom_components/sunsynk_optimizer/*.py
+        run: python -m pyflakes custom_components/sunsynk_optimizer/*.py custom_components/sunsynk_optimizer/*/*.py
       - name: Card syntax check
         run: for f in custom_components/sunsynk_optimizer/www/*.js; do node --check "$f"; done
       - name: Run tests
