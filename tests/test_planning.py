@@ -87,7 +87,7 @@ def test_select_synthetic_ramp_only_raises(planning):
     fast = {5: 5.0}
     d = _select(planning, hours_to_solar=3.0, avg_consumption_kw=1.0, synthetic_profile=fast)
     assert d.reason == "solar_bridge" and not d.synthetic_ramp
-    assert d.target_soc == 50 and d.bridge_hour == 5
+    assert d.target_soc == 57 and d.bridge_hour == 5  # 3 kWh x 1.25 margin
 
 
 @pytest.mark.parametrize("band,target", [("winter_like", 95), ("summer_like", 80), ("shoulder", 85)])
@@ -957,3 +957,28 @@ def test_learned_measured_rate(planning):
 
 def test_resolve_used_charge_rate_no_derate(planning):
     assert planning.resolve_used_charge_rate(3.0, 2.0, 8, derate=False) == (2.0, 0.70)
+
+
+def test_blend_lifts_marginal_forecast_toward_full(planning):
+    # 7.19 kWh was 45% before; just above the 7 kWh line it must now sit near 100%.
+    near = _select(planning, low_solar_forecast_kwh=7.19, band="shoulder", hours_to_solar=4.9, avg_consumption_kw=0.417)
+    assert near.reason == "solar_bridge_blend" and near.target_soc >= 90
+    mid = _select(planning, low_solar_forecast_kwh=8.5, band="shoulder", hours_to_solar=4.9, avg_consumption_kw=0.417)
+    assert near.target_soc > mid.target_soc > 50
+    # At and above the blend end the plain bridge is used.
+    far = _select(planning, low_solar_forecast_kwh=10.0, band="summer_like", hours_to_solar=4.9, avg_consumption_kw=0.417)
+    assert far.reason == "solar_bridge"
+    # Below the line the existing override still wins.
+    assert _select(planning, low_solar_forecast_kwh=6.99, band="shoulder").target_soc in (95, 100)
+
+
+def test_simple_bridge_carries_load_margin(planning):
+    d = _select(planning, hours_to_solar=4.0, avg_consumption_kw=0.5, battery_capacity_kwh=10.0)
+    assert d.target_soc == planning.bridge_soc(4.0 * 0.5 * planning.BRIDGE_LOAD_MARGIN, 10.0) > planning.bridge_soc(2.0, 10.0)
+
+
+def test_blend_never_lowers_or_touches_full(planning):
+    d = planning.TargetDecision(100, "solar_bridge")
+    assert planning.blend_toward_full(d, 7.5).reason == "solar_bridge"
+    d = planning.TargetDecision(80, "solar_bridge")
+    assert planning.blend_toward_full(d, 12.0).target_soc == 80
