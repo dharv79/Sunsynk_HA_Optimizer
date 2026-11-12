@@ -1390,8 +1390,11 @@ def trim_target_soc(
     *,
     minutes: int | None = None,
     plan_target_soc: int | None = None,
+    hold_soc: int | None = None,
 ) -> int | None:
     """Sell-down target floored at the evening reserve; None when that leaves nothing to trim.
+
+    ``hold_soc`` is an active peak-cover hold target: selling below it would be bought straight back.
 
     With ``minutes`` (local minute of day): no trim 19:00-05:00, where selling at the
     night/day export rate and rebuying later loses money and would fight the overnight
@@ -1403,6 +1406,8 @@ def trim_target_soc(
     floors = [default, reserve_soc or 0]
     if plan_target_soc is not None and (minutes is None or minutes < PEAK_START_MINUTES):
         floors.append(plan_target_soc)
+    if hold_soc is not None:
+        floors.append(hold_soc)
     target = max(floors)
     return target if target < soc else None
 
@@ -2660,6 +2665,18 @@ def restore_flux2_slot(export_paused: bool, minutes: int) -> dict[str, Any]:
     """
     paused = export_paused and PEAK_START_MINUTES <= minutes < PEAK_END_MINUTES
     return dict(EXPORT_PAUSE_FLUX2_SLOT if paused else DEFAULT_FLUX2_SLOT)
+
+
+def carry_held_flux1(payload: dict[str, Any], hold_flux1: dict[str, Any] | None, minutes: int) -> dict[str, Any]:
+    """Keep an active peak-cover hold when a push carries only Flux 2 (phase 90).
+
+    A push rebuilds every slot it does not name from the config baseline, so a
+    Flux 2 only push (trim, export pause) would otherwise wipe the Flux 1 hold.
+    The hold ends at 16:00; a push that names Flux 1 is left as it is.
+    """
+    if payload.get("flux_1") or not hold_flux1 or minutes >= PEAK_COVER_PEAK_START_MINUTES:
+        return payload
+    return {**payload, "flux_1": dict(hold_flux1)}
 
 
 def meter_delta(start: dict[str, Any] | None, end: dict[str, Any] | None, key: str) -> float | None:

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import calendar
 
 import json
@@ -358,6 +359,7 @@ from .planning import (
     DEFAULT_FLUX2_SLOT,
     EXPORT_PAUSE_FLUX2_SLOT,
     restore_flux2_slot,
+    carry_held_flux1,
     week_kpis,
     weighted_forecast_correction,
     window_grid_kwh,
@@ -492,6 +494,8 @@ class SunsynkOptimizer:
         # is re-allowed, harmless — the slot is idempotent).
         self._peak_cover: dict[str, Any] | None = None
         self._peak_cover_startup_attempts = 0
+        # Phase 90: one Flux 2 decide-and-push at a time (never held across a notification).
+        self._flux2_lock = asyncio.Lock()
         self.data_logger = DataLogger(hass)
         self._cfg_cache: tuple | None = None  # (id key, read-only config, data, options): refs keep ids valid
         self._band_price_cache: dict[tuple, dict[str, float | None]] = {}
@@ -1551,6 +1555,13 @@ class SunsynkOptimizer:
 
     async def async_run_flux2_check(self, source: str = "automatic") -> None:
         """Run Flux 2 evening export / trim logic."""
+        async with self._flux2_lock:
+            notice = await self._async_flux2_decide(source)
+        if notice:
+            await self.async_notify(*notice)
+
+    async def _async_flux2_decide(self, source: str) -> tuple[str, str] | None:
+        """Decide and push under the Flux 2 lock; returns the notification to send after it."""
         if self._outage_active():
             return  # Phase 48: a push cannot reach the inverter during an outage.
         if self.operation_mode == "monitor":
@@ -1660,14 +1671,11 @@ class SunsynkOptimizer:
                 evening_export_disabled=True,
             )
             title = "🔋 Sunsynk: evening export paused" if api_ok else "⚠️ Sunsynk: export pause NOT applied"
-            await self.async_notify(
+            return (
                 title,
-                (
-                    f"{trigger_desc}. "
-                    f"Export paused by holding target SOC at 100%; it re-enables automatically.{_api_note(api_ok)}"
-                ),
+                f"{trigger_desc}. "
+                f"Export paused by holding target SOC at 100%; it re-enables automatically.{_api_note(api_ok)}",
             )
-            return
 
         # Trim if SOC exceeds 85% on a non-full-charge day. Target 82% leaves a 3% gap
         # below the trigger so normal fluctuation doesn't immediately re-trigger a trim.
@@ -1693,12 +1701,11 @@ class SunsynkOptimizer:
                 f"soc_{round(soc)}%_exceeds_85",
             )
             title = "🔋 Sunsynk: battery trim" if api_ok else "⚠️ Sunsynk: battery trim NOT applied"
-            await self.async_notify(
+            return (
                 title,
                 f"SOC {round(soc, 1)}% is above 85%. Trimming to {trim_target}%"
                 f"{_reserve_note(trim_target, reserve)}.{_api_note(api_ok)}",
             )
-            return
 
         self.coordinator.update_state(
             last_flux2_action={
@@ -1710,6 +1717,7 @@ class SunsynkOptimizer:
             evening_export_disabled=False,
             operation_mode=self.operation_mode,
         )
+        return None
 
     async def _async_trim_defer(self, soc, trim_target, now_local, cfg, base_action) -> int | None:
         """Phase 65: size the trim to the solar that would overflow; the rest waits for the peak.
@@ -1764,7 +1772,8 @@ class SunsynkOptimizer:
         evening_export_disabled: bool = False,
     ) -> bool:
         """Push a Flux 2 override and record it as last_flux2_action. Returns api_ok."""
-        payload = {"flux_2": flux_2}
+        now = dt_util.now()
+        payload = carry_held_flux1({"flux_2": flux_2}, self._cover_hold_slot(now), now.hour * 60 + now.minute)
         api_ok = await self.async_push_flux_override(payload)
         self.coordinator.update_state(
             last_flux2_action={
@@ -2850,17 +2859,19 @@ class SunsynkOptimizer:
             wear_pence=self._wear_pence(),
             peak_need_soc=need,
         )
-        if plan["decision"] == "export" and self.coordinator.state.evening_export_disabled:
-            plan["decision"] = "export_disabled"
         live = bool(cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)) and self.operation_mode != "monitor"
         api_ok = None
-        if live and plan["decision"] == "export":
-            api_ok = await self._async_push_flux2_action(
-                "peak_export",
-                {"startTime": "16:00", "endTime": "19:00", "targetSoc": plan["target_soc"]},
-                {"soc": soc, "source": "automatic", "evening_reserve_soc": reserve},
-                f"surplus_{plan['export_kwh']}kWh_above_{plan['target_soc']}%",
-            )
+        async with self._flux2_lock:  # re-read the pause flag once any in-flight pause has finished
+            if plan["decision"] == "export" and self.coordinator.state.evening_export_disabled:
+                plan["decision"] = "export_disabled"
+            if live and plan["decision"] == "export":
+                api_ok = await self._async_push_flux2_action(
+                    "peak_export",
+                    {"startTime": "16:00", "endTime": "19:00", "targetSoc": plan["target_soc"]},
+                    {"soc": soc, "source": "automatic", "evening_reserve_soc": reserve},
+                    f"surplus_{plan['export_kwh']}kWh_above_{plan['target_soc']}%",
+                )
+        if api_ok is not None:
             title = "🔋 Sunsynk: selling surplus at peak rate" if api_ok else "⚠️ Sunsynk: peak export NOT applied"
             await self.async_notify(
                 title,
@@ -2916,13 +2927,15 @@ class SunsynkOptimizer:
         )
         live = bool(cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)) and self.operation_mode != "monitor"
         api_ok = None
-        if live and result["action"]:
-            api_ok = await self._async_push_flux2_action(
-                "peak_export",
-                {"startTime": now.strftime("%H:%M"), "endTime": "19:00", "targetSoc": result["target_soc"]},
-                {"soc": soc, "source": "automatic", "evening_reserve_soc": reserve},
-                f"recheck_{result['action']}_to_{result['target_soc']}%",
-            )
+        async with self._flux2_lock:  # a pause that fired meanwhile wins
+            if live and result["action"] and not self.coordinator.state.evening_export_disabled:
+                api_ok = await self._async_push_flux2_action(
+                    "peak_export",
+                    {"startTime": now.strftime("%H:%M"), "endTime": "19:00", "targetSoc": result["target_soc"]},
+                    {"soc": soc, "source": "automatic", "evening_reserve_soc": reserve},
+                    f"recheck_{result['action']}_to_{result['target_soc']}%",
+                )
+        if api_ok is not None:
             title = "🔋 Sunsynk: peak export adjusted" if api_ok else "⚠️ Sunsynk: peak export adjustment NOT applied"
             await self.async_notify(
                 title,
@@ -3195,10 +3208,21 @@ class SunsynkOptimizer:
         reserve = self._evening_reserve_soc()
         plan = self.coordinator.state.nightly_import_plan or {}
         plan_target = plan.get("target_soc") if plan.get("date") == now_local.date().isoformat() else None
+        hold = self._cover_hold_slot(now_local)
         target = trim_target_soc(
-            soc, reserve, minutes=now_local.hour * 60 + now_local.minute, plan_target_soc=plan_target
+            soc, reserve, minutes=now_local.hour * 60 + now_local.minute, plan_target_soc=plan_target,
+            hold_soc=(hold or {}).get("targetSoc"),
         )
         return target, reserve
+
+    def _cover_hold_slot(self, now_local: datetime) -> dict[str, Any] | None:
+        """Today's live peak-cover Flux 1 hold while it is in force (pushed, before 16:00), else None."""
+        state = self._peak_cover or {}
+        if not state.get("pushed") or state.get("date") != now_local.date().isoformat():
+            return None
+        if now_local.hour * 60 + now_local.minute >= PEAK_COVER_PEAK_START_MINUTES:
+            return None
+        return state.get("slot")
 
     async def _refresh_evening_load(self, paired_days: list[dict[str, Any]], today, weekend: bool, away: bool) -> None:
         """Phase 55: learn the 16:00-22:00 load from the meter snapshots (None below 7 home days)."""
@@ -3321,32 +3345,33 @@ class SunsynkOptimizer:
                 current_soc = self._state_float(self.battery_soc_entity, 0)
                 if current_soc < 99.5:
                     return
-                now_local = dt_util.now()
-                trim_target, reserve = self._trim_target(current_soc, now_local)
-                # Don't replace a live peak export (it already sells lower), an export
-                # pause or an event's slots.
-                if (
-                    trim_target is None
-                    or self._peak_export_holds_flux2(now_local)
-                    or self.coordinator.state.evening_export_disabled
-                    or self._slots_held()
-                ):
-                    return
-                api_ok = await self._async_push_flux2_action(
-                    "full_day_trim_to_82",
-                    {
-                        "startTime": now_local.strftime("%H:%M"),
-                        "endTime": (now_local + timedelta(minutes=60)).strftime("%H:%M"),
-                        "targetSoc": trim_target,
-                    },
-                    {
-                        "soc": current_soc,
-                        "grid_pac": self._state_float(self.grid_pac_entity, 0),
-                        "source": "automatic",
-                        "evening_reserve_soc": reserve,
-                    },
-                    "held_100%_for_1h",
-                )
+                async with self._flux2_lock:
+                    now_local = dt_util.now()
+                    trim_target, reserve = self._trim_target(current_soc, now_local)
+                    # Don't replace a live peak export (it already sells lower), an export
+                    # pause or an event's slots.
+                    if (
+                        trim_target is None
+                        or self._peak_export_holds_flux2(now_local)
+                        or self.coordinator.state.evening_export_disabled
+                        or self._slots_held()
+                    ):
+                        return
+                    api_ok = await self._async_push_flux2_action(
+                        "full_day_trim_to_82",
+                        {
+                            "startTime": now_local.strftime("%H:%M"),
+                            "endTime": (now_local + timedelta(minutes=60)).strftime("%H:%M"),
+                            "targetSoc": trim_target,
+                        },
+                        {
+                            "soc": current_soc,
+                            "grid_pac": self._state_float(self.grid_pac_entity, 0),
+                            "source": "automatic",
+                            "evening_reserve_soc": reserve,
+                        },
+                        "held_100%_for_1h",
+                    )
                 title = "🔋 Sunsynk: full-charge hold complete" if api_ok else "⚠️ Sunsynk: full-charge trim NOT applied"
                 await self.async_notify(
                     title,
@@ -4659,10 +4684,10 @@ class SunsynkOptimizer:
         live = bool(cfg.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE)) and self.operation_mode != "monitor"
         api_ok = None
         if live and actionable:
-            api_ok = await self.async_push_flux_override(
-                {"flux_1": {"startTime": now.strftime("%H:%M"), "endTime": "16:00", "targetSoc": plan["target_soc"]}}
-            )
+            slot = {"startTime": now.strftime("%H:%M"), "endTime": "16:00", "targetSoc": plan["target_soc"]}
+            api_ok = await self.async_push_flux_override({"flux_1": slot})
             state["pushed"] = api_ok is True
+            state["slot"] = slot
             hold = plan["decision"] == "hold"
             if hold:
                 title = "🔋 Sunsynk: holding the battery for the peak" if api_ok else "⚠️ Sunsynk: peak hold NOT applied"

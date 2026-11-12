@@ -22,3 +22,11 @@ Stop one inverter write silently undoing another.
 ## Saving
 
 Small and unproven: a wiped hold costs the day/peak price gap on the held energy (about 10p per kWh).
+
+## As built (12/11/2026)
+
+- Re-vet: both findings confirmed by reading the code; neither has been seen in the live logs.
+- Carry-over is limited to active holds (`planning.carry_held_flux1`), not tonight's plan: Flux 1 falling back to the baseline (charge to 100%) is the safer result if a later plan push fails. An active export pause was already kept by `restore_flux2_slot`.
+- The trim is floored at the hold target (`trim_target_soc(hold_soc=…)`).
+- `_flux2_lock` covers the Flux 2 check, peak export, re-check and full-charge trim; notifications go out after the lock.
+- `api.py` login lock added. Details: `docs/architecture/export-control.md`.
