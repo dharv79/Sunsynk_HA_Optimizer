@@ -117,6 +117,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 107. Inverter settings snapshot and change audit | Planned, not built | S, ~25-40k |
 | 108. Notification priorities, quiet hours and a morning brief | Planned, not built | M, ~40-60k |
 | 109. Data export service (CSV) | Planned, not built | S, ~20-35k |
+| 110. Marginal-forecast target blend and bridge margin | Done, merged (29e8028, PR #188) | XS, ~35k actual |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
