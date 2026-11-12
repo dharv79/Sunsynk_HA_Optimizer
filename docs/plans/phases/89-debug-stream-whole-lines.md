@@ -1,6 +1,6 @@
 # Phase 89 — Send the debug bundle as whole JSON lines
 
-**Status:** Built, in PR. **Size:** XS, ~10-20k est. **Origin:** code review 11/11/2026.
+**Status:** Done, merged (6572656, PR #190). **Size:** XS, ~10-20k est. **Origin:** code review 11/11/2026.
 
 ## Goal
 
