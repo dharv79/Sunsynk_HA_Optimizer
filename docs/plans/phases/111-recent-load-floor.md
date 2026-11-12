@@ -1,6 +1,6 @@
 # Phase 111 — Recent-nights floor on the learned overnight load
 
-**Status:** Built, in PR. **Size:** XS. **Origin:** 12/11/2026 short-charge night follow-up.
+**Status:** Done, merged (9ba6bb8, PR #192). **Size:** XS. **Origin:** 12/11/2026 short-charge night follow-up.
 
 ## Goal
 
