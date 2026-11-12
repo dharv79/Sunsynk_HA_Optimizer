@@ -1,6 +1,6 @@
 # Phase 93 — Options validation and diagnostics redaction
 
-**Status:** Planned, not built. **Size:** S, ~25-40k est. **Origin:** code review 11/11/2026.
+**Status:** Done, merged (02f1444, PR #199). **Size:** S, ~25-40k est. **Origin:** code review 11/11/2026.
 
 ## Goal
 

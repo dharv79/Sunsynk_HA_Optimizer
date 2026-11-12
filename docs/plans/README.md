@@ -100,7 +100,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 90. Flux write safety (slot carry-over and serialised decisions) | Done, merged (bf2f1da, PR #198) | S, ~45k actual |
 | 91. Log read performance | Planned, not built | M, ~50-80k |
 | 92. Fewer state writes on SOC changes | Planned, not built | S, ~25-40k |
-| 93. Options validation and diagnostics redaction | Planned, not built | S, ~25-40k |
+| 93. Options validation and diagnostics redaction | Done, merged (02f1444, PR #199) | S, ~40k actual |
 | 94. Stable entity IDs and long-term statistics (feasibility-gated) | Planned, not built | S-M, ~35-50k |
 | 95. Card rendering: redraw only on change | Planned, not built | S, ~20-35k |
 | 96. Release gate (tests and version check before a release) | Done, merged (ea89659, PR #196) | XS, ~25k actual |
