@@ -611,8 +611,8 @@ def test_learned_load_weekend_split_with_fallback(planning):
     today = date(2026, 10, 6)
     assert planning.learned_load_kw(days, today, weekend=True) == (1.2, 8)
     assert planning.learned_load_kw(days, today, weekend=False) == (0.6, 20)
-    # Too few weekend days → pooled history.
-    assert planning.learned_load_kw(days[:14], today, weekend=True) == (0.6, 14)
+    # Too few weekend days → pooled history; phase 111 lifts it to the last 3 nights' mean.
+    assert planning.learned_load_kw(days[:14], today, weekend=True) == (1.0, 14)
 
 
 @pytest.mark.parametrize(
@@ -992,3 +992,16 @@ def test_pack_lines_keeps_whole_lines(planning):
     assert all(len("\n".join(p)) <= 3500 or len(p) == 1 for p in packs)
     assert packs[-1] == ["e" * 5000]
     assert pack_lines(["x"]) == [["x"]] and pack_lines([]) == [[""]]
+
+
+def test_learned_load_follows_recent_cold_snap(planning):
+    from datetime import date, timedelta
+    today = date(2026, 11, 12)
+    days = [{"date": (today - timedelta(days=i)).isoformat(), "overnight_load_kwh": 2.5} for i in range(3, 20)]
+    days += [{"date": (today - timedelta(days=1)).isoformat(), "overnight_load_kwh": 4.3},
+             {"date": (today - timedelta(days=2)).isoformat(), "overnight_load_kwh": 3.1}]
+    kw, n = planning.learned_load_kw(days, today)
+    assert n == 19 and kw == round((4.3 + 3.1 + 2.5) / 3 / 6, 3)  # recent mean beats 0.417 median
+    # A quiet recent spell never lowers the median.
+    low = [dict(d, overnight_load_kwh=1.0) if i >= 17 else d for i, d in enumerate(days)]
+    assert planning.learned_load_kw(low, today)[0] == round(2.5 / 6, 3)

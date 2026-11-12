@@ -732,6 +732,9 @@ OVERNIGHT_LOAD_HOURS = 6.0
 LEARNED_LOAD_WINDOW_DAYS = 28
 LEARNED_LOAD_MIN_DAYS = 7
 LEARNED_LOAD_CLAMP = (0.5, 2.0)
+# Phase 111: a cold snap lifts the load faster than a 28-night median follows.
+LEARNED_LOAD_RECENT_DAYS = 3
+LEARNED_LOAD_RECENT_MIN = 2
 
 
 def learned_load_kw(
@@ -747,8 +750,13 @@ def learned_load_kw(
     full-charge days, and no day with a missing or zero load reading (a meter
     unavailable at 06:00 must not drag the rate down). With ``weekend`` set,
     uses only matching days when there are ``min_days`` of them, else all.
+
+    Phase 111: the result is never below the mean of the last
+    ``LEARNED_LOAD_RECENT_DAYS`` nights (same day type when split, at
+    least ``LEARNED_LOAD_RECENT_MIN`` of them), so it can only raise the rate.
     """
     rates: list[tuple[float, bool]] = []
+    recent: list[tuple[float, bool]] = []
     for d in paired_days:
         load = d.get("overnight_load_kwh")
         if d.get("away") or d.get("is_full_day") or not load or load <= 0:
@@ -760,13 +768,19 @@ def learned_load_kw(
         if not 0 < (today - day).days <= window_days:
             continue
         rates.append((load / OVERNIGHT_LOAD_HOURS, day.weekday() >= 5))
+        if (today - day).days <= LEARNED_LOAD_RECENT_DAYS:
+            recent.append(rates[-1])
     if weekend is not None:
         matching = [r for r in rates if r[1] == weekend]
         if len(matching) >= min_days:
             rates = matching
+            recent = [r for r in recent if r[1] == weekend]
     if len(rates) < min_days:
         return None, len(rates)
-    return round(_median([r for r, _ in rates]), 3), len(rates)
+    learned = _median([r for r, _ in rates])
+    if len(recent) >= LEARNED_LOAD_RECENT_MIN:
+        learned = max(learned, sum(r for r, _ in recent) / len(recent))
+    return round(learned, 3), len(rates)
 
 
 def resolve_load_kw(config_kw: float, learned_kw: float | None) -> tuple[float, str]:

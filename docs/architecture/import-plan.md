@@ -314,3 +314,7 @@ Equal neighbours merge, and the longest slot is split on the half-hour until the
 **Change (`planning.py`).** `blend_toward_full`: from 7 kWh to `LOW_SOLAR_BLEND_END_KWH` (10), the bridge target is blended linearly toward 100% (reason `solar_bridge_blend`); it never lowers a target. The simple bridge also carries `BRIDGE_LOAD_MARGIN` (1.25) on its energy. The hourly walk and the 05:00 hours-to-solar assumption are unchanged; the learned drain adjustment already covers charge-end to 06:00, so the gap is not counted again.
 
 **Verification.** `tests/test_planning.py`: blend near/mid/far/below the line, margin on the simple bridge, blend never lowers or touches 100%. Live: a 7–10 kWh forecast day should show `target_soc_reason: solar_bridge_blend` and a target above the plain bridge.
+
+## Recent-nights load floor (12/11/2026)
+
+Root cause: the bridge load was the 28-night median overnight rate, which lagged a cold snap (0.417 kW used against 0.72 and 0.52 kW on the last two nights). Change: `learned_load_kw` returns the larger of the median and the mean of the last 3 nights (min 2, same day type when split). Verification: `test_learned_load_follows_recent_cold_snap`.
