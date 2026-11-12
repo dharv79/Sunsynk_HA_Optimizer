@@ -1,6 +1,6 @@
 # Phase 88 — Listener guards, 22:00 ordering and a pure dry run
 
-**Status:** Built, in PR. **Size:** S, ~25-40k est. **Origin:** code review 11/11/2026.
+**Status:** Done, merged (45271d3, PR #194). **Size:** S, ~25-40k est. **Origin:** code review 11/11/2026.
 
 ## Goal
 
