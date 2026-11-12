@@ -140,3 +140,16 @@ All six views then rendered with no error cards, no console errors and no horizo
 - `planning.clip_text` caps the `last_error`, import plan and Flux 2 action sensor states at 255 characters; the full error is in the `full_error` attribute when it was cut.
 
 **Verification.** `tests/test_state_update_skip.py`: `test_clip_text_fits_the_entity_state_limit`, `test_update_state_persist_flag_is_only_used_for_derived_fields`.
+
+## Stable entity IDs and statistics (12/11/2026, phase 94)
+
+**Root cause.** Entities have `has_entity_name = True` and a device named "Sunsynk Optimizer", so Home Assistant names a new entity `<domain>.sunsynk_optimizer_<name>` unless the ID is set. Only the newer entities set it, so on a new install the generated dashboard pointed at IDs that did not exist. Numeric sensors had no `state_class`, so they kept no long-term statistics.
+
+**Design.**
+- `entity.pin_entity_id` sets every entity's ID: the explicit ID where one was given, else `<domain>.<slug of the name>` (`planning.entity_slug`), which is the ID older installs already have. It only affects a new registration; the registry keeps existing IDs.
+- `pin_entity_id` also records `unique_id → dashboard ID` in `entity.DEFAULT_ENTITY_IDS`. `dashboard_installer._registry_id_map` looks each one up in the entity registry and `planning.remap_entity_ids` rewrites the rendered dashboard where the real ID differs (prefixed IDs from an install made before this fix, renamed entities, a `_2` collision).
+- `sensor._MEASUREMENT_KEYS` get `SensorStateClass.MEASUREMENT`. `current_soc_target` and the two SOC adjustments gain `%`; the effective charge rate gains `kW`. Daily kWh and £ sensors are unchanged.
+
+**Not verified on a clean Home Assistant.** The naming rule is Home Assistant's documented behaviour; the fix was not run on a fresh install.
+
+**Verification.** `tests/test_dashboard.py`: `test_every_optimizer_id_in_the_dashboard_is_pinned`, `test_pin_entity_id_uses_the_name_or_the_explicit_id`, `test_remap_entity_ids_replaces_whole_ids_only`.

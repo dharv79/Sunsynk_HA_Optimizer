@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .entity import optimizer_device_info
+from .entity import optimizer_device_info, pin_entity_id
 from .const import DOMAIN
 from .dashboard_installer import async_install_dashboard
 
@@ -45,12 +45,11 @@ class SunsynkOptimizerButton(CoordinatorEntity, ButtonEntity):
 
     def __init__(self, coordinator, entry: ConfigEntry, key: str, name: str, entity_id: str | None = None) -> None:
         super().__init__(coordinator)
-        if entity_id:
-            self.entity_id = entity_id  # used for new installs only; the registry keeps existing ids
         self._entry = entry
         self._key = key
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+        pin_entity_id(self, "button", name, entity_id)
         self._attr_device_info = optimizer_device_info(entry)
 
     async def async_press(self) -> None:

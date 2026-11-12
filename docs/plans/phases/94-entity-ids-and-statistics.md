@@ -20,3 +20,7 @@ Make the generated dashboard work on a new install, and keep history for slow-mo
 ## Saving
 
 None. New-install correctness and history that survives the recorder purge.
+
+## As built (12/11/2026)
+
+The fresh-install check could not be run in the build environment, so both parts of the fix were built: every entity ID is pinned, and the dashboard installer maps IDs through the entity registry. An install made between phase 47 and this fix needs one press of **Update dashboard**. Details: `docs/architecture/entities-dashboard.md`.

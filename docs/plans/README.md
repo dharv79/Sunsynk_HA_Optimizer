@@ -98,7 +98,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 88. Listener guards, 22:00 ordering and a pure dry run | Done, merged (45271d3, PR #194) | S, ~40k actual |
 | 89. Send the debug bundle as whole JSON lines | Done, merged (6572656, PR #190) | XS, ~25k actual |
 | 90. Flux write safety (slot carry-over and serialised decisions) | Done, merged (bf2f1da, PR #198) | S, ~45k actual |
-| 91. Log read performance | Planned, not built | M, ~50-80k |
+| 91. Log read performance | Done, merged (8e9ad86, PR #201) | S-M, ~50k actual |
 | 92. Fewer state writes on SOC changes | Done, merged (1a0effc, PR #200) | S, ~30k actual |
 | 93. Options validation and diagnostics redaction | Done, merged (02f1444, PR #199) | S, ~40k actual |
 | 94. Stable entity IDs and long-term statistics (feasibility-gated) | Planned, not built | S-M, ~35-50k |
