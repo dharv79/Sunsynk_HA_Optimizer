@@ -1005,3 +1005,20 @@ def test_learned_load_follows_recent_cold_snap(planning):
     # A quiet recent spell never lowers the median.
     low = [dict(d, overnight_load_kwh=1.0) if i >= 17 else d for i, d in enumerate(days)]
     assert planning.learned_load_kw(low, today)[0] == round(2.5 / 6, 3)
+
+
+def test_flux1_end_rounds_part_minutes_up(planning):
+    # 15.25 min of charging needs a second 15-minute slot (phase 88).
+    assert planning.flux1_end_minutes(15.25 / 60 * 3.0, 3.0) == 2 * 60 + 30
+    assert planning.flux1_end_minutes(0.75, 3.0) == 2 * 60 + 15  # exactly 15 min stays one slot
+
+
+def test_plan_free_event_across_clock_change(planning):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Europe/London")
+    # 25/10/2026: clocks go back at 02:00 BST, so 00:30-02:30 local is 3 real hours.
+    start, end = datetime(2026, 10, 25, 0, 30, tzinfo=tz), datetime(2026, 10, 25, 2, 30, tzinfo=tz)
+    plan = planning.plan_free_event(start, end, soc=90, capacity_kwh=10, charge_rate_kw=1.0, export_rate_kw=2.0)
+    assert plan.sell_floor_soc == 70  # 3 h x 1 kW refill, not 2 h
+    assert planning.elapsed_seconds(start, plan.sell_start) == 3600  # 2 kWh at 2 kW
