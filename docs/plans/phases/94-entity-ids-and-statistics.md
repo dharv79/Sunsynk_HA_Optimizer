@@ -1,6 +1,6 @@
 # Phase 94 — Stable entity IDs and long-term statistics
 
-**Status:** Planned, not built. **Size:** S-M, ~35-50k est. **Origin:** code review 11/11/2026. Starts with a feasibility check on a fresh HA install.
+**Status:** Done, merged (c62f699, PR #202). **Size:** S-M, ~35-50k est. **Origin:** code review 11/11/2026. Starts with a feasibility check on a fresh HA install.
 
 ## Goal
 

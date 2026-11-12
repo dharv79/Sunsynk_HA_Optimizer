@@ -153,3 +153,15 @@ All six views then rendered with no error cards, no console errors and no horizo
 **Not verified on a clean Home Assistant.** The naming rule is Home Assistant's documented behaviour; the fix was not run on a fresh install.
 
 **Verification.** `tests/test_dashboard.py`: `test_every_optimizer_id_in_the_dashboard_is_pinned`, `test_pin_entity_id_uses_the_name_or_the_explicit_id`, `test_remap_entity_ids_replaces_whole_ids_only`.
+
+## Card rendering: redraw only on change (12/11/2026, phase 95)
+
+**Root cause.** The flow card redrew on every state change anywhere in Home Assistant. The day chart rebuilt the whole SVG (five series of 288 bins) on every pointer move, and a chart left open on "today" stayed on the old day after midnight with Next and Today disabled.
+
+**Design.**
+- Flow card: `setConfig` lists the entities the card reads (`_watch`); `set hass` returns early when every watched state object is the same object as last time.
+- Day chart: a pointer move inside the same 5-minute bin does nothing; a new bin calls `_drawCursor`, which updates only the cursor line, time label and legend values inside a `<g data-cur>` group.
+- Day chart: `_tick` (every 5 minutes) moves a card that was following today to the new day, and re-enables Next and Today on a card showing an older day.
+- No version constant to bump: the cards are served with `?v=<manifest version>`, so browsers reload them on the next release.
+
+**Verification.** `tests/test_cards.py` runs both cards in Node. Checked once in Chromium: three pointer moves in one bin gave one cursor update and no full redraw.

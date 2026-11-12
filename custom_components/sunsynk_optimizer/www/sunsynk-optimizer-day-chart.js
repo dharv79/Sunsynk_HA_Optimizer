@@ -102,6 +102,7 @@
       super();
       this.attachShadow({ mode: "open" });
       this._day = startOfDay(new Date());
+      this._following = true; // showing today: move on when the date rolls
       this._data = null;
       this._hidden = new Set();
       this._cursor = null;
@@ -132,13 +133,18 @@
     }
 
     connectedCallback() {
-      this._timer = setInterval(() => {
-        if (this._isToday()) this._load(true);
-      }, REFRESH_MS);
+      this._timer = setInterval(() => this._tick(), REFRESH_MS);
     }
 
     disconnectedCallback() {
       clearInterval(this._timer);
+    }
+
+    _tick() {
+      if (this._isToday()) return this._load(true);
+      // Past midnight: a card left on "today" moves to the new day; otherwise re-enable Next and Today.
+      if (this._following) return this._go(startOfDay(new Date()));
+      if (this._built) this._syncNav();
     }
 
     _isToday() {
@@ -206,15 +212,17 @@
         const rect = this._svg.getBoundingClientRect();
         if (!rect.width) return;
         const x = ((ev.clientX - rect.left) / rect.width) * this._w;
-        this._cursor = Math.max(0, Math.min(BINS - 1, Math.floor(((x - PL) / (this._w - PL - PR)) * BINS)));
-        this._draw();
+        const bin = Math.max(0, Math.min(BINS - 1, Math.floor(((x - PL) / (this._w - PL - PR)) * BINS)));
+        if (bin === this._cursor) return; // same 5-minute bin: nothing to redraw
+        this._cursor = bin;
+        this._drawCursor();
       };
       this._svg.addEventListener("pointermove", move);
       this._svg.addEventListener("pointerdown", move);
       this._svg.addEventListener("pointerleave", (ev) => {
-        if (ev.pointerType === "touch") return; // keep a tapped time until the next tap
+        if (ev.pointerType === "touch" || this._cursor === null) return; // keep a tapped time until the next tap
         this._cursor = null;
-        this._draw();
+        this._drawCursor();
       });
       if (this._ro) this._ro.disconnect();
       this._ro = new ResizeObserver(() => {
@@ -240,6 +248,7 @@
     _go(day) {
       const today = startOfDay(new Date());
       this._day = day > today ? today : day;
+      this._following = this._day >= today;
       this._cursor = null;
       this._syncNav();
       this._load();
@@ -369,6 +378,7 @@
       if (!d || d.empty) {
         out += `<text class="msg" x="${PL + PW / 2}" y="${PT + PH / 2}">${!d ? "Loading…" : "No data for this day"}</text>`;
         svg.innerHTML = out;
+        this._geo = null;
         this._note.textContent = d && d.empty
           ? d.mode === "none" ? "No entities configured." : "Home Assistant has no history or long-term statistics for these sensors on this day."
           : "Loading…";
@@ -420,18 +430,34 @@
           out += `<path class="ln" stroke="${col}" d="${line}"/>`;
         }
       }
-      // cursor + legend values (cursor, else the latest bin)
+      svg.innerHTML = out + "<g data-cur></g>";
+      this._geo = { PW, PH };
+      this._drawCursor();
+      for (const k in this._tot) {
+        const v = d.totals[k];
+        this._tot[k].textContent = v === null || v === undefined ? "—" : `${v.toFixed(1)} kWh`;
+      }
+    }
+
+    // Cursor line, time label and legend values only (cursor, else the latest bin): a pointer
+    // move must not rebuild the five 288-point series.
+    _drawCursor() {
+      const d = this._data;
+      const g = this._svg && this._svg.querySelector("[data-cur]");
+      if (!d || d.empty || !g || !this._geo) return;
+      const { PW, PH } = this._geo;
       let at = this._cursor;
+      let cur = "";
       if (at === null) {
         at = -1;
         for (const [k] of SERIES) if (d.s[k]) d.s[k].forEach((v, b) => { if (v !== null && b > at) at = b; });
       } else {
-        const xx = x(at + 0.5);
-        out += `<line class="cur" x1="${xx}" x2="${xx}" y1="${PT}" y2="${PT + PH}"/>`;
+        const xx = PL + ((at + 0.5) / BINS) * PW;
+        cur += `<line class="cur" x1="${xx}" x2="${xx}" y1="${PT}" y2="${PT + PH}"/>`;
         const mins = at * BIN_MIN;
-        out += `<text class="ax" x="${Math.min(Math.max(xx, PL + 18), PL + PW - 18)}" y="${PT + 9}" text-anchor="middle">${pad(Math.floor(mins / 60))}:${pad(mins % 60)}</text>`;
+        cur += `<text class="ax" x="${Math.min(Math.max(xx, PL + 18), PL + PW - 18)}" y="${PT + 9}" text-anchor="middle">${pad(Math.floor(mins / 60))}:${pad(mins % 60)}</text>`;
       }
-      svg.innerHTML = out;
+      g.innerHTML = cur;
       for (const [k] of SERIES) {
         const arr = d.s[k];
         let v = arr && at >= 0 ? arr[at] : null;
@@ -441,10 +467,6 @@
         }
         this._lg[k].querySelector(".v").textContent = txt.replace("-", "");
         this._lg[k].style.display = arr ? "" : "none";
-      }
-      for (const k in this._tot) {
-        const v = d.totals[k];
-        this._tot[k].textContent = v === null || v === undefined ? "—" : `${v.toFixed(1)} kWh`;
       }
     }
   }

@@ -18,3 +18,7 @@
 ## Saving
 
 None. Lower CPU on wall tablets and phones.
+
+## As built (12/11/2026)
+
+Built as designed. There is no card version constant: the cards are served with the manifest version in the URL, so the next release reloads them. Details: `docs/architecture/entities-dashboard.md`.

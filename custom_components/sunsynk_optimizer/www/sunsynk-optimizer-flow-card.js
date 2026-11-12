@@ -159,7 +159,11 @@
         extras: { ...(config.extras || {}) },
       };
       this._built = false;
-      if (this._hass) this._render();
+      // Every entity the card reads, so a state change elsewhere in Home Assistant is not a redraw.
+      this._watch = [...new Set([...Object.values(this._cfg.entities), ...Object.values(this._cfg.extras)]
+        .filter((id) => typeof id === "string" && id))];
+      this._seen = null;
+      if (this._hass) this.hass = this._hass;
     }
 
     getCardSize() {
@@ -168,7 +172,12 @@
 
     set hass(hass) {
       this._hass = hass;
-      if (this._cfg) this._render();
+      if (!this._cfg) return;
+      // Home Assistant replaces a state object when it changes, so identity is enough.
+      const seen = this._watch.map((id) => hass.states[id]);
+      if (this._seen && seen.every((s, i) => s === this._seen[i])) return;
+      this._seen = seen;
+      this._render();
     }
 
     // ---- value helpers -------------------------------------------------
