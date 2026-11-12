@@ -982,3 +982,13 @@ def test_blend_never_lowers_or_touches_full(planning):
     assert planning.blend_toward_full(d, 7.5).reason == "solar_bridge"
     d = planning.TargetDecision(80, "solar_bridge")
     assert planning.blend_toward_full(d, 12.0).target_soc == 80
+
+
+def test_pack_lines_keeps_whole_lines(planning):
+    pack_lines = planning.pack_lines
+    lines = ["a" * 2600, "b" * 1700, "c" * 860, "d" * 700, "e" * 5000]
+    packs = pack_lines(lines)
+    assert [l for p in packs for l in p] == lines
+    assert all(len("\n".join(p)) <= 3500 or len(p) == 1 for p in packs)
+    assert packs[-1] == ["e" * 5000]
+    assert pack_lines(["x"]) == [["x"]] and pack_lines([]) == [[""]]

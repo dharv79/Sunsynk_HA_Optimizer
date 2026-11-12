@@ -144,6 +144,7 @@ from .flux_helpers import (
 )
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    pack_lines,
     event_probe_paths,
     battery_health_trend,
     bms_summary_line,
@@ -709,6 +710,13 @@ class SunsynkOptimizer:
     def _mark_trim(self) -> None:
         """Record the current time as the last trim timestamp for cooldown tracking."""
         self.last_trim_ts = dt_util.utcnow().timestamp()
+
+    async def async_notify_debug(self, title: str, message: str, target: str | None = None) -> None:
+        """Debug-stream send: whole JSON lines only, split across messages when long (phase 89)."""
+        packs = pack_lines(message.split("\n"))
+        for i, pack in enumerate(packs, 1):
+            suffix = f" ({i}/{len(packs)})" if len(packs) > 1 else ""
+            await self.async_notify(title + suffix, "\n".join(pack), target=target)
 
     async def async_notify(self, title: str, message: str, target: str | None = None) -> None:
         """Send a notification via the configured HA notify service."""
@@ -1941,7 +1949,7 @@ class SunsynkOptimizer:
         }
 
 
-        await self.async_notify(
+        await self.async_notify_debug(
             "Sunsynk Weekly Cost Summary",
             json.dumps(summary),
             target=data_report_target,
@@ -2235,7 +2243,7 @@ class SunsynkOptimizer:
         self.coordinator.update_state(touch=False, flex_event=record)
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
-            await self.async_notify(
+            await self.async_notify_debug(
                 "Sunsynk Flex Event (shadow)", json.dumps({"type": "flex_event", **record}), target=data_report_target
             )
 
@@ -3038,7 +3046,7 @@ class SunsynkOptimizer:
         results = await self.coordinator.api.async_probe_events(paths)
         target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if target:
-            await self.async_notify(
+            await self.async_notify_debug(
                 "🔋 Sunsynk: events probe", json.dumps({"type": "events_probe", "results": results}), target=target
             )
         return {"results": results}
@@ -3620,7 +3628,7 @@ class SunsynkOptimizer:
             return  # No day had complete snapshots and prices.
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
-            await self.async_notify(
+            await self.async_notify_debug(
                 "Sunsynk Monthly Battery Value",
                 json.dumps({"type": "monthly_battery_value", "month": month, **summary}),
                 target=data_report_target,
@@ -3659,7 +3667,7 @@ class SunsynkOptimizer:
         self.coordinator.update_state(touch=False, upgrade_advisor={**report, "date": dt_util.now().date().isoformat()})
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
-            await self.async_notify(
+            await self.async_notify_debug(
                 "Sunsynk Upgrade Advisor", json.dumps({"type": "upgrade_advisor", **report}), target=data_report_target
             )
         lines = [t for t in (upgrade_summary(report), *electrification_summary(report)) if t]
@@ -3693,7 +3701,7 @@ class SunsynkOptimizer:
         self.coordinator.update_state(touch=False, shadow_scorecard=card)
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
-            await self.async_notify(
+            await self.async_notify_debug(
                 "Sunsynk Shadow Scorecard",
                 json.dumps({"type": "shadow_scorecard", "date": today.isoformat(), "features": card}),
                 target=data_report_target,
@@ -3744,7 +3752,7 @@ class SunsynkOptimizer:
             ir.async_delete_issue(self.hass, DOMAIN, "bill_coverage_low")
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
-            await self.async_notify(
+            await self.async_notify_debug(
                 "Sunsynk Bill Reconciliation",
                 json.dumps({"type": "bill_reconciliation", **result}),
                 target=data_report_target,
@@ -3848,7 +3856,7 @@ class SunsynkOptimizer:
             return  # Consumption sensors not configured, or no complete days logged.
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:
-            await self.async_notify(
+            await self.async_notify_debug(
                 "Sunsynk Monthly Tariff Comparison",
                 json.dumps({"type": "monthly_tariff_comparison", **result}),
                 target=data_report_target,
@@ -3971,7 +3979,7 @@ class SunsynkOptimizer:
                 for r in [*plan_recs, morning_rec, actuals_rec, kpi_rec, floor_rec, hourly_rec, peak_rec, peak_cover_rec, peak_export_rec, cost_rec, complete_rec]
                 if r
             )
-            await self.async_notify(
+            await self.async_notify_debug(
                 f"Sunsynk Daily Data — {date}",
                 lines,
                 target=data_report_target,
@@ -3985,7 +3993,7 @@ class SunsynkOptimizer:
         """Send a free event lifecycle line to the debug channel (blank target = off)."""
         target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if target:
-            await self.async_notify("Sunsynk Free Event", json.dumps(event_report("free_event", phase, event)), target=target)
+            await self.async_notify_debug("Sunsynk Free Event", json.dumps(event_report("free_event", phase, event)), target=target)
 
     def _free_event_active(self) -> bool:
         """True while a free event holds the Flux slots (scheduled/selling/charging)."""

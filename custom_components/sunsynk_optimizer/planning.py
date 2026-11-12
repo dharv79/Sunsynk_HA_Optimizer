@@ -1818,6 +1818,26 @@ def round_or_none(value: float | None, digits: int = 2) -> float | None:
 WEEK_HISTORY_DAYS = 9
 
 
+def pack_lines(lines: list[str], limit: int = 3500) -> list[list[str]]:
+    """Pack whole lines into as few messages as fit under `limit` chars (phase 89).
+
+    A single line over the limit goes alone, never cut.
+    """
+    packs: list[list[str]] = []
+    size = 0
+    for line in lines:
+        if not line:
+            continue
+        add = len(line) + (1 if packs and packs[-1] else 0)
+        if packs and size + add <= limit:
+            packs[-1].append(line)
+            size += add
+        else:
+            packs.append([line])
+            size = len(line)
+    return packs or [[""]]
+
+
 def trailing_week(today: date) -> tuple[str, str]:
     """ISO (start, end) of the 7 complete days ending yesterday.
 
