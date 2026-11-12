@@ -104,7 +104,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 94. Stable entity IDs and long-term statistics (feasibility-gated) | Done, merged (c62f699, PR #202) | S, ~40k actual |
 | 95. Card rendering: redraw only on change | Done, merged (04cded7, PR #203) | S, ~35k actual |
 | 96. Release gate (tests and version check before a release) | Done, merged (ea89659, PR #196) | XS, ~25k actual |
-| 97. Refactor 1: shared helpers, dead code and missing tests | Planned, not built | S-M, ~40-60k |
+| 97. Refactor 1: shared helpers, dead code and missing tests | Built (PR pending); one percentile/median, shared HH:MM parse, `_mpc_inputs`, `_async_weather_forecast`, `_async_outside_temp_by_date`, `grid_online` removed; load-window and weighted-ratio dedup deferred | S-M, ~40-60k |
 | 98. Refactor 2: split planning.py into a package | Planned, not built | M-L, ~70-110k |
 | 99. Refactor 3: split optimizer.py | Planned, not built | L, ~120-175k |
 | 100. Daily health line and deploy notice | Planned, not built | S, ~25-40k |

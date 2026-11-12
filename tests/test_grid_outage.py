@@ -1,15 +1,6 @@
 """Phase 48: grid outage helpers."""
 
 
-def test_grid_online_parsing(planning):
-    for v in ("Connected", "on", "1", "Grid Online", 1):
-        assert planning.grid_online(v) is True
-    for v in ("Disconnected", "off", "0", "offline", "Off-grid", 0):
-        assert planning.grid_online(v) is False
-    for v in (None, "unavailable", "unknown", "", "weird"):
-        assert planning.grid_online(v) is None
-
-
 def test_grid_online_from_voltage(planning):
     assert planning.grid_online_from_voltage(240.4) is True
     assert planning.grid_online_from_voltage("231") is True

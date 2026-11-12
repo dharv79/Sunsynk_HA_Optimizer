@@ -873,6 +873,15 @@ class SunsynkOptimizer:
             ),
         )
 
+    async def _async_weather_forecast(self, entity: str) -> list[dict[str, Any]]:
+        """Daily forecast items of a weather entity ([] when the response has none); raises if the service call fails."""
+        response = await self.hass.services.async_call(
+            "weather", "get_forecasts", {"entity_id": entity, "type": "daily"},
+            blocking=True, return_response=True,
+        )
+        data = response.get(entity) if isinstance(response, dict) else None
+        return (data.get("forecast") or []) if isinstance(data, dict) else []
+
     async def _async_weekday_weather_scores(self) -> dict[str, float | None] | None:
         """Mon–Fri full-charge scores from the daily weather forecast.
 
@@ -881,22 +890,10 @@ class SunsynkOptimizer:
         """
         weather_entity = self.cfg[CONF_WEATHER_ENTITY]
         try:
-            response = await self.hass.services.async_call(
-                "weather",
-                "get_forecasts",
-                {"entity_id": weather_entity, "type": "daily"},
-                blocking=True,
-                return_response=True,
-            )
+            forecast_items = await self._async_weather_forecast(weather_entity)
         except Exception as exc:  # pragma: no cover
             self.coordinator.update_state(last_error=f"Weather forecast failed: {exc}")
             return None
-
-        forecast_items = []
-        if isinstance(response, dict):
-            weather_data = response.get(weather_entity)
-            if isinstance(weather_data, dict):
-                forecast_items = weather_data.get("forecast", []) or []
 
         scores: dict[str, float | None] = {day: None for day in FULL_CHARGE_DAY_OPTIONS}
         for item in forecast_items:
@@ -915,13 +912,9 @@ class SunsynkOptimizer:
         """Today's cloud cover % from the daily weather forecast (phase 82); None when unavailable."""
         entity = self._cfg_str(CONF_WEATHER_ENTITY) or DEFAULT_WEATHER_ENTITY
         try:
-            response = await self.hass.services.async_call(
-                "weather", "get_forecasts", {"entity_id": entity, "type": "daily"},
-                blocking=True, return_response=True,
-            )
+            items = await self._async_weather_forecast(entity)
         except Exception:  # noqa: BLE001 - optional input, degrade to None
             return None
-        items = ((response or {}).get(entity) or {}).get("forecast") or [] if isinstance(response, dict) else []
         today = dt_util.now().date()
         for item in items:
             when = dt_util.parse_datetime(str(item.get("datetime") or ""))
@@ -2195,6 +2188,25 @@ class SunsynkOptimizer:
         day = float(cfg.get(CONF_AVG_CONSUMPTION_KW, DEFAULT_AVG_CONSUMPTION_KW))
         return {"overnight": overnight, "day": day, "evening": self._evening_load_kw or day}
 
+    def _mpc_inputs(self, cfg: dict[str, Any], now: datetime) -> dict[str, Any]:
+        """The inputs both MPC shadows solve from (phases 69 and 76): forecasts, prices, loads, battery and end value."""
+        tomorrow_id = self._cfg_str(CONF_TOMORROW_FORECAST_SENSOR, cfg) or DEFAULT_TOMORROW_FORECAST_SENSOR
+        tomorrow_kwh = self._essential_state(tomorrow_id)
+        prices, _sources = self._tariff_prices(now.date())
+        offpeak = prices.get("offpeak")
+        return {
+            "tomorrow_kwh": tomorrow_kwh,
+            "hourly_tomorrow": None if tomorrow_kwh is None else (self._synthetic_hourly_forecast(tomorrow_kwh) or {}),
+            "hourly_today": self._hourly_or_synthetic_forecast(cfg, now),
+            "prices": prices,
+            "loads": self._mpc_loads(cfg),
+            "export_bands": flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"),
+            "capacity": self._capacity_kwh(cfg),
+            "charge_kw": float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)),
+            "wear": self._wear_pence(),
+            "terminal": None if offpeak is None else offpeak / CHARGE_EFFICIENCY,
+        }
+
     async def async_run_mpc_shadow(self) -> None:
         """Every 30 min: solve the 24 h MPC plan and log it next to the rule plan (phase 69); never pushes."""
         cfg = self.cfg
@@ -2202,18 +2214,11 @@ class SunsynkOptimizer:
         soc = self._essential_state(self.battery_soc_entity)
         if soc is None:
             return
-        tomorrow_id = self._cfg_str(CONF_TOMORROW_FORECAST_SENSOR, cfg) or DEFAULT_TOMORROW_FORECAST_SENSOR
-        tomorrow_kwh = self._essential_state(tomorrow_id)
-        hourly_tomorrow = None
-        if tomorrow_kwh is not None:
-            hourly_tomorrow = self._synthetic_hourly_forecast(tomorrow_kwh) or {}
-        prices, _sources = self._tariff_prices(now.date())
-        loads = self._mpc_loads(cfg)
-        export_bands = flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export")
-        hourly_today = self._hourly_or_synthetic_forecast(cfg, now)
-        offpeak = prices.get("offpeak")
-        capacity, charge_kw, wear = self._capacity_kwh(cfg), float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)), self._wear_pence()
-        terminal = None if offpeak is None else offpeak / CHARGE_EFFICIENCY
+        mpc = self._mpc_inputs(cfg, now)
+        tomorrow_kwh, hourly_today, hourly_tomorrow, prices = mpc["tomorrow_kwh"], mpc["hourly_today"], mpc["hourly_tomorrow"], mpc["prices"]
+        export_bands, loads, capacity, charge_kw, wear, terminal = (
+            mpc["export_bands"], mpc["loads"], mpc["capacity"], mpc["charge_kw"], mpc["wear"], mpc["terminal"]
+        )
 
         def _solve(ratio: float | None) -> dict[str, Any] | None:
             slots = mpc_slots(
@@ -2339,16 +2344,12 @@ class SunsynkOptimizer:
             await self.data_logger.async_log_dynamic_tariff(**record)
             self.coordinator.update_state(touch=False, dynamic_tariff=record)
             return
-        tomorrow_id = self._cfg_str(CONF_TOMORROW_FORECAST_SENSOR, cfg) or DEFAULT_TOMORROW_FORECAST_SENSOR
-        tomorrow_kwh = self._essential_state(tomorrow_id)
-        hourly_tomorrow = None if tomorrow_kwh is None else (self._synthetic_hourly_forecast(tomorrow_kwh) or {})
-        hourly_today = self._hourly_or_synthetic_forecast(cfg, now)
-        prices, _sources = self._tariff_prices(now.date())
-        export_bands = flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export")
-        loads, profile = self._mpc_loads(cfg), (self._load_profile or {}).get("slots")
-        capacity, charge_kw, wear = self._capacity_kwh(cfg), float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE)), self._wear_pence()
-        offpeak = prices.get("offpeak")
-        terminal = None if offpeak is None else offpeak / CHARGE_EFFICIENCY  # same end value on both sides
+        mpc = self._mpc_inputs(cfg, now)
+        hourly_today, hourly_tomorrow, prices = mpc["hourly_today"], mpc["hourly_tomorrow"], mpc["prices"]
+        export_bands, loads, capacity, charge_kw, wear, terminal = (
+            mpc["export_bands"], mpc["loads"], mpc["capacity"], mpc["charge_kw"], mpc["wear"], mpc["terminal"]
+        )
+        profile = (self._load_profile or {}).get("slots")  # terminal: same end value on both sides
         agile_export = merge_tariff_rates(overrides)["agile"]["export"]
         start = now.hour * 60 + now.minute
 
@@ -3260,13 +3261,17 @@ class SunsynkOptimizer:
         self._evening_load_kw, _n = learned_evening_load_kw(days, today, weekend, skip)
         await self._guarded(lambda: self._refresh_load_profile(days, today, weekend, skip), "Load profile")
 
+    async def _async_outside_temp_by_date(self, days: int) -> dict[str, float]:
+        """{date: mean outside temperature °C} from the logged day_kpis records of the last ``days`` days."""
+        return {
+            r["date"]: r["outside_temp_c"] for r in await self.data_logger.async_load_records(days)
+            if r.get("type") == "day_kpis" and r.get("date") and isinstance(r.get("outside_temp_c"), (int, float))
+        }
+
     async def _refresh_load_profile(self, days, today, weekend: bool, skip: set[str]) -> None:
         """Phase 71: per-slot median load for today's day type, scaled by today's outside temperature."""
         half_import, _export = await self.data_logger.async_load_half_hourly(30)
-        temps = {
-            r["date"]: r["outside_temp_c"] for r in await self.data_logger.async_load_records(30)
-            if r.get("type") == "day_kpis" and r.get("date") and isinstance(r.get("outside_temp_c"), (int, float))
-        }
+        temps = await self._async_outside_temp_by_date(30)
         self._load_profile = load_profile(days, half_import, today, weekend, skip, temps, self._outside_temp_now())
         self.coordinator.update_state(
             touch=False, load_profile={**(self._load_profile or {}), "date": today.isoformat()}
@@ -3748,10 +3753,7 @@ class SunsynkOptimizer:
     async def _add_electrification(self, report: dict[str, Any], cfg: dict[str, Any], prices, opt) -> None:
         """Phase 78: heat pump on Cosy vs gas, and a higher inverter limit, over the 13-month log (report only)."""
         paired = await self.data_logger.async_load_paired_days(days=ELECTRIFY_HISTORY_DAYS)
-        temps = {
-            r["date"]: r["outside_temp_c"] for r in await self.data_logger.async_load_records(ELECTRIFY_HISTORY_DAYS)
-            if r.get("type") == "day_kpis" and r.get("date") and isinstance(r.get("outside_temp_c"), (int, float))
-        }
+        temps = await self._async_outside_temp_by_date(ELECTRIFY_HISTORY_DAYS)
         overrides = cfg.get(CONF_TARIFF_RATE_OVERRIDES)
         rates = merge_tariff_rates(overrides)
         cosy = mean_band_price(bands_from_rates(TARIFF_IMPORT_BANDS["cosy"], rates["cosy"]))
