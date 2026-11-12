@@ -123,3 +123,17 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## Flex event record (05/11/2026, phase 77)
 
 `flex_event` (once per event start, deduped by date and start time, never read back): date, time (event start), entity, hours, soc, price_p, house_load_kw, decision, offer_kwh, value_gbp, gain_gbp, floor_soc. See `export-control.md`.
+
+## Log read performance (12/11/2026, phase 91)
+
+**Root cause.** Every read re-parsed the monthly files (one 01:55 plan parsed about 25 files), `_pair_records` rescanned all records once per date on the event loop, dedup-at-write parsed the current month per write, and `mpc_plan` (48 lines a day, never read back) was about two-thirds of the log.
+
+**Design.**
+- `DataLogger._load_file` keeps each monthly file parsed in memory, keyed by size and mtime. Past months are parsed once per run; `_append_line` keeps the current month in step, and a file changed by anything else is re-read. `_read_recent` returns copies, so callers cannot alter the cached records.
+- `snapshots_by_date` indexes the meter snapshots in one pass; `_pair_records` and `async_load_snapshot_days` use it. `async_load_paired_days` reads and pairs inside the executor job.
+- Dedup-at-write uses a `(type, date, time)` set held with the parsed file, and also checks the file for the month of the record's own date, so it still holds after a month roll.
+- `mpc_plan` records go to `mpc-YYYY-MM.jsonl` (`_SIDE_FILE_PREFIX`). The pruner removes those files on the same 13-month rule, `tools/backtest.py` skips them, and older `mpc_plan` lines in the main log are skipped on read.
+
+**Not built.** Passing `paired_days` down through the callbacks and memoising the peak-cover inputs: the cache makes repeat reads cheap without changing any caller.
+
+**Verification.** `tests/test_data_logger.py` (phase 91 block): index equals the per-date scan, one parse until the file changes, copies and window, dedup incl. the previous month, the `mpc_plan` file, the pruner. Synthetic 395-day log: paired read 0.32 s cold, 0.03 s warm; a 30-day read 2.5 ms warm; about 10 MB held.

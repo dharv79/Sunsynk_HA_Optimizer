@@ -1,6 +1,6 @@
 # Phase 92 — Fewer state writes on SOC changes
 
-**Status:** Planned, not built. **Size:** S, ~25-40k est. **Origin:** code review 11/11/2026.
+**Status:** Done, merged (1a0effc, PR #200). **Size:** S, ~25-40k est. **Origin:** code review 11/11/2026.
 
 ## Goal
 

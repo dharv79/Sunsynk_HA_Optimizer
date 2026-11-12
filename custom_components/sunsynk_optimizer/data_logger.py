@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -31,6 +32,12 @@ from .planning import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Phase 91: record types written to their own monthly file ("<prefix>YYYY-MM.jsonl").
+# mpc_plan is two-thirds of all lines and is never read back, so it stays out of the main log.
+_SIDE_FILE_PREFIX = {"mpc_plan": "mpc-"}
+_SKIP_LINE_MARKERS = tuple(f'"type": "{name}"' for name in _SIDE_FILE_PREFIX)  # older main-log lines
+_CACHE_LOCK = threading.RLock()  # reads and writes run in executor threads
 
 DATA_DIR_NAME = "sunsynk_optimizer_data"
 
@@ -226,7 +233,7 @@ class DataLogger:
         # A late catch-up can land in a later month's file than the date's own.
         existing: dict[str, Any] = {}
         for month in self._months_between(min(start, now), now):
-            for rec in self._iter_jsonl(os.path.join(self._data_dir, f"{month}.jsonl")):
+            for _when, rec in self._load_file(os.path.join(self._data_dir, f"{month}.jsonl")):
                 if rec.get("type") == "daily_cost" and rec.get("date") == date:
                     existing = rec
         merged = merge_daily_cost_fields(existing, values)
@@ -441,7 +448,8 @@ class DataLogger:
         """{date: {"HH:MM": snapshot}} for every date with meter snapshots in the last ``days``."""
         records = await self.hass.async_add_executor_job(self._read_recent, days)
         dates = {r.get("date") for r in records if r.get("type") == "meter_snapshot" and r.get("date")}
-        return {date: snapshots_for_date(records, date) for date in sorted(dates)}
+        by_date = snapshots_by_date(records)
+        return {date: by_date.get(date, {}) for date in sorted(dates)}
 
     async def async_load_meter_snapshots(self, date: str) -> dict[str, dict[str, Any]]:
         """Return {"HH:MM": snapshot} for `date` (first record per time wins)."""
@@ -468,8 +476,11 @@ class DataLogger:
 
     async def async_load_paired_days(self, days: int = 30) -> list[dict[str, Any]]:
         """Return days where both an import_plan and day_actuals record exist."""
-        records = await self.hass.async_add_executor_job(self._read_recent, days)
-        return self._pair_records(records)
+        return await self.hass.async_add_executor_job(self._load_paired_days, days)
+
+    def _load_paired_days(self, days: int) -> list[dict[str, Any]]:
+        """Read and pair in the executor: the join is too slow for the event loop on a long window."""
+        return self._pair_records(self._read_recent(days))
 
     def _read_recent(self, days: int) -> list[dict[str, Any]]:
         """Read all JSONL records from the relevant monthly files within the last `days` days."""
@@ -477,14 +488,33 @@ class DataLogger:
         cutoff = now - timedelta(days=days)
         records: list[dict[str, Any]] = []
         for month in self._months_between(cutoff, now):
-            for rec in self._iter_jsonl(os.path.join(self._data_dir, f"{month}.jsonl")):
-                ts = rec.get("recorded_at", "")
-                try:
-                    if ts and datetime.fromisoformat(ts) >= cutoff:
-                        records.append(rec)
-                except (TypeError, ValueError):
-                    continue
+            for when, rec in self._load_file(os.path.join(self._data_dir, f"{month}.jsonl")):
+                if when is not None and when >= cutoff:
+                    records.append(dict(rec))  # a copy: the cached record must never be mutated
         return records
+
+    def _file_cache(self) -> dict[str, list[Any]]:
+        """{path: [(mtime_ns, size), [(recorded_at, record)], {(type, date, time)}]} (phase 91)."""
+        return self.__dict__.setdefault("_parsed_files", {})
+
+    def _load_file(self, path: str) -> list[tuple[datetime | None, dict[str, Any]]]:
+        """Parsed rows of one monthly file, re-read only when its size or mtime changed.
+
+        Past months never change, so they are parsed once per run; the current
+        month is kept in step by _append_line. A record's time is None when it
+        has no usable (timezone-aware) recorded_at.
+        """
+        with _CACHE_LOCK:
+            cache = self._file_cache()
+            signature = _file_signature(path)
+            if signature is None:
+                cache.pop(path, None)
+                return []
+            hit = cache.get(path)
+            if hit is None or hit[0] != signature:
+                rows = [(_recorded_at(rec), rec) for rec in self._iter_jsonl(path)]
+                hit = cache[path] = [signature, rows, {_dedup_key(rec) for _when, rec in rows}]
+            return hit[1]
 
     @staticmethod
     def _months_between(start: datetime, end: datetime) -> list[str]:
@@ -503,7 +533,7 @@ class DataLogger:
             with open(path, encoding="utf-8") as fh:
                 for line in fh:
                     line = line.strip()
-                    if not line:
+                    if not line or any(marker in line for marker in _SKIP_LINE_MARKERS):
                         continue
                     try:
                         rec = json.loads(line)
@@ -531,6 +561,7 @@ class DataLogger:
         kpis = by_type["day_kpis"]
         peak_exports = by_type["peak_export"]
         paired = []
+        snaps_by_date = snapshots_by_date(records)  # one pass, not one scan per date
         for date in set(plans) & set(actuals):
             plan = plans[date]
             actual = actuals[date]
@@ -547,7 +578,7 @@ class DataLogger:
                 if morning_soc is not None and target_soc is not None
                 else None
             )
-            snaps = snapshots_for_date(records, date)
+            snaps = snaps_by_date.get(date, {})
             soc_0500 = (snaps.get("05:00") or {}).get("soc")
             snap_02, snap_05 = snaps.get("02:00") or {}, snaps.get("05:00") or {}
             drain_0500 = drain_pct_to_0500(
@@ -913,6 +944,8 @@ class DataLogger:
             if not filename.endswith(".jsonl"):
                 continue
             stem = filename[:-6]
+            for prefix in _SIDE_FILE_PREFIX.values():
+                stem = stem.removeprefix(prefix)
             try:
                 dt = datetime.strptime(stem, "%Y-%m")
             except ValueError:
@@ -944,45 +977,89 @@ class DataLogger:
     def _write_record(self, record: dict[str, Any]) -> None:
         """Append one JSON line to the current month's JSONL file, creating it if needed.
 
-        For per-day record types (import_plan, morning_state, day_actuals) the
-        current month's file is scanned for an existing record with the same
-        type+date and the write is skipped if found. This prevents duplicate
-        entries from corrupting paired-day computations after HA restarts that
-        cross a scheduled-event boundary (e.g. restart at 05:55 → second
-        morning_state at 06:00).
+        Per-day record types are skipped when a record with the same type, date
+        (and time) is already logged, so an HA restart that crosses a scheduled
+        capture (restart at 05:55, second morning_state at 06:00) cannot corrupt
+        the paired days. The month of the record's own date is checked too, so
+        the check still holds in the first days after a month roll.
         """
-        month_file = self._current_month_file()
-        if (
-            record.get("type") in self._DEDUP_TYPES
-            and record.get("date")
-            and self._record_exists(month_file, record["type"], record["date"], record.get("time"))
-        ):
-            _LOGGER.info(
-                "Skipping duplicate %s record for %s (already in %s)",
-                record["type"], record["date"], os.path.basename(month_file),
-            )
-            return
-        self._append_line(month_file, record)
+        with _CACHE_LOCK:
+            month_file = self._current_month_file(_SIDE_FILE_PREFIX.get(record.get("type"), ""))
+            if record.get("type") in self._DEDUP_TYPES and record.get("date"):
+                seen_in = next((path for path in self._dedup_files(month_file, record) if self._record_exists(path, record)), None)
+                if seen_in:
+                    _LOGGER.info(
+                        "Skipping duplicate %s record for %s (already in %s)",
+                        record["type"], record["date"], os.path.basename(seen_in),
+                    )
+                    return
+            self._append_line(month_file, record)
 
-    def _current_month_file(self) -> str:
-        return os.path.join(self._data_dir, f"{datetime.now(timezone.utc).strftime('%Y-%m')}.jsonl")
+    def _current_month_file(self, prefix: str = "") -> str:
+        return os.path.join(self._data_dir, f"{prefix}{datetime.now(timezone.utc).strftime('%Y-%m')}.jsonl")
+
+    def _dedup_files(self, month_file: str, record: dict[str, Any]) -> list[str]:
+        """The current month's file plus the file for the month of the record's date, when different."""
+        files = [month_file]
+        month = str(record["date"])[:7]
+        try:
+            datetime.strptime(month, "%Y-%m")
+        except ValueError:
+            return files
+        own = os.path.join(self._data_dir, f"{month}.jsonl")
+        return files if own == month_file else files + [own]
 
     def _append_line(self, path: str, record: dict[str, Any]) -> None:
-        try:
-            os.makedirs(self._data_dir, exist_ok=True)
-            with open(path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record) + "\n")
-        except OSError:
-            _LOGGER.exception("Failed to write data log to %s", path)
+        with _CACHE_LOCK:
+            cache = self._file_cache()
+            hit = cache.get(path)
+            in_step = hit is not None and hit[0] == _file_signature(path)
+            try:
+                os.makedirs(self._data_dir, exist_ok=True)
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(record) + "\n")
+            except OSError:
+                _LOGGER.exception("Failed to write data log to %s", path)
+                cache.pop(path, None)
+                return
+            if in_step:  # keep the parsed copy in step instead of re-reading the file
+                hit[1].append((_recorded_at(record), record))
+                hit[2].add(_dedup_key(record))
+                hit[0] = _file_signature(path)
+            else:
+                cache.pop(path, None)
 
-    @staticmethod
-    def _record_exists(path: str, record_type: str, date: str, time: str | None = None) -> bool:
-        """Return True if a record with the given type and date (and `time`, for
-        meter snapshots) already exists in the file."""
-        return any(
-            rec.get("type") == record_type and rec.get("date") == date and rec.get("time") == time
-            for rec in DataLogger._iter_jsonl(path)
-        )
+    def _record_exists(self, path: str, record: dict[str, Any]) -> bool:
+        """True if a record with this type and date (and time, for meter snapshots) is already in the file."""
+        self._load_file(path)
+        hit = self._file_cache().get(path)
+        return hit is not None and _dedup_key(record) in hit[2]
+
+
+def _file_signature(path: str) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _recorded_at(record: dict[str, Any]) -> datetime | None:
+    """The record's timezone-aware recorded_at, or None (such records never match a read window)."""
+    try:
+        when = datetime.fromisoformat(record.get("recorded_at") or "")
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo is not None else None
+
+
+def _dedup_key(record: dict[str, Any]) -> tuple[Any, Any, Any]:
+    key = (record.get("type"), record.get("date"), record.get("time"))
+    try:
+        hash(key)
+    except TypeError:
+        return (None, None, None)
+    return key
 
 
 def _meter_delta(snap_a: dict[str, Any], snap_b: dict[str, Any], key: str) -> float | None:
@@ -999,6 +1076,15 @@ def snapshots_for_date(records: list[dict[str, Any]], date: str) -> dict[str, di
     for rec in records:
         if rec.get("type") == "meter_snapshot" and rec.get("date") == date and rec.get("time"):
             out.setdefault(rec["time"], rec)
+    return out
+
+
+def snapshots_by_date(records: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
+    """{date: {"HH:MM": meter_snapshot}} in one pass; the first record per time wins, as snapshots_for_date."""
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for rec in records:
+        if rec.get("type") == "meter_snapshot" and rec.get("date") and rec.get("time"):
+            out.setdefault(rec["date"], {}).setdefault(rec["time"], rec)
     return out
 
 
