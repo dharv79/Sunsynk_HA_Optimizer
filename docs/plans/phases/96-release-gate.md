@@ -1,6 +1,6 @@
 # Phase 96 — Release gate
 
-**Status:** Built, in PR. **Size:** XS, ~15-20k est. **Origin:** code review 11/11/2026.
+**Status:** Done, merged (ea89659, PR #196). **Size:** XS, ~15-20k est. **Origin:** code review 11/11/2026.
 
 ## Findings
 
