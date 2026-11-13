@@ -21,3 +21,18 @@ schedule_free_event:
 cancel_free_event:
 get_plan:
 probe_inverter_events:
+export_data:
+  fields:
+    start:
+      required: false
+      selector:
+        date:
+    end:
+      required: false
+      selector:
+        date:
+    types:
+      required: false
+      selector:
+        text:
+          multiple: true

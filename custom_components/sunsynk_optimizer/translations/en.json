@@ -245,6 +245,24 @@
       "description": "Dry-run tonight's plan and return it. Pushes, logs and stores nothing.",
       "fields": {}
     },
+    "export_data": {
+      "name": "Export data to CSV",
+      "description": "Write the logged history as CSV files (one per record type plus a daily summary) to a new folder under the config directory, and return the paths. Read-only; identifiers are masked.",
+      "fields": {
+        "start": {
+          "name": "From date",
+          "description": "First day to export. Defaults to 90 days ago."
+        },
+        "end": {
+          "name": "To date",
+          "description": "Last day to export. Defaults to today."
+        },
+        "types": {
+          "name": "Record types",
+          "description": "Only these record types (for example day_actuals). Blank exports all and adds the daily summary."
+        }
+      }
+    },
     "probe_inverter_events": {
       "name": "Probe inverter events",
       "description": "Read-only check of which Sunsynk cloud alarm/event routes respond, and what they return.",

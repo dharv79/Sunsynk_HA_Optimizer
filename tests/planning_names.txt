@@ -67,6 +67,8 @@ EVENING_LOAD_MIN_DAYS
 EVENING_LOAD_WINDOW_DAYS
 EVENING_RESERVE_HOURS
 EVENT_PROBE_ROUTES
+EXPORT_DEFAULT_DAYS
+EXPORT_LEAD_COLUMNS
 EXPORT_PAUSE_FLUX2_SLOT
 FAILURE_KINDS
 FLEX_DEFAULT_HOURS
@@ -238,6 +240,7 @@ STRING_MIN_HISTORY
 STRING_MIN_TOTAL_KW
 STRING_SAMPLE_FROM_HOUR
 STRING_SAMPLE_TO_HOUR
+SUMMARY_FILE
 TARIFF_DEFAULT_RATES
 TARIFF_IMPORT_BANDS
 TARIFF_LABELS
@@ -361,6 +364,7 @@ config_time_problems
 cost_under_tariff
 daily_health
 daily_report_plans
+daily_summary_rows
 day_kpis
 day_load_slots
 days_in_period
@@ -385,6 +389,7 @@ expected_load
 expected_spare_solar
 explain_plan
 export_limit_scenario
+export_rows
 fit_load_temp
 flex_event_offer
 flex_event_window
@@ -494,6 +499,7 @@ pv_string_attributes
 quantile_correction
 recent_soc
 reconcile_month
+record_date
 record_for_date
 records_today
 redact_config
@@ -541,6 +547,7 @@ tariff_price_changes
 tariff_vat_percent
 temp_deration_factor
 time_field_errors
+to_csv
 tou_diff
 tou_settings_payload
 tou_slots_from_plan
