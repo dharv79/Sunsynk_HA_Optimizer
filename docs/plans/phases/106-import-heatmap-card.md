@@ -1,6 +1,6 @@
 # Phase 106 — Import heat-map card (hour by day)
 
-**Status:** Built (PR pending merge). **Size:** M, ~45-70k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
+**Status:** Done, merged (381d418, PR #218). **Size:** M, ~45-70k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
 
 ## Goal
 
