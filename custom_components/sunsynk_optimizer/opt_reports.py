@@ -53,6 +53,8 @@ from .planning import (
     round_trip_measured,
     digest_text,
     EXPORT_DEFAULT_DAYS,
+    HEATMAP_MAX_DAYS,
+    heatmap_data,
     LOAD_REPORT_HISTORY_DAYS,
     SHIFT_WINDOW_DAYS,
     SUMMARY_FILE,
@@ -187,6 +189,13 @@ class ReportsMixin:
 
         paths = await self.hass.async_add_executor_job(_write) if files else []
         return {"folder": folder if paths else None, "files": paths, "from": first.isoformat(), "to": last.isoformat()}
+
+    async def async_heatmap_data(self, kind: str, days: int) -> dict[str, Any]:
+        """Heat-map data for the card (phase 106); read-only. Served by the websocket command, not sensor attributes."""
+        half_import, half_export = await self.data_logger.async_load_half_hourly(min(days, HEATMAP_MAX_DAYS) + 2)
+        snaps = await self.data_logger.async_load_snapshot_days(min(days, HEATMAP_MAX_DAYS) + 2) if kind == "load" else {}
+        bands = flux_bands_from_charges(self.cfg.get(CONF_CHARGES), "import")
+        return heatmap_data(kind, half_import, half_export, snaps, dt_util.now().date(), days, bands)
 
     async def _async_send_load_report(self) -> None:
         """Monthly (phase 105): last month's daily load against what its temperatures predict. Report only.

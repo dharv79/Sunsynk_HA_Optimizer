@@ -9,7 +9,11 @@ from pathlib import Path
 _LOGGER = logging.getLogger(__name__)
 
 STATIC_URL = "/sunsynk_optimizer_static"
-CARD_FILES = ("sunsynk-optimizer-flow-card.js", "sunsynk-optimizer-day-chart.js")
+CARD_FILES = (
+    "sunsynk-optimizer-flow-card.js",
+    "sunsynk-optimizer-day-chart.js",
+    "sunsynk-optimizer-heatmap.js",
+)
 
 
 def card_url(file: str, version: str) -> str:

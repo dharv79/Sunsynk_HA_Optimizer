@@ -57,6 +57,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_trim_defer.py` | Phase 65 trim overflow/defer split, no-forecast and clipped fallbacks |
 | `tests/test_full_charge_skip.py` | Phase 68 days since last 99% SOC, due/skip, 14-day cap |
 | `tests/test_import_causes.py` | Phase 42 import cause ordering, gaps, resets |
+| `tests/test_heatmap.py` | Phase 106 heat-map data (gaps, 95th-percentile scale, kinds, limits) and the card/websocket contract |
 | `tests/test_notify_policy.py` | Phase 108 title levels, quiet hours across midnight, send/hold rules, held list cap, morning brief |
 | `tests/test_export.py` | Phase 109 export rows, range and type filtering, CSV columns, masking, daily-summary join |
 | `tests/test_settings_audit.py` | Phase 107 snapshot filtering, diff (added/removed/numeric text), notification text |

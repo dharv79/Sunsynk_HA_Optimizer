@@ -311,6 +311,13 @@ from .notify_policy import (
     hold_item,
     morning_brief,
 )
+from .heatmap import (
+    HEATMAP_KINDS,
+    HEATMAP_DEFAULT_DAYS,
+    HEATMAP_MAX_DAYS,
+    HEATMAP_SCALE_QUANTILE,
+    heatmap_data,
+)
 from .digest import (
     DIGEST_MISS_PCT,
     WEEKLY_KPI_SENSORS,
@@ -992,6 +999,11 @@ __all__ = [
     "daytime_load_kw",
     "deploy_changes",
     "digest_text",
+    "HEATMAP_KINDS",
+    "HEATMAP_DEFAULT_DAYS",
+    "HEATMAP_MAX_DAYS",
+    "HEATMAP_SCALE_QUANTILE",
+    "heatmap_data",
     "NOTIFY_LEVELS",
     "DEFAULT_NOTIFY_MIN_LEVEL",
     "HELD_LIMIT",

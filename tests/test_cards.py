@@ -65,7 +65,7 @@ def card_result():
     node = shutil.which("node")
     if not node:
         pytest.skip("Node is not installed")
-    files = [str(WWW / "sunsynk-optimizer-flow-card.js"), str(WWW / "sunsynk-optimizer-day-chart.js")]
+    files = [str(WWW / "sunsynk-optimizer-flow-card.js"), str(WWW / "sunsynk-optimizer-day-chart.js"), str(WWW / "sunsynk-optimizer-heatmap.js")]
     run = subprocess.run([node, "-e", _HARNESS, *files], capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr
     return json.loads(run.stdout.strip().splitlines()[-1])
