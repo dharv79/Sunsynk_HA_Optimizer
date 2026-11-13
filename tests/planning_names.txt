@@ -588,3 +588,10 @@ weekly_import_causes
 weekly_kpi_values
 weighted_forecast_correction
 window_grid_kwh
+TWIN_DEFAULTS
+twin_day
+twin_replay
+twin_run
+twin_slots
+twin_sweep
+twin_target
