@@ -1,6 +1,6 @@
 # Phase 72 — Full digital twin: replay every subsystem on half-hourly history
 
-**Status:** Planned, not built. **Size:** XL. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Built, scoped (13/11/2026); SHA recorded in the next PR. **Size:** XL. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
@@ -31,3 +31,14 @@ Not yet checked against the code and plans. Run a feasibility check first and co
 - Pure decision logic in `planning.py` with tests (rule 19); missing data is `None`, never 0.
 - Ships in shadow/logged form first if it changes inverter writes; monitor mode makes no API writes.
 - Docs and the plan index updated; run py_compile, pyflakes and pytest.
+
+## Built (13/11/2026)
+
+Feasibility check: `shadow.mpc_backtest_day` and `reports.simulate_system` already replay a day with *foresight*; none runs the real rule planner causally. The twin fills that gap and reuses `_day_flows` (phase 37) for load and solar, so no new logging was needed.
+
+- `planning/twin.py` (rule 19, HA-free, offline only, not called by the live integration): `twin_slots` (02:00-22:00, 40 half-hours; load even per segment, solar bell-shaped within the segment, segment totals from the meters), `twin_target` (calls the real `select_target_soc` from a logged `import_plan`, with `target_offset` and `load_scale`), `twin_run` (causal SOC machine: window charge to the target at `charge_kw`, solar covers load, surplus charges then exports, deficit discharges to the floor, efficiencies both ways; the 22:00 SOC above the floor is credited at the off-peak price), `twin_day`, `twin_replay` (totals, per-day rows, `soc_06_mae`/`soc_22_mae` against the real `morning_state` and 22:00 snapshot), `twin_sweep` (all grid combinations, cheapest first, `delta_gbp` vs base).
+- `tools/twin.py DATA_DIR [--grid name=a,b,c ...] [--set name=v] [--days N] [--csv file]`. Parameters: `capacity_kwh`, `charge_kw`, `floor_soc`, `charge_eff`, `discharge_eff`, `target_offset`, `load_scale`. Flat band prices by flag.
+- Away days, missing snapshots, a missing band price or start SOC → the day is skipped (counted in `skipped`), never costed as 0.
+- Tests: `tests/test_twin.py`.
+
+**Not built (scoped out):** export-disable, trim, peak cover, peak export, free-event and gentle-charge replay; temperature derating; tariff swap; Bayesian optimisation and the monthly top-3 post. Planner thresholds that are module constants (the 7 kWh cliff, 85/82 trim, 35/20 nudge) cannot be swept until they are injectable. Run with no `--grid` first and check `soc_06_mae`/`soc_22_mae`; large errors mean the model needs calibrating before any sweep is trusted. Not yet run on live data.

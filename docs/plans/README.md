@@ -79,7 +79,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 69. Receding-horizon MPC planner (48 h, half-hourly) in shadow | Done, merged (f860226, PR #141), shadow; 24 h horizon, `mpc_live` not built | L, ~55k actual |
 | 70. Self-learned probabilistic solar forecast (own P10/P50/P90) | Done, merged (f5a86eb, PR #142), shadow; no weather bins | M, ~35k actual |
 | 71. Half-hourly household load forecaster (weather and calendar aware) | Done, merged (2ee29b0, PR #143), shadow (`load_profile_live` off) | M, ~45k actual |
-| 72. Full digital twin: replay every subsystem on half-hourly history | Planned, not built | XL |
+| 72. Full digital twin: replay every subsystem on half-hourly history | Built, scoped (overnight planner + battery model); SHA pending | XL, ~60k actual |
 | 73. Native inverter time-of-use programming via the six system-mode slots | Done, merged (98b3280, PR #149), shadow; no writes | M, ~30k actual |
 | 74. Local Modbus/RS485 control path as a cloud-outage fallback | Planned, not built | XL |
 | 75. Battery state-of-health and degradation ledger | Done, merged (3b4ddb5, PR #137) | M, ~70k actual |
