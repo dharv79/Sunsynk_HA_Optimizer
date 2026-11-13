@@ -1,6 +1,6 @@
 # Phase 100 — Daily health line and deploy notice
 
-**Status:** Planned, not built. **Size:** S, ~25-40k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
+**Status:** Built (PR pending merge). **Size:** S, ~25-40k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
 
 ## Goal
 
@@ -15,3 +15,7 @@ Answer "is it working, and which version is running?" from one line, without rea
 ## Saving
 
 None. Visibility.
+
+## Built (13/11/2026)
+
+`planning/health.py` (`daily_health`, `records_today`, `deploy_changes`), `sensor.health`, the 22:00 health line and the startup `deployed` record and notice. Detail in `docs/architecture/entities-dashboard.md`. Deviations: the record is in the debug bundle and state only (not the JSONL log); the deploy notice lists new record types, not new fields; API failures count push and settings-write failures until phase 101.

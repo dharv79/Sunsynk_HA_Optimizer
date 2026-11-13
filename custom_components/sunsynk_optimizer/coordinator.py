@@ -148,6 +148,10 @@ class OptimizerState:
     # Today's 16:00 peak export decision (phase 17). Persisted so a restart
     # keeps the 22:00 debug line and a live export's hold on Flux 2.
     peak_export: dict[str, Any] = field(default_factory=dict)
+    # Phase 100: latest 22:00 health verdict, and the version / record types seen at the last start.
+    daily_health: dict[str, Any] = field(default_factory=dict)
+    deployed_version: str | None = None
+    known_record_types: list[str] = field(default_factory=list)
     # Bill reconciliation (phase 36): month, billed_gbp (user-entered) and the last result.
     bill_reconciliation: dict[str, Any] = field(default_factory=dict)
 

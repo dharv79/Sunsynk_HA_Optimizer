@@ -87,6 +87,8 @@ GRID_CURRENT_DRIFT_TOLERANCE_A
 GRID_OFFLINE_MAX_V
 GRID_ONLINE_MIN_V
 HALF_HOURS_PER_DAY
+HEALTH_SOC_STALE_CHECK_H
+HEALTH_SOC_STALE_PROBLEM_H
 HEALTH_TREND_MIN_DAYS
 HEATING_BASE_C
 HEATING_MIN_DAYS
@@ -318,6 +320,7 @@ cloud_bucket
 compare_tariffs
 config_time_problems
 cost_under_tariff
+daily_health
 daily_report_plans
 day_kpis
 day_load_slots
@@ -325,6 +328,7 @@ days_in_period
 days_since_full
 daytime_import_anomaly
 daytime_load_kw
+deploy_changes
 divergence_streak
 drain_pct_to_0500
 dynamic_tariff_summary
@@ -444,6 +448,7 @@ quantile_correction
 recent_soc
 reconcile_month
 record_for_date
+records_today
 redact_config
 redact_diagnostics
 redact_values

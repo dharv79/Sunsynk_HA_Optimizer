@@ -17,12 +17,16 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
+    INTEGRATION_VERSION,
     CONF_CHARGES,
+    CONF_COST_AWARE_EXPORT_SHADOW_MODE,
+    CONF_DATA_REPORT_TARGET,
     CONF_BATTERY_COST_GBP,
     CONF_BATTERY_LIFETIME_KWH,
     CONF_OCTOPUS_IMPORT_COST_SENSOR,
     GENTLE_CHARGE_SETTING,
 )
+from .data_logger import RECORD_TYPES
 from .flux_helpers import kpi_prices_pence
 from .planning import (
     battery_health_trend,
@@ -47,6 +51,9 @@ from .planning import (
     audit_days,
     audit_summary,
     CLIPPED_SOC_PCT,
+    daily_health,
+    deploy_changes,
+    records_today,
     DRIFT_CHECK_AFTER_PUSH_MINUTES,
     expected_grid_current_a,
     flux_drift,
@@ -115,6 +122,71 @@ class MonitorMixin:
                 f"{weaker.upper()} has produced well below its usual share for {streak} days "
                 f"(MPPT0 share {share * 100:.0f}% vs usual {result['median'] * 100:.0f}%). "
                 "Check for shading, soiling or a failed connector.",
+            )
+
+    async def _async_capture_daily_health(self, date: str) -> dict[str, Any]:
+        """22:00: one-line health verdict (phase 100) into state and the bundle; read-only, resets the day's counters."""
+        state = self.coordinator.state
+        records = await self.data_logger.async_load_records(2)
+        written, expected = records_today(records, date)
+        outcome = next((r for r in reversed(records) if r.get("type") == "charge_outcome" and r.get("date") == date), {})
+        soc_state = self.hass.states.get(self.battery_soc_entity)
+        seen = getattr(soc_state, "last_reported", None) or getattr(soc_state, "last_updated", None)
+        soc_age = None if seen is None else max(0.0, (dt_util.utcnow() - seen).total_seconds() / 3600)
+        api = state.last_api_result or {}
+        shadows = [n for n in ("mpc_plan", "dynamic_tariff", "tou_shadow", "flex_event") if getattr(state, n)]
+        if self.cfg.get(CONF_COST_AWARE_EXPORT_SHADOW_MODE):
+            shadows.append("export_cost_trigger")
+        rec = {
+            "date": date,
+            **daily_health(
+                version=INTEGRATION_VERSION,
+                api_ok=api.get("ok") if "ok" in api else None,
+                charge_shortfall_pct=outcome.get("shortfall_pct"),
+                records_written=written,
+                records_expected=expected,
+                guarded_errors=dict(self._guarded_errors),
+                api_failures=self._api_failures,
+                soc_age_hours=soc_age,
+                shadow_features=shadows,
+            ),
+        }
+        self._guarded_errors.clear()
+        self._api_failures = 0
+        self.coordinator.update_state(touch=False, daily_health=rec)
+        return rec
+
+    async def _async_deploy_check(self, _now) -> None:
+        await self._guarded(self.async_run_deploy_check, "Deploy check")
+
+    async def async_run_deploy_check(self) -> None:
+        """Startup: when the manifest version differs from the last one seen, say what changed (phase 100).
+
+        The debug stream always gets the `deployed` record; the notify target only when a previous
+        version was known. New record types come from the list stored at the last deploy.
+        """
+        state = self.coordinator.state
+        old = state.deployed_version
+        if INTEGRATION_VERSION is None or old == INTEGRATION_VERSION:
+            return
+        new_types = deploy_changes(state.known_record_types, list(RECORD_TYPES))
+        rec = {
+            "type": "deployed",
+            "old_version": old,
+            "new_version": INTEGRATION_VERSION,
+            "new_record_types": new_types,
+            "recorded_at": dt_util.utcnow().isoformat(),
+        }
+        self.coordinator.update_state(
+            touch=False, deployed_version=INTEGRATION_VERSION, known_record_types=list(RECORD_TYPES)
+        )
+        target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if target:
+            await self.async_notify_debug("Sunsynk Deployed", json.dumps(rec), target=target)
+        if old:
+            added = f" New record types: {', '.join(new_types)}." if new_types else ""
+            await self.async_notify(
+                f"🔋 Sunsynk: Updated to {INTEGRATION_VERSION}", f"Was {old}.{added}"
             )
 
     async def _async_data_audit(self, _now) -> None:

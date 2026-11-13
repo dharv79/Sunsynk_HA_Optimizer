@@ -42,6 +42,46 @@ _CACHE_LOCK = threading.RLock()  # reads and writes run in executor threads
 
 DATA_DIR_NAME = "sunsynk_optimizer_data"
 
+# Every record type the logger writes (phase 100): the deploy notice lists the ones new since the last start.
+RECORD_TYPES = (
+    "battery_floor",
+    "battery_health",
+    "capacity_estimate",
+    "charge_outcome",
+    "charge_watchdog",
+    "daily_cost",
+    "day_actuals",
+    "day_kpis",
+    "dynamic_tariff",
+    "flex_event",
+    "free_event",
+    "full_charge_day",
+    "full_charge_recheck",
+    "grid_notice",
+    "half_hourly_export",
+    "half_hourly_import",
+    "hourly_profile",
+    "import_causes",
+    "import_plan",
+    "inverter_drift",
+    "inverter_event",
+    "meter_reconciliation_export",
+    "meter_reconciliation_import",
+    "meter_snapshot",
+    "morning_state",
+    "mpc_plan",
+    "multi_day_plan",
+    "outage",
+    "overnight_load",
+    "peak_cover",
+    "peak_export",
+    "peak_export_recheck",
+    "peak_window_usage",
+    "pv_strings",
+    "tou_shadow",
+    "trim_shadow",
+)
+
 # import_plan fields persisted to the JSONL log. `away` and
 # `effective_charge_rate_kw` are read back by _pair_records for the home/away
 # calibration split and the last-known charge-rate fallback respectively.

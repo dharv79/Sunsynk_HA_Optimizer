@@ -226,6 +226,13 @@ from .forecast import (
     voltage_derate_suspect,
     weighted_forecast_correction,
 )
+from .health import (
+    HEALTH_SOC_STALE_CHECK_H,
+    HEALTH_SOC_STALE_PROBLEM_H,
+    daily_health,
+    deploy_changes,
+    records_today,
+)
 from .kpis import (
     AUDIT_COST_SETTLE_DAYS,
     AUDIT_DAILY_TYPES,
@@ -628,6 +635,8 @@ __all__ = [
     "GRID_OFFLINE_MAX_V",
     "GRID_ONLINE_MIN_V",
     "HALF_HOURS_PER_DAY",
+    "HEALTH_SOC_STALE_CHECK_H",
+    "HEALTH_SOC_STALE_PROBLEM_H",
     "HEALTH_TREND_MIN_DAYS",
     "HEATING_BASE_C",
     "HEATING_MIN_DAYS",
@@ -859,6 +868,7 @@ __all__ = [
     "compare_tariffs",
     "config_time_problems",
     "cost_under_tariff",
+    "daily_health",
     "daily_report_plans",
     "day_kpis",
     "day_load_slots",
@@ -866,6 +876,7 @@ __all__ = [
     "days_since_full",
     "daytime_import_anomaly",
     "daytime_load_kw",
+    "deploy_changes",
     "divergence_streak",
     "drain_pct_to_0500",
     "dynamic_tariff_summary",
@@ -985,6 +996,7 @@ __all__ = [
     "recent_soc",
     "reconcile_month",
     "record_for_date",
+    "records_today",
     "redact_config",
     "redact_diagnostics",
     "redact_values",
