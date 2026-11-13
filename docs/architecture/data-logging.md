@@ -140,4 +140,4 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 
 ## CSV export service (13/11/2026, phase 109)
 
-`sunsynk_optimizer.export_data` writes the logged records as CSV (one file per record type plus a daily summary) to `<config>/sunsynk_optimizer_export/<timestamp>/`. The type list is `data_logger.RECORD_TYPES`, so a new record type must be added there (already required). See `docs/plans/phases/109-data-export-service.md`.
+`sunsynk_optimizer.export_data` writes the logged records as CSV (one file per record type plus a daily summary) to `<config>/sunsynk_optimizer_export/<timestamp>/`. The type list is `data_logger.RECORD_TYPES`, so a new record type must be added there (already required). See `docs/plans/phases/109-data-export.md`.
