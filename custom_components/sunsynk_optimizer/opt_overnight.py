@@ -819,6 +819,7 @@ class OvernightMixin:
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
             await self._guarded(self._async_send_shadow_scorecard, "Shadow scorecard")
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")
+            await self._guarded(self.async_run_settings_audit, "Inverter settings audit")  # phase 107
         await self._guarded(self._async_monthly_reports, "Monthly reports")
         await self._guarded(self.async_recheck_full_charge_day, "Full-charge-day re-check")
 

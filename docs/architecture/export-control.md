@@ -288,3 +288,7 @@ The record (`flex_event`: date, start time, entity, hours, soc, price, house loa
 - **Shadow line.** Every peak export and peak cover record carries `round_trip_shadow`: the gain under 0.85 against the gain under the measured AC figure, whether each is worth it, and the break-even efficiency (buy / sell price). Null until a measured figure exists. Never acted on: `ROUND_TRIP_EFFICIENCY` and `CHARGE_EFFICIENCY` still drive every decision.
 - **Scorecard.** New `round_trip` feature: days with a shadow line, days the call would flip, and the £ the measured figure would have moved.
 - **Decision to take later.** If the measured AC figure stays well above or below 0.85 over a winter, switch the constants in a separate phase.
+
+## Inverter settings audit (13/11/2026, phase 107)
+
+Weekly (Sunday 18:00) read-only snapshot of the inverter settings, diffed against the last one to catch changes made outside the integration. Separate from the drift check above, which compares against what was pushed. Design and deviations: `docs/plans/phases/107-inverter-settings-audit.md`.

@@ -29,6 +29,9 @@ from .const import (
 from .data_logger import RECORD_TYPES
 from .flux_helpers import kpi_prices_pence
 from .planning import (
+    settings_change_text,
+    settings_changes,
+    snapshot_settings,
     battery_health_trend,
     bms_summary_line,
     health_fault_flag,
@@ -415,6 +418,42 @@ class MonitorMixin:
         self.coordinator.update_state(
             touch=False,
             cloud_grid_notices={"seen": (seen + [n["id"] for n in fresh])[-100:], "last": fresh[-1]},
+        )
+
+    async def async_run_settings_audit(self) -> None:
+        """Weekly (phase 107): snapshot the inverter's settings and report what changed since the last one.
+
+        Read-only (no writes, so also in monitor mode). The keys the integration writes itself are not
+        compared. The first snapshot only stores a baseline. A failed read keeps the old snapshot.
+        """
+        try:
+            settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
+        except Exception as exc:  # pragma: no cover - network
+            _LOGGER.debug("Settings audit read failed: %s", exc)
+            return
+        current = snapshot_settings(settings)
+        if not current:
+            return
+        now = dt_util.now()
+        previous = (self.coordinator.state.settings_snapshot or {}).get("values")
+        changes = settings_changes(previous, current)
+        self.coordinator.update_state(
+            touch=False, settings_snapshot={"date": now.date().isoformat(), "values": current}
+        )
+        if not changes:
+            return
+        await self.data_logger.async_log_settings_audit(date=now.date().isoformat(), changes=changes)
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify_debug(
+                "Sunsynk Settings Audit",
+                json.dumps({"type": "settings_audit", "date": now.date().isoformat(), "changes": changes}),
+                target=data_report_target,
+            )
+        await self.async_notify(
+            "🔋 Sunsynk: inverter settings changed",
+            f"{settings_change_text(changes)}. Changed outside this integration (installer, app or firmware); "
+            "nothing was re-pushed.",
         )
 
     async def async_run_drift_check(self) -> None:

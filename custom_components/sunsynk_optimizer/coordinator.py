@@ -162,6 +162,8 @@ class OptimizerState:
     api_health_days: list[dict[str, Any]] = field(default_factory=list)
     # Phase 105: today's load against the temperature fit (date, load_kwh, expected_kwh, diff_kwh, pct, temp_c).
     load_vs_expected: dict[str, Any] = field(default_factory=dict)
+    # Phase 107: last weekly inverter settings snapshot {date, values}.
+    settings_snapshot: dict[str, Any] = field(default_factory=dict)
     deployed_version: str | None = None
     known_record_types: list[str] = field(default_factory=list)
     # Bill reconciliation (phase 36): month, billed_gbp (user-entered) and the last result.
