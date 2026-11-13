@@ -40,6 +40,7 @@ from .const import (
 )
 from .flux_helpers import price_source
 from .planning import (
+    round_trip_shadow,
     BATTERY_BOTTOM_SOC,
     grid_online_from_voltage,
     outage_record,
@@ -623,6 +624,10 @@ class DaytimeMixin:
             "peak_need_soc": round(need, 1),
             **plan,
             "price_source": price_source(sources, "export_peak", "offpeak"),
+            "round_trip_shadow": round_trip_shadow(  # phase 103: gain under the measured round trip, never acted on
+                plan["export_kwh"], prices["offpeak"], prices["export_peak"],
+                self.coordinator.state.round_trip_measured.get("ac_eff"), self._wear_pence(),
+            ),
             "live": live,
             "api_ok": api_ok,
         }
@@ -1048,6 +1053,10 @@ class DaytimeMixin:
             "day_pence": prices["day"],
             "peak_pence": prices["peak"],
             "price_source": price_source(sources, "day", "peak"),
+            "round_trip_shadow": round_trip_shadow(  # phase 103: gain under the measured round trip, never acted on
+                plan.get("topup_kwh"), prices["day"], prices["peak"],
+                self.coordinator.state.round_trip_measured.get("ac_eff"), self._wear_pence(),
+            ),
             "live": live,
             "api_ok": api_ok,
         }

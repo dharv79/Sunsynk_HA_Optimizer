@@ -48,6 +48,8 @@ from .data_logger import DATA_DIR_NAME
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
     api_week,
+    round_trip_intervals,
+    round_trip_measured,
     digest_text,
     scorecard_verdicts,
     verdict_changes,
@@ -120,6 +122,12 @@ class ReportsMixin:
         records = await self.data_logger.async_load_records(SCORECARD_WINDOW_DAYS + 2)
         paired = days_in_period(await self.data_logger.async_load_paired_days(days=WEEK_HISTORY_DAYS), start, end)
         verdicts = scorecard_verdicts(shadow_scorecard(records, today.isoformat()))
+        trip = round_trip_measured(round_trip_intervals(records), self._capacity_kwh())
+        self.coordinator.update_state(touch=False, round_trip_measured=trip)
+        if trip["overall"]:
+            await self.data_logger.async_log_round_trip_measured(
+                date=today.isoformat(), **{k: v for k, v in trip.items() if k != "type"}
+            )
         digest = {
             "date": today.isoformat(),
             "period_start": start,
@@ -128,6 +136,7 @@ class ReportsMixin:
             "charge": weekly_charge_shortfalls(records, start, end),
             "forecast": weekly_forecast_error(paired),
             "shadow_changes": verdict_changes(self.coordinator.state.shadow_verdicts, verdicts),
+            "round_trip": {k: trip[k] for k in ("battery_eff", "ac_eff", "warm", "cold", "intervals")},
         }
         self.coordinator.update_state(
             touch=False,

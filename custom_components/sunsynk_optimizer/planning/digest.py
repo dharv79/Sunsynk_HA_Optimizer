@@ -150,6 +150,13 @@ def digest_text(digest: dict[str, Any] | None) -> str:
     fc = d.get("forecast")
     if fc:
         parts.append(f"Solar forecast error: raw {fc['raw_mae_kwh']:g} kWh a day, corrected {fc['corrected_mae_kwh']:g} kWh.")
+    trip = d.get("round_trip") or {}
+    if trip.get("battery_eff") is not None:
+        cold = (trip.get("cold") or {}).get("battery_eff")
+        parts.append(
+            f"Measured battery round trip {trip['battery_eff'] * 100:.1f}% (about {trip['ac_eff'] * 100:.0f}% at the AC side)"
+            + (f", {cold * 100:.1f}% on cold days" if cold is not None else "") + "."
+        )
     for change in d.get("shadow_changes") or []:
         parts.append(f"Shadow feature {change['feature']} went {change['from']} to {change['to']}.")
     return " ".join(parts)

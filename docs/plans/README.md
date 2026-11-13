@@ -110,8 +110,8 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 100. Daily health line and deploy notice | Done, merged (7a5bd7c, PR #209) | S, ~25-40k |
 | 101. Cloud API reliability log | Done, merged (f9b3ad9, PR #210) | S, ~20-35k |
 | 102. Shiftable-load report | Planned, not built | M, ~40-60k |
-| 103. Measured round-trip efficiency (shadow) | Planned, not built | S, ~30-45k |
-| 104. Weekly digest: import causes, charge shortfalls and shadow results | Built (PR pending) | S, ~25-40k |
+| 103. Measured round-trip efficiency (shadow) | Built (PR pending) | S, ~30-45k |
+| 104. Weekly digest: import causes, charge shortfalls and shadow results | Done, merged (c0279b6, PR #211) | S, ~25-40k |
 | 105. Weather-normalised load report | Planned, not built | S-M, ~30-50k |
 | 106. Import heat-map card (hour by day) | Planned, not built | M, ~45-70k |
 | 107. Inverter settings snapshot and change audit | Planned, not built | S, ~25-40k |

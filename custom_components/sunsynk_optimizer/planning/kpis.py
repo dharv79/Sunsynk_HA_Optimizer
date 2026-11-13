@@ -549,6 +549,17 @@ def shadow_scorecard(
     multi = win("multi_day_plan")
     differs = [m for m in multi if m.get("changes_target") or m.get("changes_peak")]
     out["multi_day"] = _score(len(multi), len(differs), None, [m["date"] for m in differs], "needs a ≥2 day low-solar run")
+    # 103 measured round trip: peak export / cover days with a shadow line; delta is measured gain minus the 0.85 gain.
+    rt = [r for kind in ("peak_export", "peak_cover") for r in win(kind) if isinstance(r.get("round_trip_shadow"), dict)]
+    rt_flipped = [r for r in rt if r["round_trip_shadow"].get("worth_default") != r["round_trip_shadow"].get("worth_measured")]
+    rt_delta = _sum_or_none([
+        r["round_trip_shadow"]["gain_gbp_measured"] - r["round_trip_shadow"]["gain_gbp_default"]
+        for r in rt if None not in (r["round_trip_shadow"].get("gain_gbp_measured"), r["round_trip_shadow"].get("gain_gbp_default"))
+    ])
+    out["round_trip"] = _score(
+        len(rt), len(rt_flipped), rt_delta, sorted({r["date"] for r in rt_flipped}),
+        "measured round trip vs 0.85; delta is the £ the measured figure would have moved; changed = days the call flips",
+    )
     # 34 capacity: latest estimate present and sampled.
     caps_est = win("capacity_estimate", 70)
     latest = caps_est[-1] if caps_est else {}

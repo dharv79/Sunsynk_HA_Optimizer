@@ -1,6 +1,6 @@
 # Phase 104 — Weekly digest: import causes, charge shortfalls and shadow results
 
-**Status:** Built (PR pending merge). **Size:** S, ~25-40k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building. Finishes the parts of phases 42 and 47 that were not built.
+**Status:** Built, merged (c0279b6, PR #211). **Size:** S, ~25-40k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building. Finishes the parts of phases 42 and 47 that were not built.
 
 ## Goal
 
