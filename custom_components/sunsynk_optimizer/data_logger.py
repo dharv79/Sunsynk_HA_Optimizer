@@ -78,6 +78,7 @@ RECORD_TYPES = (
     "peak_export_recheck",
     "peak_window_usage",
     "round_trip_measured",
+    "settings_audit",
     "pv_strings",
     "tou_shadow",
     "trim_shadow",
@@ -359,6 +360,10 @@ class DataLogger:
     async def async_log_round_trip_measured(self, **fields: Any) -> None:
         """Log the measured battery round trip (phase 103, shadow): one per date (deduped)."""
         await self._async_append(_record("round_trip_measured", **fields))
+
+    async def async_log_settings_audit(self, **fields: Any) -> None:
+        """Log inverter settings changed outside the integration (phase 107): written only when there are changes."""
+        await self._async_append(_record("settings_audit", **fields))
 
     async def async_log_meter_snapshot(self, **fields: Any) -> None:
         """Log a cumulative daily-meter snapshot (phase 14): one per date+time."""

@@ -8,6 +8,9 @@ AUDIT_COST_SETTLE_DAYS
 AUDIT_DAILY_TYPES
 AUDIT_DAYS
 AUDIT_DEDUP_TYPES
+AUDIT_IGNORE_KEYS
+AUDIT_IGNORE_SUFFIXES
+AUDIT_MAX_LISTED
 AUDIT_SOLAR_MIN_KWH
 ApiStats
 BASELOAD_FACTOR
@@ -513,12 +516,15 @@ scorecard_summary
 scorecard_verdicts
 select_target_soc
 sensitive_values
+settings_change_text
+settings_changes
 shadow_scorecard
 shift_hours
 shiftable_loads
 shiftable_text
 should_log_import_plan
 simulate_system
+snapshot_settings
 soc_cap_shadow
 soc_retry_due
 soc_trend_kw

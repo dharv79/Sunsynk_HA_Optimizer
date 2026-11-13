@@ -282,6 +282,14 @@ from .weather_load import (
     prior_month,
     weather_load_rows,
 )
+from .settings_audit import (
+    AUDIT_IGNORE_KEYS,
+    AUDIT_IGNORE_SUFFIXES,
+    AUDIT_MAX_LISTED,
+    snapshot_settings,
+    settings_changes,
+    settings_change_text,
+)
 from .digest import (
     DIGEST_MISS_PCT,
     WEEKLY_KPI_SENSORS,
@@ -963,6 +971,12 @@ __all__ = [
     "daytime_load_kw",
     "deploy_changes",
     "digest_text",
+    "AUDIT_IGNORE_KEYS",
+    "AUDIT_IGNORE_SUFFIXES",
+    "AUDIT_MAX_LISTED",
+    "snapshot_settings",
+    "settings_changes",
+    "settings_change_text",
     "LOAD_BASE_SHIFT_PCT",
     "LOAD_FIT_HISTORY_DAYS",
     "LOAD_REPORT_HISTORY_DAYS",
