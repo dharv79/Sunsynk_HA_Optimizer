@@ -46,6 +46,9 @@ from .flux_helpers import (
 )
 from .planning import (
     flux_bands_from_charges,
+    LOAD_FIT_HISTORY_DAYS,
+    load_vs_expected,
+    weather_load_rows,
     BATTERY_LOW_SOC,
     parse_half_hourly_charges,
     meter_reconciliation,
@@ -286,6 +289,21 @@ class CaptureMixin:
         self.coordinator.update_state(touch=False, last_day_kpis=record)
         return {"type": "day_kpis", **record}
 
+    async def _async_capture_load_vs_expected(self, date: str, load_kwh: Any) -> None:
+        """22:00 (phase 105): today's load against the load/temperature fit of the other home days; state only.
+
+        Skipped on away days (they would read as a big shortfall); the sensor then keeps the last home day.
+        """
+        plan = self.coordinator.state.nightly_import_plan or {}
+        if plan.get("date") == date and plan.get("away"):
+            return
+        rows = weather_load_rows(await self.data_logger.async_load_records(LOAD_FIT_HISTORY_DAYS))
+        temp = self._outside_temp
+        mean_temp = temp["sum"] / temp["n"] if temp.get("date") == date and temp.get("n") else None
+        result = load_vs_expected(rows, date, load_kwh, mean_temp)
+        if result is not None:
+            self.coordinator.update_state(touch=False, load_vs_expected=result)
+
     async def _async_outside_temp_by_date(self, days: int) -> dict[str, float]:
         """{date: mean outside temperature °C} from the logged day_kpis records of the last ``days`` days."""
         return {
@@ -525,6 +543,7 @@ class CaptureMixin:
             "export_derated_min": derated_min,
         }
         kpi_rec = await self._async_capture_day_kpis(date)
+        await self._guarded(lambda: self._async_capture_load_vs_expected(date, day_load_kwh), "Load vs expected")
         floor_rec = await self._async_review_battery_floor(date)
         hourly_rec = await self._async_log_hourly_profile(date)
         await self._guarded(lambda: self._async_capture_pv_strings(date), "PV string capture")

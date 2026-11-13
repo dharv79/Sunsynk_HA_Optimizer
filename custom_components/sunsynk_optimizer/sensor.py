@@ -138,6 +138,10 @@ async def async_setup_entry(
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.api_success_rate",
             ),
             SunsynkOptimizerSensor(
+                coordinator, entry, "load_vs_expected", "Load vs expected for the weather",
+                entity_id="sensor.load_vs_expected",
+            ),
+            SunsynkOptimizerSensor(
                 coordinator, entry, "data_health", "Data health gaps",
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.data_health",
             ),
@@ -244,7 +248,7 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return "h"
         if self._sensor_key in ("dynamic_tariff", "upgrade_advisor"):
             return "GBP"
-        if self._sensor_key in ("api_success_rate", "pv_strings", "battery_soh", "current_soc_target", "overnight_drain_adjustment", "evening_soc_adjustment"):
+        if self._sensor_key in ("api_success_rate", "load_vs_expected", "pv_strings", "battery_soh", "current_soc_target", "overnight_drain_adjustment", "evening_soc_adjustment"):
             return "%"
         if self._sensor_key == "effective_charge_rate":
             return "kW"
@@ -294,6 +298,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "api_success_rate":
             return _as_dict(state.api_health).get("success_rate_pct")
+
+        if self._sensor_key == "load_vs_expected":
+            return _as_dict(state.load_vs_expected).get("pct")
 
         if self._sensor_key == "data_health":
             return _as_dict(state.data_health).get("count")
@@ -445,6 +452,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return {k: v for k, v in _as_dict(state.battery_runtime).items() if k != "hours"}
         if self._sensor_key == "api_success_rate":
             return {k: v for k, v in _as_dict(state.api_health).items() if k not in ("type", "success_rate_pct")}
+        if self._sensor_key == "load_vs_expected":
+            return {k: v for k, v in _as_dict(state.load_vs_expected).items() if k != "pct"}
         if self._sensor_key == "health":
             return {k: v for k, v in _as_dict(state.daily_health).items() if k not in ("type", "status")}
         if self._sensor_key == "data_health":
