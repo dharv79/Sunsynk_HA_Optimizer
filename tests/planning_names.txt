@@ -1,9 +1,15 @@
 AGILE_SPIKE_PENCE
+API_ALERT_DAYS
+API_ALERT_MIN_CALLS
+API_FAIL_RATE_ALERT_PCT
+API_HISTORY_DAYS
+API_LATENCY_KEEP
 AUDIT_COST_SETTLE_DAYS
 AUDIT_DAILY_TYPES
 AUDIT_DAYS
 AUDIT_DEDUP_TYPES
 AUDIT_SOLAR_MIN_KWH
+ApiStats
 BASELOAD_FACTOR
 BASELOAD_MIN_EXTRA_KWH
 BASELOAD_MIN_NIGHTS
@@ -57,6 +63,7 @@ EVENING_LOAD_WINDOW_DAYS
 EVENING_RESERVE_HOURS
 EVENT_PROBE_ROUTES
 EXPORT_PAUSE_FLUX2_SLOT
+FAILURE_KINDS
 FLEX_DEFAULT_HOURS
 FLEX_MAX_HOURS
 FLOOR_CANDIDATE_SOC
@@ -285,6 +292,10 @@ _workdata_index
 achievable_max_soc
 agile_prices_by_date
 agile_region_override
+api_alert_due
+api_unreliable_streak
+api_week
+append_api_day
 apply_soc_adjustments
 apply_user_override
 arbitrage_worth_it
@@ -315,6 +326,7 @@ charge_progress_ok
 charge_shortfall_suspect
 cheapest_hour_today
 cheapest_window_plan
+classify_failure
 clip_text
 cloud_bucket
 compare_tariffs

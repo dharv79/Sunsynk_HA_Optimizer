@@ -150,6 +150,9 @@ class OptimizerState:
     peak_export: dict[str, Any] = field(default_factory=dict)
     # Phase 100: latest 22:00 health verdict, and the version / record types seen at the last start.
     daily_health: dict[str, Any] = field(default_factory=dict)
+    # Phase 101: latest day's cloud API counters and the last 14 days (for the 3-day alert and weekly line).
+    api_health: dict[str, Any] = field(default_factory=dict)
+    api_health_days: list[dict[str, Any]] = field(default_factory=list)
     deployed_version: str | None = None
     known_record_types: list[str] = field(default_factory=list)
     # Bill reconciliation (phase 36): month, billed_gbp (user-entered) and the last result.

@@ -107,8 +107,8 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 97. Refactor 1: shared helpers, dead code and missing tests | Done, merged (7c6c1f8, PR #206); one percentile/median, shared HH:MM parse, `_mpc_inputs`, `_async_weather_forecast`, `_async_outside_temp_by_date`, `grid_online` removed; load-window and weighted-ratio dedup deferred | S-M, ~40-60k |
 | 98. Refactor 2: split planning.py into a package | Done, merged (935bbb7, PR #207); 11 modules (`core` sink, `overnight`, `forecast`, `load`, `peak`, `events`, `kpis`, `reports`, `battery`, `shadow`, `redact`), `__init__` re-exports all 492 names, loaders and CI globs updated; mixed-topic constants placed by usage; `overnight` (~1,000 lines) could be split further; load-window/weighted-ratio dedups still deferred | M-L, ~70-110k |
 | 99. Refactor 3: split optimizer.py | Done, merged (feb06b3, PR #208); `SunsynkOptimizer` is now `optimizer.py` (core, 560 lines) plus 7 mixins `opt_overnight`, `opt_daytime`, `opt_capture`, `opt_reports`, `opt_monitor`, `opt_events`, `opt_shadow`, and `opt_common` (shared helpers); all 200 class members moved verbatim (AST-identical to the original); two structural tests added; `async_run_import_plan` break-up and per-mixin characterisation tests deferred | L, ~120-175k |
-| 100. Daily health line and deploy notice | Built (PR pending) | S, ~25-40k |
-| 101. Cloud API reliability log | Planned, not built | S, ~20-35k |
+| 100. Daily health line and deploy notice | Done, merged (7a5bd7c, PR #209) | S, ~25-40k |
+| 101. Cloud API reliability log | Built (PR pending) | S, ~20-35k |
 | 102. Shiftable-load report | Planned, not built | M, ~40-60k |
 | 103. Measured round-trip efficiency (shadow) | Planned, not built | S, ~30-45k |
 | 104. Weekly digest: import causes, charge shortfalls and shadow results | Planned, not built | S, ~25-40k |

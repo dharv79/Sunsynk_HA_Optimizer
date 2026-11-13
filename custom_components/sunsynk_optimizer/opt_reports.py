@@ -47,6 +47,7 @@ from .const import (
 from .data_logger import DATA_DIR_NAME
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
+    api_week,
     monthly_report_due,
     TARIFF_IMPORT_BANDS,
     TARIFF_LABELS,
@@ -155,6 +156,7 @@ class ReportsMixin:
             "week_peak_export_kwh": _sum("peak_export_kwh"),
             "week_peak_export_gain_gbp": _sum("peak_export_gain_gbp"),
             "peak_export_live": bool(self.cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)),
+            "api_health_week": api_week(self.coordinator.state.api_health_days),  # phase 101
             # Phase 37: days behind week_battery_saving_gbp.
             "battery_saving_days": battery_value_summary(paired_days)["days"],
         }

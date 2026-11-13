@@ -722,6 +722,7 @@ class OvernightMixin:
         if self.operation_mode == "monitor" or self._slots_held() or self._outage_active():
             return
         now = dt_util.now()
+        self.coordinator.api.stats.note_push_retry()  # phase 101
         if await self.async_push_flux_override(payload):
             state = self.coordinator.state
             updates: dict[str, Any] = {"last_error": None}

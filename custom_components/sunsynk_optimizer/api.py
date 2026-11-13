@@ -21,6 +21,8 @@ import aiohttp
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
+from .planning.api_health import ApiStats, classify_failure
+
 BASE_WEB = "https://www.sunsynk.net"
 BASE_API = "https://api.sunsynk.net"
 SOURCE = "sunsynk"      # required literal value in all Sunsynk API requests
@@ -53,6 +55,7 @@ class SunsynkApiClient:
         self._password = password
         self._token: str | None = None
         self._login_lock = asyncio.Lock()
+        self.stats = ApiStats()  # phase 101: per-day reliability counters, read and reset at 22:00
 
     @staticmethod
     def _md5_hex(value: str) -> str:
@@ -150,9 +153,22 @@ class SunsynkApiClient:
             if self._token and self._token != stale:
                 return
             self._token = None
+            if stale is not None:
+                self.stats.note_relogin()
             await self.async_login()
 
     async def _authorized_json(self, method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Authenticated request returning parsed JSON, timed and counted for the reliability log (phase 101)."""
+        started = time.monotonic()
+        try:
+            data = await self._authorized_json_inner(method, url, payload)
+        except Exception as exc:
+            self.stats.record(classify_failure(exc), time.monotonic() - started)
+            raise
+        self.stats.record(None, time.monotonic() - started)
+        return data
+
+    async def _authorized_json_inner(self, method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Authenticated request returning parsed JSON.
 
         On a 401 the token is cleared and a single re-login + retry is attempted,

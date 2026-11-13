@@ -15,6 +15,20 @@ Split by topic (phase 98); every name is re-exported here so
 
 from __future__ import annotations
 
+from .api_health import (
+    API_ALERT_DAYS,
+    API_ALERT_MIN_CALLS,
+    API_FAIL_RATE_ALERT_PCT,
+    API_HISTORY_DAYS,
+    API_LATENCY_KEEP,
+    FAILURE_KINDS,
+    ApiStats,
+    api_alert_due,
+    api_unreliable_streak,
+    api_week,
+    append_api_day,
+    classify_failure,
+)
 from .battery import (
     CAPACITY_ALERT_FRACTION,
     CAPACITY_DISCHARGE_MONTHS,
@@ -547,11 +561,17 @@ from .shadow import (
 
 __all__ = [
     "AGILE_SPIKE_PENCE",
+    "API_ALERT_DAYS",
+    "API_ALERT_MIN_CALLS",
+    "API_FAIL_RATE_ALERT_PCT",
+    "API_HISTORY_DAYS",
+    "API_LATENCY_KEEP",
     "AUDIT_COST_SETTLE_DAYS",
     "AUDIT_DAILY_TYPES",
     "AUDIT_DAYS",
     "AUDIT_DEDUP_TYPES",
     "AUDIT_SOLAR_MIN_KWH",
+    "ApiStats",
     "BASELOAD_FACTOR",
     "BASELOAD_MIN_EXTRA_KWH",
     "BASELOAD_MIN_NIGHTS",
@@ -605,6 +625,7 @@ __all__ = [
     "EVENING_RESERVE_HOURS",
     "EVENT_PROBE_ROUTES",
     "EXPORT_PAUSE_FLUX2_SLOT",
+    "FAILURE_KINDS",
     "FLEX_DEFAULT_HOURS",
     "FLEX_MAX_HOURS",
     "FLOOR_CANDIDATE_SOC",
@@ -833,6 +854,10 @@ __all__ = [
     "achievable_max_soc",
     "agile_prices_by_date",
     "agile_region_override",
+    "api_alert_due",
+    "api_unreliable_streak",
+    "api_week",
+    "append_api_day",
     "apply_soc_adjustments",
     "apply_user_override",
     "arbitrage_worth_it",
@@ -863,6 +888,7 @@ __all__ = [
     "charge_shortfall_suspect",
     "cheapest_hour_today",
     "cheapest_window_plan",
+    "classify_failure",
     "clip_text",
     "cloud_bucket",
     "compare_tariffs",

@@ -50,6 +50,10 @@ from .planning import (
     AUDIT_DAYS,
     audit_days,
     audit_summary,
+    API_FAIL_RATE_ALERT_PCT,
+    api_alert_due,
+    api_unreliable_streak,
+    append_api_day,
     CLIPPED_SOC_PCT,
     daily_health,
     deploy_changes,
@@ -124,7 +128,22 @@ class MonitorMixin:
                 "Check for shading, soiling or a failed connector.",
             )
 
-    async def _async_capture_daily_health(self, date: str) -> dict[str, Any]:
+    async def _async_capture_api_health(self, date: str) -> dict[str, Any]:
+        """22:00: take the day's cloud API counters (phase 101), keep a 14-day history, raise or clear the Repairs issue."""
+        rec = self.coordinator.api.stats.take(date)
+        history = append_api_day(self.coordinator.state.api_health_days, rec)
+        self.coordinator.update_state(touch=False, api_health=rec, api_health_days=history)
+        if api_alert_due(history):
+            ir.async_create_issue(
+                self.hass, DOMAIN, "api_unreliable", is_fixable=False,
+                severity=ir.IssueSeverity.WARNING, translation_key="api_unreliable",
+                translation_placeholders={"days": str(api_unreliable_streak(history)), "rate": str(API_FAIL_RATE_ALERT_PCT)},
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, "api_unreliable")
+        return rec
+
+    async def _async_capture_daily_health(self, date: str, api_rec: dict[str, Any] | None = None) -> dict[str, Any]:
         """22:00: one-line health verdict (phase 100) into state and the bundle; read-only, resets the day's counters."""
         state = self.coordinator.state
         records = await self.data_logger.async_load_records(2)
@@ -146,13 +165,12 @@ class MonitorMixin:
                 records_written=written,
                 records_expected=expected,
                 guarded_errors=dict(self._guarded_errors),
-                api_failures=self._api_failures,
+                api_failures=(api_rec or {}).get("failures_total"),
                 soc_age_hours=soc_age,
                 shadow_features=shadows,
             ),
         }
         self._guarded_errors.clear()
-        self._api_failures = 0
         self.coordinator.update_state(touch=False, daily_health=rec)
         return rec
 

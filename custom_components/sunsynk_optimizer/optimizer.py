@@ -168,10 +168,8 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         # is re-allowed, harmless — the slot is idempotent).
         self._peak_cover: dict[str, Any] | None = None
         self._peak_cover_startup_attempts = 0
-        # Phase 100: today's scheduled-callback errors by label and API push failures, read and
-        # reset by the 22:00 health line. Unpersisted: a restart only thins the day's count.
+        # Phase 100: today's scheduled-callback errors by label, read and reset by the 22:00 health line. Unpersisted: a restart only thins the day's count.
         self._guarded_errors: dict[str, int] = {}
-        self._api_failures = 0
         # Phase 90: one Flux 2 decide-and-push at a time (never held across a notification).
         self._flux2_lock = asyncio.Lock()
         self.data_logger = DataLogger(hass)
@@ -428,7 +426,6 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
             result = await self.coordinator.api.async_post_income(self.plant_id, payload)
         except Exception as exc:  # pragma: no cover
             _LOGGER.exception("Sunsynk API push failed")
-            self._api_failures += 1
             self.coordinator.update_state(
                 last_api_result={"ok": False, "error": str(exc)},
                 last_error=f"API push failed: {exc}",
@@ -558,7 +555,6 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
             await self.coordinator.api.async_write_settings(serial, {**settings, key: str(value)})
         except Exception as exc:  # pragma: no cover
             _LOGGER.exception("Sunsynk settings write failed (%s)", key)
-            self._api_failures += 1
             self.coordinator.update_state(
                 last_api_result={"ok": False, "error": str(exc)},
                 last_error=f"Settings write failed ({key}): {exc}",
