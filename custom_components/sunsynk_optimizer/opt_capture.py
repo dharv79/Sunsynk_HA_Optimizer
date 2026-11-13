@@ -528,12 +528,18 @@ class CaptureMixin:
         floor_rec = await self._async_review_battery_floor(date)
         hourly_rec = await self._async_log_hourly_profile(date)
         await self._guarded(lambda: self._async_capture_pv_strings(date), "PV string capture")
+        api_rec: dict[str, Any] = {}
         health_rec: dict[str, Any] = {}
+
+        async def _api() -> None:
+            nonlocal api_rec
+            api_rec = await self._async_capture_api_health(date)
 
         async def _health() -> None:
             nonlocal health_rec
-            health_rec = await self._async_capture_daily_health(date)
+            health_rec = await self._async_capture_daily_health(date, api_rec)
 
+        await self._guarded(_api, "API health")
         await self._guarded(_health, "Daily health")
         # Persisted (not just logged/notified) so the dashboard's Consumption
         # sensor has today's actuals to display, the same way last_morning_state
@@ -579,7 +585,7 @@ class CaptureMixin:
                 complete_rec = {}
             lines = "\n".join(
                 json.dumps(r)
-                for r in [health_rec, *plan_recs, morning_rec, actuals_rec, kpi_rec, floor_rec, hourly_rec, peak_rec, peak_cover_rec, peak_export_rec, cost_rec, complete_rec]
+                for r in [health_rec, api_rec, *plan_recs, morning_rec, actuals_rec, kpi_rec, floor_rec, hourly_rec, peak_rec, peak_cover_rec, peak_export_rec, cost_rec, complete_rec]
                 if r
             )
             await self.async_notify_debug(

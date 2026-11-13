@@ -180,6 +180,10 @@
     }
   },
   "issues": {
+    "api_unreliable": {
+      "title": "Sunsynk Optimizer: Sunsynk cloud unreliable",
+      "description": "More than {rate}% of Sunsynk cloud calls failed on each of the last {days} days. Plans and pushes may be retried or missed; see the Cloud API success rate sensor and the 22:00 api_health line."
+    },
     "data_missing": {
       "title": "Sunsynk Optimizer: missing daily records",
       "description": "{count} daily records are missing from the last 14 days: {items}. Learned corrections skip these days. This clears itself once the gaps age out or are filled."

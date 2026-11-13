@@ -1,6 +1,6 @@
 # Phase 100 — Daily health line and deploy notice
 
-**Status:** Built (PR pending merge). **Size:** S, ~25-40k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
+**Status:** Built, merged (7a5bd7c, PR #209). **Size:** S, ~25-40k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
 
 ## Goal
 
