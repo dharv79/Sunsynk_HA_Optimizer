@@ -1,6 +1,6 @@
 # Phase 103 — Measured round-trip efficiency (shadow)
 
-**Status:** Built (PR pending merge). **Size:** S, ~30-45k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
+**Status:** Done, merged (3086575, PR #212). **Size:** S, ~30-45k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
 
 ## Goal
 
