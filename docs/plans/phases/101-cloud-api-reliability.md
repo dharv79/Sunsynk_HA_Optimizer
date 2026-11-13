@@ -1,6 +1,6 @@
 # Phase 101 — Cloud API reliability log
 
-**Status:** Built (PR pending merge). **Size:** S, ~20-35k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
+**Status:** Built, merged (f9b3ad9, PR #210). **Size:** S, ~20-35k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
 
 ## Goal
 

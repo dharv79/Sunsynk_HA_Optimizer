@@ -48,6 +48,12 @@ from .data_logger import DATA_DIR_NAME
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
     api_week,
+    digest_text,
+    scorecard_verdicts,
+    verdict_changes,
+    weekly_charge_shortfalls,
+    weekly_forecast_error,
+    weekly_import_causes,
     monthly_report_due,
     TARIFF_IMPORT_BANDS,
     TARIFF_LABELS,
@@ -101,6 +107,34 @@ class ReportsMixin:
         await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
         report_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         self.coordinator.update_state(last_monthly_report_month=report_month)
+
+    async def _async_weekly_digest(self) -> None:
+        """Sunday 18:00: why the week cost what it did (phase 104). Read-only; stored for the summary, AI prompt and sensors.
+
+        Import causes (phase 42 ledger, kWh and £), nights short of the charge target, raw against
+        corrected forecast error, shadow features whose verdict changed since last week, and the
+        weekly KPI roll-up behind the `kpi_week_*` sensors.
+        """
+        today = dt_util.now().date()
+        start, end = trailing_week(today)
+        records = await self.data_logger.async_load_records(SCORECARD_WINDOW_DAYS + 2)
+        paired = days_in_period(await self.data_logger.async_load_paired_days(days=WEEK_HISTORY_DAYS), start, end)
+        verdicts = scorecard_verdicts(shadow_scorecard(records, today.isoformat()))
+        digest = {
+            "date": today.isoformat(),
+            "period_start": start,
+            "period_end": end,
+            "import_causes": weekly_import_causes(records, paired, start, end),
+            "charge": weekly_charge_shortfalls(records, start, end),
+            "forecast": weekly_forecast_error(paired),
+            "shadow_changes": verdict_changes(self.coordinator.state.shadow_verdicts, verdicts),
+        }
+        self.coordinator.update_state(
+            touch=False,
+            weekly_digest=digest,
+            last_week_kpis={"date": today.isoformat(), "period_start": start, "period_end": end, **week_kpis(paired)},
+            shadow_verdicts=verdicts,
+        )
 
     async def _async_send_weekly_cost_summary(self) -> None:
         """Sunday 18:00: roll up the 7 complete days ending yesterday (Sun–Sat) and send it as JSON.
@@ -157,6 +191,7 @@ class ReportsMixin:
             "week_peak_export_gain_gbp": _sum("peak_export_gain_gbp"),
             "peak_export_live": bool(self.cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)),
             "api_health_week": api_week(self.coordinator.state.api_health_days),  # phase 101
+            "digest": self.coordinator.state.weekly_digest,  # phase 104
             # Phase 37: days behind week_battery_saving_gbp.
             "battery_saving_days": battery_value_summary(paired_days)["days"],
         }
@@ -221,7 +256,8 @@ class ReportsMixin:
             f"household load {_sum('day_load_kwh')} kWh, "
             f"solar generated {_sum('actual_solar_kwh')} kWh, "
             f"solar forecast {_sum('solar_forecast_kwh')} kWh. "
-            f"Year-to-date net cost: £{ytd.get('net_cost_gbp', 'unknown')} over {ytd.get('days_counted', 0)} days."
+            f"Year-to-date net cost: £{ytd.get('net_cost_gbp', 'unknown')} over {ytd.get('days_counted', 0)} days. "
+            f"{digest_text(self.coordinator.state.weekly_digest)}"
         )
         instructions = (
             "You are reviewing one week of data for a home battery/solar optimiser on the Octopus "

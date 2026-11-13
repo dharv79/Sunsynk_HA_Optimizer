@@ -815,6 +815,7 @@ class OvernightMixin:
         """Time-change callback at 18:00 daily: Sunday weekly pick, then the daily re-check."""
         if dt_util.now().strftime("%A") == "Sunday":
             await self._guarded(self.async_choose_best_full_charge_day, "Full-charge-day selection")
+            await self._guarded(self._async_weekly_digest, "Weekly digest")  # phase 104; the summary carries it
             await self._guarded(self._async_send_weekly_cost_summary, "Weekly cost summary")
             await self._guarded(self._async_send_shadow_scorecard, "Shadow scorecard")
             await self._guarded(self._async_send_ai_weekly_insight, "AI weekly insight")

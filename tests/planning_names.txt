@@ -51,6 +51,7 @@ DEFAULT_FLUX2_SLOT
 DEFAULT_TRIM_TARGET_SOC
 DERATE_PV_MIN_W
 DERATE_USED_FRACTION
+DIGEST_MISS_PCT
 DISCHARGE_EFFICIENCY
 DRIFT_CHECK_AFTER_PUSH_MINUTES
 DRIFT_CHECK_INTERVAL_HOURS
@@ -233,6 +234,7 @@ UPGRADE_MIN_DAYS
 UPGRADE_PV_STEP_KWP
 VOLTAGE_DERATE_PERIOD_MIN
 VOLTAGE_DERATE_V
+WEEKLY_KPI_SENSORS
 WEEK_HISTORY_DAYS
 _AUDIT_REDACT_PARTS
 _BASELINE_SEGMENTS
@@ -341,6 +343,7 @@ days_since_full
 daytime_import_anomaly
 daytime_load_kw
 deploy_changes
+digest_text
 divergence_streak
 drain_pct_to_0500
 dynamic_tariff_summary
@@ -474,6 +477,7 @@ scale_hourly
 scaled_solar_kwh
 score_full_charge_day
 scorecard_summary
+scorecard_verdicts
 select_target_soc
 sensitive_values
 shadow_scorecard
@@ -509,9 +513,14 @@ upgrade_scenarios
 upgrade_summary
 url_segment
 valid_hhmm
+verdict_changes
 voltage_derate_suspect
 walk_bridge_gap
 wear_cost_pence_per_kwh
 week_kpis
+weekly_charge_shortfalls
+weekly_forecast_error
+weekly_import_causes
+weekly_kpi_values
 weighted_forecast_correction
 window_grid_kwh

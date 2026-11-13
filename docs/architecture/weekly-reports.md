@@ -135,3 +135,13 @@ Both scenarios go into the report as `heat_pump` / `export_limit` (None when the
 - COP curve and clamps; the Cosy mean, and None when a half-hour has no price.
 - Heat-pump maths (standing charge, COP, payback); skipping away and missing days; required inputs; negative saving gives no payback.
 - Export-limit maths and minimum days; summary lines.
+
+## Weekly digest additions (13/11/2026, phase 104)
+
+- **Step.** Sunday 18:00 `_async_weekly_digest` (before the cost summary) builds `weekly_digest` in state from logged records only (pure `planning/digest.py`); read-only and independent of the debug target. The weekly summary JSON carries it as `digest`, and the AI insight prompt gets `digest_text(...)`.
+- **Import causes.** Phase 42 ledger summed over the 7 days, kWh by cause. £ uses each day's own average price (settled import cost over import kWh), so it covers priced days only and is `null` when none; `priced_days` says how many.
+- **Charge shortfalls.** Nights from the `charge_outcome` records more than 3 points short (below the 5-point alert, so near misses show), with the likely cause counts and the worst gap.
+- **Forecast error.** Raw and corrected solar forecast against actual over the paired days: mean absolute error and bias (forecast minus actual).
+- **Shadow verdicts.** The scorecard is recomputed weekly (30-day window) and diffed against `shadow_verdicts` kept in state; the first run only sets the baseline. The monthly scorecard notification is unchanged.
+- **Weekly KPI sensors.** `sensor.kpi_week_*` (avoidable import, peak export income, self-sufficiency, unused charge, over-limit import) read `last_week_kpis`, the same `week_kpis` roll-up as the summary, updated each Sunday. Plain measurements with the period as attributes.
+- **Not built.** Per-feature £ of verdict changes (the scorecard's own `delta_gbp` already holds it) and a human-readable digest message (the digest goes to the debug stream and the AI insight).

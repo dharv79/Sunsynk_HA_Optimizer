@@ -150,6 +150,11 @@ class OptimizerState:
     peak_export: dict[str, Any] = field(default_factory=dict)
     # Phase 100: latest 22:00 health verdict, and the version / record types seen at the last start.
     daily_health: dict[str, Any] = field(default_factory=dict)
+    # Phase 104: the Sunday digest (import causes, charge misses, forecast error, shadow verdict
+    # changes), last week's KPI roll-up for the kpi_week_* sensors, and last week's shadow verdicts.
+    weekly_digest: dict[str, Any] = field(default_factory=dict)
+    last_week_kpis: dict[str, Any] = field(default_factory=dict)
+    shadow_verdicts: dict[str, str] = field(default_factory=dict)
     # Phase 101: latest day's cloud API counters and the last 14 days (for the 3-day alert and weekly line).
     api_health: dict[str, Any] = field(default_factory=dict)
     api_health_days: list[dict[str, Any]] = field(default_factory=list)

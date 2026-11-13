@@ -1,6 +1,6 @@
 # Phase 104 — Weekly digest: import causes, charge shortfalls and shadow results
 
-**Status:** Planned, not built. **Size:** S, ~25-40k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building. Finishes the parts of phases 42 and 47 that were not built.
+**Status:** Built (PR pending merge). **Size:** S, ~25-40k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building. Finishes the parts of phases 42 and 47 that were not built.
 
 ## Goal
 
@@ -17,3 +17,7 @@ The Sunday digest reports cost and KPIs but not why. Add the explanation that is
 ## Saving
 
 None. Reporting.
+
+## Built (13/11/2026)
+
+`planning/digest.py`, `_async_weekly_digest`, `digest` in the weekly summary and AI prompt, `sensor.kpi_week_*`. Detail in `docs/architecture/weekly-reports.md`. Deviation: no separate human message; the digest rides the existing debug-stream summary and the AI insight.

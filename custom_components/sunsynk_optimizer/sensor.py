@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .data_logger import DataLogger
 from .entity import optimizer_device_info, pin_entity_id
-from .planning import KPI_SENSORS, clip_text, explain_plan, free_event_attributes, kpi_sensor_values, pv_string_attributes, upgrade_options
+from .planning import KPI_SENSORS, WEEKLY_KPI_SENSORS, weekly_kpi_values, clip_text, explain_plan, free_event_attributes, kpi_sensor_values, pv_string_attributes, upgrade_options
 
 
 _ADAPTIVE_THRESHOLDS = {
@@ -153,6 +153,7 @@ async def async_setup_entry(
             ),
         ]
         + [KpiSensor(coordinator, entry, *spec) for spec in KPI_SENSORS]
+        + [WeeklyKpiSensor(coordinator, entry, *spec) for spec in WEEKLY_KPI_SENSORS]
     )
 
 
@@ -186,6 +187,31 @@ class KpiSensor(CoordinatorEntity, SensorEntity):
             return None
         day = dt_util.parse_date(str(_as_dict(self.coordinator.state.last_day_kpis).get("date") or ""))
         return dt_util.start_of_local_day(day) if day else None
+
+
+class WeeklyKpiSensor(CoordinatorEntity, SensorEntity):
+    """Last Sunday's 7-day KPI roll-up (phase 104) so the dashboard can chart week on week. Unknown, never 0."""
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, entry: ConfigEntry, key: str, _field: str, name: str, unit: str) -> None:
+        super().__init__(coordinator)
+        self._key = key
+        self._attr_name = name
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        pin_entity_id(self, "sensor", name, f"sensor.{key}")
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_info = optimizer_device_info(entry)
+
+    @property
+    def native_value(self) -> float | None:
+        return weekly_kpi_values(self.coordinator.state.last_week_kpis).get(self._key)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        rec = _as_dict(self.coordinator.state.last_week_kpis)
+        return {k: rec.get(k) for k in ("period_start", "period_end", "week_kpi_days")}
 
 
 class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
