@@ -69,6 +69,10 @@
           "octopus_export_consumption_sensor": "Octopus export 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
           "tariff_rate_overrides": "Tariff comparison overrides (optional JSON; unit rates p/kWh ex-VAT, standing p/day, e.g. {\"go\": {\"cheap\": 8.5, \"standing\": 54.62}, \"vat_percent\": 0, \"agile_region\": \"C\"})",
           "data_report_target": "Daily data report notify target (optional, developer)",
+          "notify_min_level": "Send at once: reports and up / information and up / action needed only (the rest is held)",
+          "notify_quiet_start": "Quiet hours start (HH:MM, optional; only action-needed messages are sent inside them)",
+          "notify_quiet_end": "Quiet hours end (HH:MM, optional)",
+          "morning_brief_time": "Morning brief time (HH:MM, optional; one message with the plan, forecast and anything held)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
         }
       }
@@ -152,6 +156,10 @@
           "octopus_export_consumption_sensor": "Octopus export 'previous accumulative consumption' sensor (optional; enables the monthly tariff comparison)",
           "tariff_rate_overrides": "Tariff comparison overrides (optional JSON; unit rates p/kWh ex-VAT, standing p/day, e.g. {\"go\": {\"cheap\": 8.5, \"standing\": 54.62}, \"vat_percent\": 0, \"agile_region\": \"C\"})",
           "data_report_target": "Daily data report notify target (optional, developer)",
+          "notify_min_level": "Send at once: reports and up / information and up / action needed only (the rest is held)",
+          "notify_quiet_start": "Quiet hours start (HH:MM, optional; only action-needed messages are sent inside them)",
+          "notify_quiet_end": "Quiet hours end (HH:MM, optional)",
+          "morning_brief_time": "Morning brief time (HH:MM, optional; one message with the plan, forecast and anything held)",
           "enable_ai_weekly_insight": "Enable AI Task weekly insight (optional, off by default)"
         }
       },
@@ -175,6 +183,7 @@
       "entity_not_found": "Entity was not found.",
       "invalid_service": "Service must be in domain.service format.",
       "service_not_found": "Service was not found.",
+      "quiet_pair": "Set both the quiet hours start and end, or neither.",
       "invalid_time": "Enter a 24-hour time as HH:MM, for example 16:00.",
       "same_time": "Start and end cannot be the same time."
     }

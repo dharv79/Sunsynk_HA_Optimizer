@@ -52,6 +52,7 @@ DAY_KPI_FIELDS
 DEFAULT_AUTO_AWAY_MIN_HOURS
 DEFAULT_BATTERY_VOLTAGE
 DEFAULT_FLUX2_SLOT
+DEFAULT_NOTIFY_MIN_LEVEL
 DEFAULT_TRIM_TARGET_SOC
 DERATE_PV_MIN_W
 DERATE_USED_FRACTION
@@ -111,6 +112,8 @@ HEAT_PUMP_COP_AT_0C
 HEAT_PUMP_COP_DEFAULT
 HEAT_PUMP_COP_PER_C
 HEAT_PUMP_COP_RANGE
+HELD_LIMIT
+HELD_TEXT_CHARS
 IMPORT_CAUSES
 IMPORT_CAUSE_CHARGE_WINDOW
 IMPORT_FEEDBACK_MIN_DAYS
@@ -164,6 +167,7 @@ NEWSVENDOR_MIN_OVERBUY_P
 NIGHTLY_PLAN_MINUTES
 NOMINAL_PACK_VOLTAGE
 NOTIFICATION_KEEP_CHARS
+NOTIFY_LEVELS
 OUTAGE_MIN_LOAD_KW
 OUTCOME_ALERT_PCT
 OUTCOME_COLD_C
@@ -371,6 +375,7 @@ days_in_period
 days_since_full
 daytime_import_anomaly
 daytime_load_kw
+delivery
 deploy_changes
 digest_text
 divergence_streak
@@ -421,9 +426,11 @@ heat_pump_cop
 heat_pump_scenario
 heating_scale
 hhmm_to_minutes
+hold_item
 hourly_profile
 import_cause_step
 import_feedback_adjustment
+in_quiet_hours
 intraday_forecast_scale
 inverter_fault_flag
 is_clipping
@@ -453,6 +460,7 @@ minutes_to_hhmm
 month_vs_fit
 monthly_load_report
 monthly_report_due
+morning_brief
 mpc_backtest_day
 mpc_load_kw
 mpc_slots
@@ -472,6 +480,7 @@ no_battery_baseline
 normalise_grid_notices
 normalise_inverter_counts
 normalise_inverter_events
+notification_level
 octopus_region
 outage_record
 outage_runtime_hours
@@ -505,6 +514,7 @@ records_today
 redact_config
 redact_diagnostics
 redact_values
+release_time
 remap_entity_ids
 reserve_hold_cost
 resolve_load_kw

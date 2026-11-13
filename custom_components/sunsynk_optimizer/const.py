@@ -91,6 +91,12 @@ OPERATION_MODE_OPTIONS = ["auto", "monitor"]
 
 CONF_DATA_REPORT_TARGET = "data_report_target"
 
+# Notification priorities (phase 108). Defaults send everything at once: no change until set.
+CONF_NOTIFY_MIN_LEVEL = "notify_min_level"
+CONF_QUIET_START = "notify_quiet_start"
+CONF_QUIET_END = "notify_quiet_end"
+CONF_MORNING_BRIEF_TIME = "morning_brief_time"
+
 # Optional link to the separately-installed Home Assistant Octopus Energy
 # integration. Free text (not EntitySelector) because Octopus entity IDs carry
 # an unpredictable MPAN/MPRN/serial suffix the user must copy from their own
