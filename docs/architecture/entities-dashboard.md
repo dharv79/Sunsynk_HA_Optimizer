@@ -183,3 +183,7 @@ All six views then rendered with no error cards, no console errors and no horizo
 ## Load vs expected sensor (13/11/2026, phase 105)
 
 `sensor.load_vs_expected` (state: % difference between the day's load and the load/temperature fit of the other home days; attributes: `expected_kwh`, `load_kwh`, `diff_kwh`, `temp_c`, `base_kwh`, `slope_kwh_per_c`, `days`, `date`). Set at 22:00, unchanged on away days. Monthly report: see `docs/plans/phases/105-weather-normalised-load.md`.
+
+## Heat map card (13/11/2026, phase 106)
+
+Generated dashboard view "Heat map" (`heat-map`, panel) with `custom:sunsynk-optimizer-heatmap`: days down, 48 half-hours across, import / export / load. Data comes from the websocket command `sunsynk_optimizer/heatmap` (not entity attributes; 28 x 48 values exceed HA's attribute limit). Tapping a cell opens that day in the day chart through `?date=`. Design and verification: `docs/plans/phases/106-*.md`.

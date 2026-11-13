@@ -273,6 +273,12 @@ def _power_flow_card(s, forecast_sensor: str) -> dict[str, Any]:
     }
 
 
+def _heatmap() -> dict[str, Any]:
+    """Heat map tab (phase 106): the bundled www/sunsynk-optimizer-heatmap.js, fed by a websocket command (no entities)."""
+    card = {"type": "custom:sunsynk-optimizer-heatmap", "title": "Import by half-hour", "days": 28}
+    return {"title": "Heat map", "path": "heat-map", "icon": "mdi:grid", "type": "panel", "cards": [card]}
+
+
 def _day_chart(s) -> dict[str, Any]:
     """Day chart tab: the bundled www/sunsynk-optimizer-day-chart.js, one day at a time with ◀ / ▶."""
     card = {
@@ -872,6 +878,7 @@ def _build_dashboard(config: dict) -> dict:
         "views": [
             _overview(s, forecast_sensor),
             _day_chart(s),
+            _heatmap(),
             _plan(s, forecast_sensor, avg_consumption_kw),
             _energy(s),
             _system(s),

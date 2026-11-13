@@ -103,6 +103,7 @@
       this.attachShadow({ mode: "open" });
       this._day = startOfDay(new Date());
       this._following = true; // showing today: move on when the date rolls
+      this._applyDateParam(); // ?date=YYYY-MM-DD, set by a tap on the heat map card
       this._data = null;
       this._hidden = new Set();
       this._cursor = null;
@@ -133,6 +134,8 @@
     }
 
     connectedCallback() {
+      // Arriving from the heat map by SPA navigation reuses this element: pick up the new date.
+      if (this._built && this._applyDateParam()) { this._syncNav(); this._load(); }
       this._timer = setInterval(() => this._tick(), REFRESH_MS);
     }
 
@@ -145,6 +148,19 @@
       // Past midnight: a card left on "today" moves to the new day; otherwise re-enable Next and Today.
       if (this._following) return this._go(startOfDay(new Date()));
       if (this._built) this._syncNav();
+    }
+
+    /** Open on the day named by ?date= in the page URL (the heat map card links here); false when absent. */
+    _applyDateParam() {
+      const q = new URLSearchParams((window.location && window.location.search) || "").get("date");
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(q || "");
+      if (!m) return false;
+      const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      if (isNaN(day.getTime()) || isoDay(day) !== q) return false;
+      const today = startOfDay(new Date());
+      this._day = day > today ? today : day;
+      this._following = this._day >= today;
+      return true;
     }
 
     _isToday() {

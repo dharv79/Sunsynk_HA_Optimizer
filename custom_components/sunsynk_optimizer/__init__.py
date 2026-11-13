@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import voluptuous as vol
 
+from homeassistant.components import websocket_api
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
@@ -31,8 +33,25 @@ def _optimizer(hass: HomeAssistant):
     return coordinators[0].optimizer
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): "sunsynk_optimizer/heatmap",
+    vol.Optional("kind", default="import"): vol.In(("import", "export", "load")),
+    vol.Optional("days", default=28): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
+})
+@websocket_api.async_response
+async def _ws_heatmap(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Half-hourly import / export / load for the heat-map card (phase 106); read-only."""
+    try:
+        data = await _optimizer(hass).async_heatmap_data(msg["kind"], msg["days"])
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], "not_ready", str(err))
+        return
+    connection.send_result(msg["id"], data)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
+    websocket_api.async_register_command(hass, _ws_heatmap)
     await async_register_card(hass)
 
     async def _set_target(call: ServiceCall) -> None:

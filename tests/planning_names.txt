@@ -108,6 +108,10 @@ HEALTH_TREND_MIN_DAYS
 HEATING_BASE_C
 HEATING_MIN_DAYS
 HEATING_SCALE_BOUNDS
+HEATMAP_DEFAULT_DAYS
+HEATMAP_KINDS
+HEATMAP_MAX_DAYS
+HEATMAP_SCALE_QUANTILE
 HEAT_PUMP_COP_AT_0C
 HEAT_PUMP_COP_DEFAULT
 HEAT_PUMP_COP_PER_C
@@ -425,6 +429,7 @@ health_fault_flag
 heat_pump_cop
 heat_pump_scenario
 heating_scale
+heatmap_data
 hhmm_to_minutes
 hold_item
 hourly_profile

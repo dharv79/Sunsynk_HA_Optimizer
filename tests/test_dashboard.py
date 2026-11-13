@@ -38,7 +38,7 @@ def test_dashboard_has_expected_top_level_shape(dashboard):
     assert dashboard["title"]
     views = dashboard["views"]
     assert len(views) >= 6
-    assert all(v["type"] == "sections" and v["sections"] for v in views if v["path"] != "day-chart")
+    assert all(v["type"] == "sections" and v["sections"] for v in views if v["path"] not in ("day-chart", "heat-map"))
     assert next(v for v in views if v["path"] == "day-chart")["type"] == "panel"
     paths = [v["path"] for v in views]
     assert len(paths) == len(set(paths))
@@ -165,7 +165,10 @@ def test_dashboard_surfaces_optimizer_entities(dashboard):
 
 def test_only_documented_custom_cards(dashboard):
     custom = {c["type"] for c in _cards(dashboard) if str(c["type"]).startswith("custom:")}
-    assert custom == {"custom:sunsynk-optimizer-flow-card", "custom:sunsynk-optimizer-day-chart", "custom:apexcharts-card"}
+    assert custom == {
+        "custom:sunsynk-optimizer-flow-card", "custom:sunsynk-optimizer-day-chart",
+        "custom:sunsynk-optimizer-heatmap", "custom:apexcharts-card",
+    }
 
 
 def test_actions_use_perform_action_and_confirm_writes(dashboard):
