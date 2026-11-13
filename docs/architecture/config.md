@@ -72,3 +72,7 @@ Optional: `auto_away_persons` (comma-separated `person.*`), `auto_away_calendar`
 - `planning.redact_diagnostics` masks by key as before, then replaces every sensitive value (`planning.sensitive_values`: values under masked keys, the MPAN and meter-serial parts of Octopus entity IDs, person and calendar entities) in every string of config, state and `paired_days`. Values under 4 characters are not masked by value.
 
 **Verification.** `tests/test_security.py`: `test_time_fields_must_be_hhmm`, `test_config_time_problems_lists_bad_saved_times`, `test_diagnostics_redacts_identifiers_by_value`. The form steps themselves need HA.
+
+## Notification priorities (13/11/2026, phase 108)
+
+Options `notify_min_level` (default report = send everything), `notify_quiet_start`/`notify_quiet_end` and `morning_brief_time` (blank = off). Levels are derived from the notification title in `planning.notification_level`; action-needed messages always send; held messages go out in one morning brief. The debug stream and any explicit-target send are never held. See `docs/plans/phases/108-*.md`.

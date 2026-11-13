@@ -34,6 +34,10 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
+    CONF_MORNING_BRIEF_TIME,
+    CONF_NOTIFY_MIN_LEVEL,
+    CONF_QUIET_END,
+    CONF_QUIET_START,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGES,
     CONF_DEFAULT_FULL_CHARGE_DAY,
@@ -55,6 +59,12 @@ from .flux_helpers import (
     merge_entry_data,
 )
 from .planning import (
+    delivery,
+    hhmm_to_minutes,
+    hold_item,
+    morning_brief,
+    notification_level,
+    release_time,
     pack_lines,
     DYNAMIC_SHADOW_MINUTE,
     capacity_estimate_pending,
@@ -254,6 +264,15 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
             self.unsubs.append(
                 async_track_time_change(self.hass, callback, hour=hour, minute=minute, second=0)
             )
+        # Phase 108: held notifications go out in one message at the brief time (else when quiet hours end).
+        release = release_time(self.cfg.get(CONF_MORNING_BRIEF_TIME), self.cfg.get(CONF_QUIET_END))
+        if release is not None:
+            minutes = hhmm_to_minutes(release)
+            self.unsubs.append(
+                async_track_time_change(
+                    self.hass, self._async_release_held, hour=minutes // 60, minute=minutes % 60, second=0
+                )
+            )
         self.unsubs.append(
             async_track_time_interval(self.hass, self._async_periodic_flux2_check, timedelta(minutes=30))
         )
@@ -379,10 +398,51 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         packs = pack_lines(message.split("\n"))
         for i, pack in enumerate(packs, 1):
             suffix = f" ({i}/{len(packs)})" if len(packs) > 1 else ""
-            await self.async_notify(title + suffix, "\n".join(pack), target=target)
+            await self._async_deliver(title + suffix, "\n".join(pack), target=target)
 
     async def async_notify(self, title: str, message: str, target: str | None = None) -> None:
-        """Send a notification via the configured HA notify service."""
+        """Send a human notification, or hold it per the priority options (phase 108).
+
+        Action-needed messages always send. Anything below the configured minimum level, or any
+        non-action message inside quiet hours, is held for the morning brief when a release time
+        is set, else dropped. An explicit ``target`` (the debug stream) is never held.
+        """
+        if target is None:
+            cfg = self.cfg
+            now = dt_util.now()
+            level = notification_level(title)
+            if delivery(
+                level, cfg.get(CONF_NOTIFY_MIN_LEVEL), now.hour * 60 + now.minute,
+                cfg.get(CONF_QUIET_START), cfg.get(CONF_QUIET_END),
+            ) == "hold":
+                if release_time(cfg.get(CONF_MORNING_BRIEF_TIME), cfg.get(CONF_QUIET_END)) is not None:
+                    self.coordinator.update_state(
+                        touch=False,
+                        held_notifications=hold_item(
+                            self.coordinator.state.held_notifications, title, message, now.strftime("%H:%M")
+                        ),
+                    )
+                return
+        await self._async_deliver(title, message, target=target)
+
+    async def _async_release_held(self, _now) -> None:
+        """Time-change callback at the brief time: one message with the plan, forecast and what was held."""
+        await self._guarded(self._async_do_release_held, "Morning brief")
+
+    async def _async_do_release_held(self) -> None:
+        held = list(self.coordinator.state.held_notifications or [])
+        if not held and hhmm_to_minutes(self.cfg.get(CONF_MORNING_BRIEF_TIME)) is None:
+            return  # quiet-hours release with nothing held: stay silent
+        state = self.coordinator.state
+        title, message = morning_brief(
+            held, state.nightly_import_plan, state.last_morning_state, state.spare_solar,
+            dt_util.now().date().isoformat(),
+        )
+        if await self._async_deliver(title, message):
+            self.coordinator.update_state(touch=False, held_notifications=[])
+
+    async def _async_deliver(self, title: str, message: str, target: str | None = None) -> bool:
+        """Send via the configured HA notify service; True when it went out."""
         cfg = self.cfg
         service_string = self._cfg_str(CONF_NOTIFY_SERVICE, cfg)
         # Stored state keeps only the start of the text: a debug bundle is several kB (phase 92).
@@ -395,7 +455,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
                 last_error=f"Invalid notify service: {service_string}",
                 last_notification=record,
             )
-            return
+            return False
 
         domain, service = service_string.split(".", 1)
         data: dict[str, Any] = {"title": title, "message": message}
@@ -412,8 +472,9 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
                 last_error=f"Notification failed: {exc}",
                 last_notification={**record, "error": str(exc)},
             )
-            return
+            return False
         self.coordinator.update_state(last_notification={**record, "ok": True})
+        return True
 
     async def _async_post_with_status(self, payload: dict[str, Any]) -> bool:
         """POST to the API and surface success/failure via coordinator state.

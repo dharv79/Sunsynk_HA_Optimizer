@@ -34,6 +34,10 @@ from .const import (
     CONF_CHARGE_RATE,
     CONF_CURRENCY,
     CONF_DATA_REPORT_TARGET,
+    CONF_MORNING_BRIEF_TIME,
+    CONF_NOTIFY_MIN_LEVEL,
+    CONF_QUIET_END,
+    CONF_QUIET_START,
     CONF_DEFAULT_FULL_CHARGE_DAY,
     CONF_ENABLE_AI_WEEKLY_INSIGHT,
     CONF_EXPORT_DISABLE_THRESHOLD,
@@ -128,7 +132,7 @@ from .const import (
     OPERATION_MODE_OPTIONS,
 )
 from .flux_helpers import default_charges, default_flux_products, merge_entry_data
-from .planning import DEFAULT_BATTERY_VOLTAGE, time_field_errors
+from .planning import DEFAULT_BATTERY_VOLTAGE, DEFAULT_NOTIFY_MIN_LEVEL, time_field_errors, valid_hhmm
 
 _LOGGER = logging.getLogger(__name__)
 STATUS_OPTIONS = ["import", "export"]
@@ -369,6 +373,21 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 default=values.get(CONF_DATA_REPORT_TARGET, ""),
             ): selector.TextSelector(),
             vol.Required(
+                CONF_NOTIFY_MIN_LEVEL, default=values.get(CONF_NOTIFY_MIN_LEVEL, DEFAULT_NOTIFY_MIN_LEVEL)
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(value="report", label="Everything, reports included"),
+                        selector.SelectOptionDict(value="info", label="Plans and alerts (hold weekly and monthly reports)"),
+                        selector.SelectOptionDict(value="action", label="Action needed only (hold the rest)"),
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(CONF_QUIET_START, default=values.get(CONF_QUIET_START, "")): selector.TextSelector(),
+            vol.Optional(CONF_QUIET_END, default=values.get(CONF_QUIET_END, "")): selector.TextSelector(),
+            vol.Optional(CONF_MORNING_BRIEF_TIME, default=values.get(CONF_MORNING_BRIEF_TIME, "")): selector.TextSelector(),
+            vol.Required(
                 CONF_ENABLE_AI_WEEKLY_INSIGHT,
                 default=values.get(CONF_ENABLE_AI_WEEKLY_INSIGHT, DEFAULT_ENABLE_AI_WEEKLY_INSIGHT),
             ): selector.BooleanSelector(),
@@ -447,6 +466,13 @@ async def _validate_input(hass: HomeAssistant, user_input: dict[str, Any], valid
         domain, service = notify_service.split(".", 1)
         if not hass.services.has_service(domain, service):
             errors[CONF_NOTIFY_SERVICE] = "service_not_found"
+
+    for name in (CONF_QUIET_START, CONF_QUIET_END, CONF_MORNING_BRIEF_TIME):
+        value = str(user_input.get(name) or "").strip()
+        if value and not valid_hhmm(value):
+            errors[name] = "invalid_time"
+    if bool(str(user_input.get(CONF_QUIET_START) or "").strip()) != bool(str(user_input.get(CONF_QUIET_END) or "").strip()):
+        errors.setdefault(CONF_QUIET_END if not str(user_input.get(CONF_QUIET_END) or "").strip() else CONF_QUIET_START, "quiet_pair")
 
     if validate_login:
         try:

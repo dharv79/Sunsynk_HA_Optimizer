@@ -115,8 +115,8 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 105. Weather-normalised load report | Done, merged (e82c016, PR #214) | S-M, ~30-50k |
 | 106. Import heat-map card (hour by day) | Planned, not built | M, ~45-70k |
 | 107. Inverter settings snapshot and change audit | Done, merged (658de82, PR #215) | S, ~25-40k |
-| 108. Notification priorities, quiet hours and a morning brief | Planned, not built | M, ~40-60k |
-| 109. Data export service (CSV) | Built (PR pending) | S, ~20-35k |
+| 108. Notification priorities, quiet hours and a morning brief | Built (PR pending) | M, ~40-60k |
+| 109. Data export service (CSV) | Done, merged (9321907, PR #216) | S, ~20-35k |
 | 110. Marginal-forecast target blend and bridge margin | Done, merged (29e8028, PR #188) | XS, ~35k actual |
 | 111. Recent-nights floor on the learned overnight load | Done, merged (9ba6bb8, PR #192) | XS, ~30k actual |
 
