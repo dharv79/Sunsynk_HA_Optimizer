@@ -51,10 +51,14 @@ from .planning import (
     round_trip_intervals,
     round_trip_measured,
     digest_text,
+    LOAD_REPORT_HISTORY_DAYS,
     SHIFT_WINDOW_DAYS,
     scorecard_verdicts,
     shiftable_loads,
     shiftable_text,
+    load_report_text,
+    monthly_load_report,
+    weather_load_rows,
     verdict_changes,
     weekly_charge_shortfalls,
     weekly_forecast_error,
@@ -109,6 +113,7 @@ class ReportsMixin:
         await self._guarded(lambda: self._async_send_monthly_tariff_comparison(force=True), "Monthly tariff comparison")
         await self._guarded(lambda: self._async_send_monthly_battery_value(force=True), "Monthly battery value")
         await self._guarded(self._async_send_shiftable_report, "Shiftable-load report")
+        await self._guarded(self._async_send_load_report, "Weather-normalised load report")
         await self._guarded(self._async_send_upgrade_advisor, "Upgrade advisor")
         await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
         report_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
@@ -133,6 +138,27 @@ class ReportsMixin:
                 "Sunsynk Shiftable Loads", json.dumps({"type": "shiftable_loads", **result}), target=target
             )
         await self.async_notify("🔋 Sunsynk: loads you could move", text)
+
+    async def _async_send_load_report(self) -> None:
+        """Monthly (phase 105): last month's daily load against what its temperatures predict. Report only.
+
+        Debug JSON line always when a report exists; a human notification only when the month or the
+        base load is unusual (a quiet month says nothing).
+        """
+        today = dt_util.now().date()
+        month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        rows = weather_load_rows(await self.data_logger.async_load_records(LOAD_REPORT_HISTORY_DAYS))
+        report = monthly_load_report(rows, month)
+        if report is None:
+            return
+        target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if target:
+            await self.async_notify_debug(
+                "Sunsynk Weather-normalised Load", json.dumps({"type": "load_report", **report}), target=target
+            )
+        text = load_report_text(report)
+        if text:
+            await self.async_notify("🔋 Sunsynk: load vs the weather", text)
 
     async def _async_weekly_digest(self) -> None:
         """Sunday 18:00: why the week cost what it did (phase 104). Read-only; stored for the summary, AI prompt and sensors.

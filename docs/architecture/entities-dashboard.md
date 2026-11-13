@@ -179,3 +179,7 @@ All six views then rendered with no error cards, no console errors and no horizo
 - **Reporting.** 22:00 `_async_capture_api_health` puts an `api_health` line second in the bundle, keeps a 14-day history in state (`api_health_days`), feeds `sensor.api_success_rate` (diagnostic, %, attributes = the day's counters) and the weekly summary's `api_health_week` totals.
 - **Alert.** One Repairs issue `api_unreliable` when the failure rate exceeds 10% (at least 5 calls) on 3 consecutive days; deleted when the streak breaks.
 - **Phase 74 evidence.** Read the weekly `api_health_week` and the `api_health` lines over a few weeks before deciding on local Modbus.
+
+## Load vs expected sensor (13/11/2026, phase 105)
+
+`sensor.load_vs_expected` (state: % difference between the day's load and the load/temperature fit of the other home days; attributes: `expected_kwh`, `load_kwh`, `diff_kwh`, `temp_c`, `base_kwh`, `slope_kwh_per_c`, `days`, `date`). Set at 22:00, unchanged on away days. Monthly report: see `docs/plans/phases/105-weather-normalised-load.md`.

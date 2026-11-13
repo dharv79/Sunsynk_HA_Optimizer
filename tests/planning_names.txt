@@ -127,9 +127,17 @@ LEARNED_LOAD_MIN_DAYS
 LEARNED_LOAD_RECENT_DAYS
 LEARNED_LOAD_RECENT_MIN
 LEARNED_LOAD_WINDOW_DAYS
+LOAD_BASE_SHIFT_PCT
+LOAD_FIT_HISTORY_DAYS
+LOAD_FIT_MIN_DAYS
+LOAD_FLAG_PCT
+LOAD_FLAG_SIGMA
+LOAD_MONTH_FIT_MIN_DAYS
+LOAD_MONTH_MIN_DAYS
 LOAD_PROFILE_IMPORT_SHARE
 LOAD_PROFILE_MIN_DAYS
 LOAD_PROFILE_WINDOW_DAYS
+LOAD_REPORT_HISTORY_DAYS
 LOW_SOLAR_BLEND_END_KWH
 LOW_SOLAR_THRESHOLD_KWH
 MARGINAL_SOLAR_MIN_EXPORT_W
@@ -370,9 +378,11 @@ evening_reserve_soc
 event_probe_paths
 event_report
 expected_grid_current_a
+expected_load
 expected_spare_solar
 explain_plan
 export_limit_scenario
+fit_load_temp
 flex_event_offer
 flex_event_window
 floor_saving_gbp
@@ -418,6 +428,8 @@ learned_measured_rate
 ledger_point
 load_profile
 load_profile_backtest
+load_report_text
+load_vs_expected
 logged_day_cost_gbp
 low_solar_run
 manual_free_event_error
@@ -430,6 +442,8 @@ merge_tariff_rates
 meter_delta
 meter_reconciliation
 minutes_to_hhmm
+month_vs_fit
+monthly_load_report
 monthly_report_due
 mpc_backtest_day
 mpc_load_kw
@@ -472,6 +486,7 @@ percentile
 plan_free_event
 plan_retry_due
 price_at
+prior_month
 pv_string_attributes
 quantile_correction
 recent_soc
@@ -537,6 +552,7 @@ verdict_changes
 voltage_derate_suspect
 walk_bridge_gap
 wear_cost_pence_per_kwh
+weather_load_rows
 week_kpis
 weekly_charge_shortfalls
 weekly_forecast_error
