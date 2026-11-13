@@ -57,6 +57,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_trim_defer.py` | Phase 65 trim overflow/defer split, no-forecast and clipped fallbacks |
 | `tests/test_full_charge_skip.py` | Phase 68 days since last 99% SOC, due/skip, 14-day cap |
 | `tests/test_import_causes.py` | Phase 42 import cause ordering, gaps, resets |
+| `tests/test_daily_health.py` | Phase 100 health verdict, records-today count, deploy changes, record-type registry |
 | `tests/test_data_audit.py` | Phase 45 audit rules, summary, config redaction |
 | `tests/test_kpi_sensors.py` | Phase 47 KPI sensor values (None, never 0) |
 | `tests/test_grid_outage.py` | Phase 48 grid voltage parser, runtime, outage record |

@@ -93,7 +93,7 @@ The dashboard's "Bill check and battery health" card (Consumption column, after 
 
 - **Device (47).** `entity.optimizer_device_info` (identifiers = inverter serial, rule 2) is set on every platform's entities. New entities set an explicit `entity_id`; existing ones keep their registry ids.
 - **KPI sensors (47).** `sensor.kpi_*` from the latest `day_kpis` (`last_day_kpis`): daily £ are MONETARY/TOTAL with `last_reset`, the rest MEASUREMENT. Unknown, never 0.
-- **Others.** `sensor.data_health` (45), `binary_sensor.grid_outage` and `sensor.battery_runtime` (48), `sensor.pv_string_share` (49).
+- **Others.** `sensor.health` (100), `sensor.data_health` (45), `binary_sensor.grid_outage` and `sensor.battery_runtime` (48), `sensor.pv_string_share` (49).
 - **Battery SOH (75).** `sensor.battery_soh` (%, diagnostic) is the BMS state of health from the cloud register snapshot; attributes carry packs, cycles, capacity, cell spread/temperature, BMS limits, fault words and the SOH trend.
 - **MPC plan (69).** `sensor.mpc_plan` (diagnostic): state is the shadow MPC's next half-hour action (`grid_charge`, `solar_charge`, `discharge`, `export`, `hold`); attributes carry the summary, the rule plan's target and the 24 h per-slot SOC path.
 - **TOU check (73), flex offer (77), upgrade advisor (50/78).** `sensor.tou_shadow`, `sensor.flex_event_offer`, `sensor.upgrade_advisor` (diagnostic); see the dashboard revamp section.
@@ -165,3 +165,10 @@ All six views then rendered with no error cards, no console errors and no horizo
 - No version constant to bump: the cards are served with `?v=<manifest version>`, so browsers reload them on the next release.
 
 **Verification.** `tests/test_cards.py` runs both cards in Node. Checked once in Chromium: three pointer moves in one bin gave one cursor update and no full redraw.
+
+## Daily health line and deploy notice (13/11/2026, phase 100)
+
+- **Health.** At 22:00 `opt_monitor._async_capture_daily_health` builds a `daily_health` record (pure `planning.daily_health`) and puts it first in the debug bundle. It also feeds `sensor.health` (OK / Check / Problem; unknown when a core input is missing, never OK). Problem: last push failed, or no SOC update for 6 h. Check: any `_guarded` error, API failure, charge more than 5 points short, fewer than the 4 daily records, or SOC older than 2 h. Attributes carry version, reasons, records written/expected, errors by label, API failures, SOC age and active shadow features. Not written to the JSONL log (never read back).
+- **Counters.** `_guarded_errors` (by label) and `_api_failures` (push and settings-write failures) are unpersisted and reset each 22:00; a restart only thins the day's count. Phase 101 replaces `_api_failures` with the real per-call counter.
+- **Deploy notice.** 45 s after startup `async_run_deploy_check` compares `deployed_version` with the manifest. On a change it sends a `deployed` record to the debug target and, if a previous version was known, a notification listing the record types new since the last deploy (`data_logger.RECORD_TYPES` against the stored `known_record_types`). Fields within a type are not tracked. The first run after this phase has no stored list, so `new_record_types` is null.
+- **Registry.** `RECORD_TYPES` is kept by hand; `tests/test_daily_health.py` fails if a type the logger writes is missing from it.

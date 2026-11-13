@@ -1,6 +1,6 @@
 # Phase 99 — Refactor 3: split optimizer.py
 
-**Status:** Built (PR pending merge). **Size:** L, ~120-175k est. **Origin:** code review 11/11/2026 (refactor). After phases 88, 90, 91 and 98 (so the fixes are not redone in two layouts).
+**Status:** Built, merged (feb06b3, PR #208). **Size:** L, ~120-175k est. **Origin:** code review 11/11/2026 (refactor). After phases 88, 90, 91 and 98 (so the fixes are not redone in two layouts).
 
 ## Goal
 

@@ -132,6 +132,7 @@ async def async_setup_entry(
             SunsynkOptimizerSensor(
                 coordinator, entry, "import_causes", "Import causes today", entity_id="sensor.import_causes_today"
             ),
+            SunsynkOptimizerSensor(coordinator, entry, "health", "Health", entity_id="sensor.health"),
             SunsynkOptimizerSensor(
                 coordinator, entry, "data_health", "Data health gaps",
                 entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.data_health",
@@ -257,6 +258,9 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
 
         if self._sensor_key == "import_causes":
             return _as_dict(state.import_causes).get("total_kwh")
+
+        if self._sensor_key == "health":
+            return _as_dict(state.daily_health).get("status")
 
         if self._sensor_key == "data_health":
             return _as_dict(state.data_health).get("count")
@@ -406,6 +410,8 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
             return pv_string_attributes(state.pv_strings)
         if self._sensor_key == "battery_runtime":
             return {k: v for k, v in _as_dict(state.battery_runtime).items() if k != "hours"}
+        if self._sensor_key == "health":
+            return {k: v for k, v in _as_dict(state.daily_health).items() if k not in ("type", "status")}
         if self._sensor_key == "data_health":
             return _as_dict(_as_dict(state.data_health).get("classes"))
         if self._sensor_key == "import_causes":
