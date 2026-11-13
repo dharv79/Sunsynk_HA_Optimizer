@@ -1,6 +1,6 @@
 # Phase 102 — Shiftable-load report
 
-**Status:** Planned, not built. **Size:** M, ~40-60k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
+**Status:** Built (PR pending merge). **Size:** M, ~40-60k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
 
 ## Goal
 
@@ -16,3 +16,15 @@ Show which regular daytime loads could move to the cheap overnight window or to 
 ## Saving (rough, unproven)
 
 Depends on the user moving the load. 2 kWh a day moved from day rate to off-peak is about 20p a day, roughly £35 over a winter.
+
+## Built (13/11/2026)
+
+`planning/shiftable.py` (`shiftable_loads`, `shiftable_text`), called from `_async_send_shiftable_report` in `opt_reports.py` in the monthly reports. Report only: a debug `shiftable_loads` JSON line and a human notification; no state, no JSONL record.
+
+- Blocks are runs of 1-6 half-hours at least 0.3 kWh above that slot's lower-quartile import over 28 days, in slots priced above the cheapest Flux import band and outside 02:00-05:00. Blocks merge across days when starts are within two half-hours and are listed when they recur on 4+ days; the saving is the excess kWh at slot price minus cheap price, scaled to 30 days. At least 7 usable days are needed.
+- The baseline is the lower quartile, not the median: a load recurring on half the days lifted its own median baseline and vanished (found by the test).
+
+Deviations from the design:
+- Moves to the cheap window only; the summer spare-solar destination is not modelled.
+- The supply-limit fit check is implemented (`headroom_kw`) but the caller passes none: no grid import limit is configured (`export_limit_w` is the export limit), so `fits` is reported as unchecked.
+- Import-based: battery-covered loads do not show, so it finds loads that actually cost day-rate import.

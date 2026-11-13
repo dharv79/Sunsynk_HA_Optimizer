@@ -145,3 +145,7 @@ Both scenarios go into the report as `heat_pump` / `export_limit` (None when the
 - **Shadow verdicts.** The scorecard is recomputed weekly (30-day window) and diffed against `shadow_verdicts` kept in state; the first run only sets the baseline. The monthly scorecard notification is unchanged.
 - **Weekly KPI sensors.** `sensor.kpi_week_*` (avoidable import, peak export income, self-sufficiency, unused charge, over-limit import) read `last_week_kpis`, the same `week_kpis` roll-up as the summary, updated each Sunday. Plain measurements with the period as attributes.
 - **Not built.** Per-feature £ of verdict changes (the scorecard's own `delta_gbp` already holds it) and a human-readable digest message (the digest goes to the debug stream and the AI insight).
+
+## Shiftable-load report (13/11/2026, phase 102)
+
+Monthly (first-Sunday catch-up in `_async_monthly_reports`). `planning.shiftable_loads` finds recurring day-rate import blocks in the logged half-hourly import and prices moving them to the cheap window; `_async_send_shiftable_report` sends the debug JSON line and a notification. Report only. See `docs/plans/phases/102-shiftable-load-report.md` for the baseline choice and deviations.

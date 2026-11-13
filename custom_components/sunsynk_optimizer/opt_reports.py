@@ -51,7 +51,10 @@ from .planning import (
     round_trip_intervals,
     round_trip_measured,
     digest_text,
+    SHIFT_WINDOW_DAYS,
     scorecard_verdicts,
+    shiftable_loads,
+    shiftable_text,
     verdict_changes,
     weekly_charge_shortfalls,
     weekly_forecast_error,
@@ -105,10 +108,31 @@ class ReportsMixin:
             return
         await self._guarded(lambda: self._async_send_monthly_tariff_comparison(force=True), "Monthly tariff comparison")
         await self._guarded(lambda: self._async_send_monthly_battery_value(force=True), "Monthly battery value")
+        await self._guarded(self._async_send_shiftable_report, "Shiftable-load report")
         await self._guarded(self._async_send_upgrade_advisor, "Upgrade advisor")
         await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
         report_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         self.coordinator.update_state(last_monthly_report_month=report_month)
+
+    async def _async_send_shiftable_report(self) -> None:
+        """Monthly (phase 102): recurring daytime import blocks and what moving them to the cheap window is worth.
+
+        Report only: no writes, no state. Prices are the configured Flux import rows; the cheap
+        price is the lowest of them. Supply-limit fit is not checked (no import limit is configured).
+        """
+        imp, _export = await self.data_logger.async_load_half_hourly(SHIFT_WINDOW_DAYS + 2)
+        bands = flux_bands_from_charges(self.cfg.get(CONF_CHARGES), "import")
+        cheap = min((b[2] for b in bands), default=None)
+        result = shiftable_loads(imp, bands, cheap, dt_util.now().date())
+        text = shiftable_text(result)
+        if text is None:
+            return
+        target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if target:
+            await self.async_notify_debug(
+                "Sunsynk Shiftable Loads", json.dumps({"type": "shiftable_loads", **result}), target=target
+            )
+        await self.async_notify("🔋 Sunsynk: loads you could move", text)
 
     async def _async_weekly_digest(self) -> None:
         """Sunday 18:00: why the week cost what it did (phase 104). Read-only; stored for the summary, AI prompt and sensors.
