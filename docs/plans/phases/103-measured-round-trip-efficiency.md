@@ -1,6 +1,6 @@
 # Phase 103 — Measured round-trip efficiency (shadow)
 
-**Status:** Planned, not built. **Size:** S, ~30-45k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
+**Status:** Built (PR pending merge). **Size:** S, ~30-45k est. **Origin:** idea sweep 11/11/2026 (efficiency, visibility, reporting; tariff, heat pump, EV and diverter ideas excluded). Vet against the code before building.
 
 ## Goal
 
@@ -19,3 +19,7 @@ Replace the fixed `ROUND_TRIP_EFFICIENCY = 0.85` and the logged `charge_efficien
 ## Saving (rough, unproven)
 
 £0-10 a year: avoids top-ups that lose money if the measured figure is low; nothing if it is near 0.85.
+
+## Built (13/11/2026)
+
+`planning/efficiency.py`, `soc` on `battery_health` records, weekly recompute in the digest step, `round_trip_shadow` on peak export and cover records, `round_trip` scorecard feature. Detail in `docs/architecture/export-control.md`. Deviations: uses the BMS lifetime totals (the daily meters are not logged); weekly rather than monthly refresh; the measured figure is battery-terminal and the AC figure assumes the inverter legs.

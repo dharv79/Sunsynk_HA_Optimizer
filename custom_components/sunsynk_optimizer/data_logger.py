@@ -77,6 +77,7 @@ RECORD_TYPES = (
     "peak_export",
     "peak_export_recheck",
     "peak_window_usage",
+    "round_trip_measured",
     "pv_strings",
     "tou_shadow",
     "trim_shadow",
@@ -354,6 +355,10 @@ class DataLogger:
     async def async_log_battery_health(self, **fields: Any) -> None:
         """Log the daily BMS state-of-health snapshot (phase 75): one per date (deduped)."""
         await self._async_append(_record("battery_health", **fields))
+
+    async def async_log_round_trip_measured(self, **fields: Any) -> None:
+        """Log the measured battery round trip (phase 103, shadow): one per date (deduped)."""
+        await self._async_append(_record("round_trip_measured", **fields))
 
     async def async_log_meter_snapshot(self, **fields: Any) -> None:
         """Log a cumulative daily-meter snapshot (phase 14): one per date+time."""
@@ -999,7 +1004,7 @@ class DataLogger:
         "import_plan", "morning_state", "day_actuals", "peak_window_usage", "charge_watchdog", "charge_outcome",
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load", "import_causes",
         "half_hourly_import", "half_hourly_export", "capacity_estimate", "pv_strings",
-        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health", "dynamic_tariff", "tou_shadow", "flex_event", "battery_floor", "hourly_profile",
+        "meter_reconciliation_import", "meter_reconciliation_export", "battery_health", "round_trip_measured", "dynamic_tariff", "tou_shadow", "flex_event", "battery_floor", "hourly_profile",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:

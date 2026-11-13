@@ -278,3 +278,13 @@ The record (`flex_event`: date, start time, entity, hours, soc, price, house loa
 - `api.py`: `_async_relogin` takes a login lock and skips the login when another caller has already replaced the stale token.
 
 **Verification.** `tests/test_planning.py`: `test_carry_held_flux1_keeps_peak_cover_hold`, `test_trim_target_never_sells_below_a_hold`. The lock and login paths need HA and the cloud API, so they have no unit test.
+
+## Measured round-trip efficiency, shadow (13/11/2026, phase 103)
+
+- **Vetting.** `battery_etoday_charge/discharge` are only dashboard tiles (no log), so the measurement uses the BMS lifetime totals already in each `battery_health` record (`charge_total_kwh`, `discharge_total_kwh`, `cell_temp_c`). Those count energy at the battery terminals, so the measured figure excludes the inverter. The AC figure is the battery figure (capped at 1) times the assumed `CHARGE_EFFICIENCY` x `DISCHARGE_EFFICIENCY`; the inverter part is assumed, not measured.
+- **Needed one new field.** `battery_health` records now carry `soc` (the live SOC when read), because the SOC correction needs the SOC at each sample. Earlier records lack it, so the first figure appears about three weeks after install (20 kWh charged in the 30-day window).
+- **Measure.** `planning/efficiency.py`: between consecutive-day records, battery round trip = (discharged + SOC change / 100 x capacity) / charged, summed over the window (energy-weighted, not an average of daily ratios). Warm and cold groups split at 10 C cell temperature (each needs 10 kWh charged). A figure outside 0.5-1.05 is dropped as a unit or counter fault.
+- **When.** Recomputed in the Sunday digest step over the 30-day window (the plan said monthly; weekly gets a first figure sooner), kept in `state.round_trip_measured` and logged as `round_trip_measured` (one per date).
+- **Shadow line.** Every peak export and peak cover record carries `round_trip_shadow`: the gain under 0.85 against the gain under the measured AC figure, whether each is worth it, and the break-even efficiency (buy / sell price). Null until a measured figure exists. Never acted on: `ROUND_TRIP_EFFICIENCY` and `CHARGE_EFFICIENCY` still drive every decision.
+- **Scorecard.** New `round_trip` feature: days with a shadow line, days the call would flip, and the £ the measured figure would have moved.
+- **Decision to take later.** If the measured AC figure stays well above or below 0.85 over a winter, switch the constants in a separate phase.

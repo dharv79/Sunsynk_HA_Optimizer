@@ -186,6 +186,9 @@ PV_STRING_ATTRIBUTE_KEYS
 RESERVE_HOLD_MARGIN_SOC
 RESERVE_HOLD_MIN_KWH
 ROUND_TRIP_EFFICIENCY
+RT_MIN_CHARGE_KWH
+RT_MIN_GROUP_CHARGE_KWH
+RT_PLAUSIBLE
 SCORECARD_ERROR_GAIN
 SCORECARD_ERROR_LOSS
 SCORECARD_HARM_GBP
@@ -291,6 +294,7 @@ _tou_flag
 _tou_setting_keys
 _workdata_float
 _workdata_index
+ac_round_trip
 achievable_max_soc
 agile_prices_by_date
 agile_region_override
@@ -473,6 +477,10 @@ resolve_load_kw
 resolve_used_charge_rate
 restore_flux2_slot
 round_or_none
+round_trip_breakeven
+round_trip_intervals
+round_trip_measured
+round_trip_shadow
 scale_hourly
 scaled_solar_kwh
 score_full_charge_day

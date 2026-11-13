@@ -382,7 +382,7 @@ class MonitorMixin:
         )
         if new_day:
             await self.data_logger.async_log_battery_health(
-                date=today, **{k: v for k, v in health.items() if k != "fault_words"},
+                date=today, soc=self._read_soc(), **{k: v for k, v in health.items() if k != "fault_words"},
                 fault_words=health.get("fault_words") or {}, trend=trend,
             )
         return health
