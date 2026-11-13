@@ -137,3 +137,7 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 **Not built.** Passing `paired_days` down through the callbacks and memoising the peak-cover inputs: the cache makes repeat reads cheap without changing any caller.
 
 **Verification.** `tests/test_data_logger.py` (phase 91 block): index equals the per-date scan, one parse until the file changes, copies and window, dedup incl. the previous month, the `mpc_plan` file, the pruner. Synthetic 395-day log: paired read 0.32 s cold, 0.03 s warm; a 30-day read 2.5 ms warm; about 10 MB held.
+
+## CSV export service (13/11/2026, phase 109)
+
+`sunsynk_optimizer.export_data` writes the logged records as CSV (one file per record type plus a daily summary) to `<config>/sunsynk_optimizer_export/<timestamp>/`. The type list is `data_logger.RECORD_TYPES`, so a new record type must be added there (already required). See `docs/plans/phases/109-data-export-service.md`.

@@ -41,6 +41,7 @@ _SKIP_LINE_MARKERS = tuple(f'"type": "{name}"' for name in _SIDE_FILE_PREFIX)  #
 _CACHE_LOCK = threading.RLock()  # reads and writes run in executor threads
 
 DATA_DIR_NAME = "sunsynk_optimizer_data"
+EXPORT_DIR_NAME = "sunsynk_optimizer_export"  # CSV exports (phase 109), beside the data folder
 
 # Every record type the logger writes (phase 100): the deploy notice lists the ones new since the last start.
 RECORD_TYPES = (

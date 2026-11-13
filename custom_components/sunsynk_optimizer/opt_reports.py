@@ -17,6 +17,7 @@ from datetime import (
     timedelta,
 )
 from typing import Any
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
@@ -44,15 +45,21 @@ from .const import (
     DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     DEFAULT_PEAK_EXPORT_LIVE,
 )
-from .data_logger import DATA_DIR_NAME
+from .data_logger import DATA_DIR_NAME, EXPORT_DIR_NAME, RECORD_TYPES
 from .octopus_public import async_fetch_agile_rates
 from .planning import (
     api_week,
     round_trip_intervals,
     round_trip_measured,
     digest_text,
+    EXPORT_DEFAULT_DAYS,
     LOAD_REPORT_HISTORY_DAYS,
     SHIFT_WINDOW_DAYS,
+    SUMMARY_FILE,
+    daily_summary_rows,
+    export_rows,
+    sensitive_values,
+    to_csv,
     scorecard_verdicts,
     shiftable_loads,
     shiftable_text,
@@ -138,6 +145,48 @@ class ReportsMixin:
                 "Sunsynk Shiftable Loads", json.dumps({"type": "shiftable_loads", **result}), target=target
             )
         await self.async_notify("🔋 Sunsynk: loads you could move", text)
+
+    async def async_service_export_data(
+        self, start: str | None = None, end: str | None = None, types: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Service (phase 109): write the logged history as CSV files and return their paths. Read-only on the log.
+
+        One file per record type plus `daily_summary.csv` (paired day joined with that day's KPIs), in a new
+        timestamped folder under the config directory. Identifiers are masked as in the diagnostics download.
+        """
+        today = dt_util.now().date()
+        first = date_cls.fromisoformat(start) if start else today - timedelta(days=EXPORT_DEFAULT_DAYS)
+        last = date_cls.fromisoformat(end) if end else today
+        if first > last:
+            raise HomeAssistantError("The start date is after the end date")
+        unknown = [t for t in (types or []) if t not in RECORD_TYPES]
+        if unknown:
+            raise HomeAssistantError("Unknown record type: " + ", ".join(sorted(unknown)))
+        days = (today - first).days + 2
+        records = await self.data_logger.async_load_records(days)
+        paired = await self.data_logger.async_load_paired_days(days=days)
+        sensitive = sensitive_values(self.cfg)
+        tables = export_rows(records, RECORD_TYPES, first.isoformat(), last.isoformat(), types)
+        summary = daily_summary_rows(paired, tables.get("day_kpis") or [], first.isoformat(), last.isoformat())
+        folder = os.path.join(
+            self.hass.config.path(EXPORT_DIR_NAME), dt_util.now().strftime("%Y%m%d-%H%M%S")
+        )
+        files = {name: to_csv(rows, sensitive) for name, rows in tables.items()}
+        if summary and not types:
+            files[SUMMARY_FILE] = to_csv(summary, sensitive)
+
+        def _write() -> list[str]:
+            os.makedirs(folder, exist_ok=True)
+            paths = []
+            for name in sorted(files):
+                path = os.path.join(folder, f"{name}.csv")
+                with open(path, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(files[name])
+                paths.append(path)
+            return paths
+
+        paths = await self.hass.async_add_executor_job(_write) if files else []
+        return {"folder": folder if paths else None, "files": paths, "from": first.isoformat(), "to": last.isoformat()}
 
     async def _async_send_load_report(self) -> None:
         """Monthly (phase 105): last month's daily load against what its temperatures predict. Report only.

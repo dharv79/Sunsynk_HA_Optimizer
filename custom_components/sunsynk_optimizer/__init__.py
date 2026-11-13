@@ -66,6 +66,21 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DOMAIN, "probe_inverter_events", _probe, schema=vol.Schema({}), supports_response=SupportsResponse.ONLY
     )
     hass.services.async_register(DOMAIN, "cancel_free_event", _cancel, schema=vol.Schema({}))
+    async def _export(call: ServiceCall) -> dict:
+        start, end = call.data.get("start"), call.data.get("end")
+        return await _optimizer(hass).async_service_export_data(
+            start.isoformat() if start else None, end.isoformat() if end else None, call.data.get("types")
+        )
+
+    hass.services.async_register(
+        DOMAIN, "export_data", _export,
+        schema=vol.Schema({
+            vol.Optional("start"): cv.date,
+            vol.Optional("end"): cv.date,
+            vol.Optional("types"): vol.All(cv.ensure_list, [cv.string]),
+        }),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     hass.services.async_register(
         DOMAIN, "get_plan", _get_plan, schema=vol.Schema({}), supports_response=SupportsResponse.ONLY
     )
