@@ -1,6 +1,6 @@
 # Phase 112 — Daily settings efficiency audit
 
-**Status:** Planned, not built. **Size:** S, ~25-40k est. **Origin:** efficiency review of the inverter manuals and the user's settings screenshots, 15/11/2026. Builds on phase 107.
+**Status:** Built (PR pending), see Build notes. **Size:** S, ~25-40k est. **Origin:** efficiency review of the inverter manuals and the user's settings screenshots, 15/11/2026. Builds on phase 107.
 
 ## Goal
 
@@ -37,3 +37,10 @@ None direct. It keeps the floor change (about £15-25 a winter) and the charge s
 - No writes.
 - Docs (`entities-dashboard.md` or `code-map.md`), the plan index and `testing.md` updated.
 - py_compile, pyflakes and pytest pass.
+
+## Build notes (15/11/2026)
+
+- Daily check runs at the end of the 06:20 data audit as its own read (`async_run_settings_efficiency`); the Sunday change audit (phase 107) is untouched, so its weekly snapshot diff is unaffected.
+- Rules find keys by name words (floors: `shutdown`, `low`+`cap`; `trickle`; `priority`; `noise`; `usetimer`). Unmatched rules are listed in the `settings_flags` debug line so real key names can be confirmed and the matchers corrected.
+- Not built: Grid Amps, Max Solar Power, work mode and float checks (the first two are deliberate user choices; the last two have unknown value encodings), and options-flow overrides (defaults in `planning.EFFICIENCY_EXPECTED`, `expected` argument ready).
+- Daily health (phase 100) lists the flag count and turns to "Check".
