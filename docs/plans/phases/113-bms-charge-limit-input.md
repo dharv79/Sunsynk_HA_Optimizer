@@ -1,6 +1,6 @@
 # Phase 113 — Cold-battery charge input from the BMS limit
 
-**Status:** Planned, not built. **Size:** S-M, ~30-50k est. **Origin:** efficiency review, 15/11/2026.
+**Status:** Done, merged (ffb4201, PR #225), shadow only. **Size:** S-M, ~35k actual. **Origin:** efficiency review, 15/11/2026.
 
 ## Goal
 
@@ -29,3 +29,9 @@ Unproven. Small in mild weather. On cold nights it avoids a target shortfall (da
 - Shadow first, with the live behaviour behind an option. No new writes.
 - Docs (`import-plan.md`), the plan index and `testing.md` updated.
 - py_compile, pyflakes and pytest pass.
+
+## Build notes
+
+- Shadow by default; option `bms_rate_live` (off) makes the BMS rate live. Plan record logs `bms_charge_limit_a`, `bms_rate_kw`, `bms_rate_live`, `rate_source`, `bms_shadow_window_end`.
+- The limit comes from a battery-health snapshot under an hour old, refreshed first except on a dry run.
+- Not built: the scorecard row comparing each rate with the measured 05:00 rate. Compare the logged `bms_rate_kw` with `measured_charge_rate_kw` before enabling the option.
