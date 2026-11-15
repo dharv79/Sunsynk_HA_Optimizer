@@ -70,3 +70,79 @@ def settings_change_text(changes: list[dict[str, str | None]], limit: int = AUDI
     ]
     more = f" (+{len(changes) - limit} more)" if len(changes) > limit else ""
     return "; ".join(shown) + more
+
+
+# ---- Phase 112: daily efficiency flags -------------------------------------------------------------
+# Each rule finds its setting by key-name words (the cloud key names are unverified), then compares the
+# value with a recommended one. A rule that matches no key is reported as unmatched so the first live
+# run shows which names to add; a missing or unreadable value is never flagged (rule 11 spirit).
+
+EFFICIENCY_EXPECTED: dict[str, float] = {"max_shutdown_soc": 15.0, "max_low_batt_soc": 20.0, "max_trickle_w": 0.0}
+
+
+def _num(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _flag_on(value: Any) -> bool | None:
+    text = str(value).strip().lower()
+    if text in ("1", "true", "on", "yes", "enabled"):
+        return True
+    if text in ("0", "false", "off", "no", "disabled"):
+        return False
+    return None
+
+
+def _find_key(settings: dict[str, Any], words: tuple[str, ...], exclude: tuple[str, ...] = ()) -> str | None:
+    for name in sorted(str(k) for k in settings):
+        lowered = name.lower()
+        if all(w in lowered for w in words) and not any(x in lowered for x in exclude):
+            return name
+    return None
+
+
+def settings_efficiency_check(
+    settings: Any, expected: dict[str, float] | None = None
+) -> tuple[list[dict[str, Any]], dict[str, str], list[str]]:
+    """(flags, matched rule -> key, unmatched rules) for settings that cost energy.
+
+    flags are {key, value, expected, why}, sorted by key. Not a dict -> ([], {}, []).
+    """
+    if not isinstance(settings, dict):
+        return [], {}, []
+    exp = {**EFFICIENCY_EXPECTED, **(expected or {})}
+    rules: list[tuple[str, tuple[str, ...], tuple[str, ...], str, Any, str]] = [
+        ("shutdown", ("shutdown",), (), "max", exp["max_shutdown_soc"], "Shut Down floor higher than the battery needs"),
+        ("low_batt", ("low", "cap"), ("shutdown", "restart"), "max", exp["max_low_batt_soc"], "Low Batt floor higher than the battery needs"),
+        ("trickle", ("trickle",), (), "max", exp["max_trickle_w"], "grid trickle feed above 0 imports needlessly"),
+        ("priority_load", ("priority",), (), "on", True, "Priority Load off"),
+        ("low_noise", ("noise",), (), "on", False, "Low Noise Mode throttles the inverter"),
+        ("use_timer", ("usetimer",), (), "on", True, "Use Timer off, so the plan's slots are ignored"),
+    ]
+    flags: list[dict[str, Any]] = []
+    matched: dict[str, str] = {}
+    unmatched: list[str] = []
+    for rule, words, exclude, kind, want, why in rules:
+        key = _find_key(settings, words, exclude)
+        if key is None:
+            unmatched.append(rule)
+            continue
+        matched[rule] = key
+        raw = settings[key]
+        if kind == "max":
+            value = _num(raw)
+            if value is not None and value > want:
+                flags.append({"key": key, "value": value, "expected": f"<= {want:g}", "why": why})
+        else:
+            value = _flag_on(raw)
+            if value is not None and value != want:
+                flags.append({"key": key, "value": raw, "expected": "on" if want else "off", "why": why})
+    return sorted(flags, key=lambda f: f["key"]), matched, unmatched
+
+
+def settings_efficiency_flags(settings: Any, expected: dict[str, float] | None = None) -> list[dict[str, Any]]:
+    """Just the flags from `settings_efficiency_check`."""
+    return settings_efficiency_check(settings, expected)[0]

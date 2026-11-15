@@ -292,3 +292,7 @@ The record (`flex_event`: date, start time, entity, hours, soc, price, house loa
 ## Inverter settings audit (13/11/2026, phase 107)
 
 Weekly (Sunday 18:00) read-only snapshot of the inverter settings, diffed against the last one to catch changes made outside the integration. Separate from the drift check above, which compares against what was pushed. Design and deviations: `docs/plans/phases/107-inverter-settings-audit.md`.
+
+## Daily settings efficiency check (15/11/2026, phase 112)
+
+06:20 read-only check (`async_run_settings_efficiency`) of floors, trickle feed, Priority Load, Low Noise and Use Timer against `planning.EFFICIENCY_EXPECTED`. Debug `settings_flags` line daily; one notification when the flag set changes; flag count in the daily health line. Key names are matched by words and unverified: check `unmatched` in the first debug lines.

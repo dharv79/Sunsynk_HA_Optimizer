@@ -595,3 +595,6 @@ twin_run
 twin_slots
 twin_sweep
 twin_target
+EFFICIENCY_EXPECTED
+settings_efficiency_check
+settings_efficiency_flags

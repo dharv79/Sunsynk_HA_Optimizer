@@ -38,6 +38,7 @@ def daily_health(
     api_failures: int | None,
     soc_age_hours: float | None,
     shadow_features: list[str] | None,
+    settings_flag_count: int | None = None,
 ) -> dict[str, Any]:
     """One-line health verdict for the 22:00 bundle and `sensor.health`. Pure.
 
@@ -64,6 +65,8 @@ def daily_health(
         checks.append(f"{api_failures} API failure(s)")
     if shortfall is not None and shortfall > OUTCOME_ALERT_PCT:
         checks.append(f"charge {shortfall:g}% short")
+    if settings_flag_count:
+        checks.append(f"{settings_flag_count} inverter setting flag(s)")
     if records_written is not None and records_expected is not None and records_written < records_expected:
         checks.append(f"{records_written}/{records_expected} daily records")
     core_known = api_ok is not None and soc_age is not None and records_written is not None and records_expected is not None
@@ -86,6 +89,7 @@ def daily_health(
         "api_failures": api_failures,
         "soc_age_hours": None if soc_age is None else round(soc_age, 1),
         "shadow_features": sorted(shadow_features or []),
+        "settings_flags": settings_flag_count,
     }
 
 

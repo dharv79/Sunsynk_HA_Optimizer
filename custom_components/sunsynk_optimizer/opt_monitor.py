@@ -31,6 +31,7 @@ from .flux_helpers import kpi_prices_pence
 from .planning import (
     settings_change_text,
     settings_changes,
+    settings_efficiency_check,
     snapshot_settings,
     battery_health_trend,
     bms_summary_line,
@@ -171,6 +172,7 @@ class MonitorMixin:
                 api_failures=(api_rec or {}).get("failures_total"),
                 soc_age_hours=soc_age,
                 shadow_features=shadows,
+                settings_flag_count=(state.settings_flags or {}).get("count"),
             ),
         }
         self._guarded_errors.clear()
@@ -230,6 +232,7 @@ class MonitorMixin:
             issues = audit_days(records, today, AUDIT_DAYS, expect_cost)
         summary = audit_summary(issues)
         self.coordinator.update_state(touch=False, data_health=summary)
+        await self._guarded(self.async_run_settings_efficiency, "Settings efficiency check")  # phase 112
         for kind in ("missing", "duplicate", "contradiction"):
             issue_id = f"data_{kind}"
             dates = summary["classes"].get(kind)
@@ -455,6 +458,41 @@ class MonitorMixin:
             f"{settings_change_text(changes)}. Changed outside this integration (installer, app or firmware); "
             "nothing was re-pushed.",
         )
+
+    async def async_run_settings_efficiency(self) -> None:
+        """Daily (phase 112): flag inverter settings that cost energy. Read-only (also in monitor mode).
+
+        Always logs a `settings_flags` debug line (flags, matched and unmatched rules, so key names can
+        be verified); notifies only when the set of flags changes. A failed read keeps the last result.
+        """
+        try:
+            settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
+        except Exception as exc:  # pragma: no cover - network
+            _LOGGER.debug("Settings efficiency read failed: %s", exc)
+            return
+        if not isinstance(settings, dict) or not settings:
+            return
+        flags, matched, unmatched = settings_efficiency_check(settings)
+        signature = json.dumps([[f["key"], str(f["value"])] for f in flags])
+        previous = (self.coordinator.state.settings_flags or {}).get("signature")
+        date = dt_util.now().date().isoformat()
+        self.coordinator.update_state(
+            touch=False,
+            settings_flags={
+                "date": date, "signature": signature, "count": len(flags),
+                "flags": flags, "matched": matched, "unmatched": unmatched,
+            },
+        )
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify_debug(
+                "Sunsynk Settings Flags",
+                json.dumps({"type": "settings_flags", "date": date, "flags": flags, "matched": matched, "unmatched": unmatched}),
+                target=data_report_target,
+            )
+        if flags and signature != previous:
+            lines = "; ".join(f"{f['key']} = {f['value']} ({f['why']}; want {f['expected']})" for f in flags)
+            await self.async_notify("🔋 Sunsynk: inverter setting costs energy", f"{lines}. Nothing was changed.")
 
     async def async_run_drift_check(self) -> None:
         """Read back what the inverter holds and alert once per drift episode.

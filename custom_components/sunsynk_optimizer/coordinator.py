@@ -164,6 +164,8 @@ class OptimizerState:
     load_vs_expected: dict[str, Any] = field(default_factory=dict)
     # Phase 107: last weekly inverter settings snapshot {date, values}.
     settings_snapshot: dict[str, Any] = field(default_factory=dict)
+    # Phase 112: daily efficiency check {date, signature, flags, matched, unmatched}.
+    settings_flags: dict[str, Any] = field(default_factory=dict)
     # Phase 108: non-action notifications held for the morning brief ({when, title, message}).
     held_notifications: list[dict[str, Any]] = field(default_factory=list)
     deployed_version: str | None = None
