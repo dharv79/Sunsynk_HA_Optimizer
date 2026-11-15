@@ -598,3 +598,8 @@ twin_target
 EFFICIENCY_EXPECTED
 settings_efficiency_check
 settings_efficiency_flags
+BMS_INVERTER_MAX_A
+BMS_LIMIT_MAX_AGE_S
+BMS_NOMINAL_VOLTAGE
+bms_limited_rate_kw
+charge_rate_source

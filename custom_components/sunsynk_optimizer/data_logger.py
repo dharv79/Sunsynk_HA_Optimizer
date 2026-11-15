@@ -136,6 +136,11 @@ _IMPORT_PLAN_FIELDS = (
     "battery_temp_c",
     "measured_charge_rate_kw",
     "measured_charge_rate_live",
+    "bms_charge_limit_a",
+    "bms_rate_kw",
+    "bms_rate_live",
+    "rate_source",
+    "bms_shadow_window_end",
     "user_override",
 )
 

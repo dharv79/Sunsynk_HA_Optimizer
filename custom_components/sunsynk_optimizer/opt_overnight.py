@@ -27,6 +27,7 @@ from .const import (
     CONF_BATTERY_LIFETIME_KWH,
     CONF_FULL_WINDOW_LIVE,
     CONF_EVENING_LOAD_LIVE,
+    CONF_BMS_RATE_LIVE,
     CONF_MEASURED_RATE_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_FULL_CHARGE_SKIP_LIVE,
@@ -44,6 +45,7 @@ from .const import (
     DEFAULT_IMPORT_FEEDBACK_LIVE,
     DEFAULT_FULL_WINDOW_LIVE,
     DEFAULT_EVENING_LOAD_LIVE,
+    DEFAULT_BMS_RATE_LIVE,
     DEFAULT_MEASURED_RATE_LIVE,
     DEFAULT_GENTLE_CHARGE_LIVE,
     DEFAULT_FULL_CHARGE_SKIP_LIVE,
@@ -84,6 +86,9 @@ from .planning import (
     charge_efficiency,
     charge_progress_ok,
     evening_reserve_choice,
+    BMS_LIMIT_MAX_AGE_S,
+    bms_limited_rate_kw,
+    charge_rate_source,
     flux1_end_minutes,
     forecast_band,
     full_charge_day_move,
@@ -530,9 +535,17 @@ class OvernightMixin:
         if measured_live and measured is not None:
             effective_charge_rate, at_temp = measured
             derate = not at_temp
+        # Phase 113: the live BMS charge limit; logged always, used only when its option is on.
+        bms_limit_a = await self._async_bms_charge_limit_a(dry_run)
+        bms_voltage = float(cfg.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE)
+        bms_rate_kw = bms_limited_rate_kw(bms_limit_a, bms_voltage)
+        bms_live = bool(cfg.get(CONF_BMS_RATE_LIVE, DEFAULT_BMS_RATE_LIVE))
+        bms_applied = bms_live and bms_rate_kw is not None and derate
         used_charge_rate, temp_factor = resolve_used_charge_rate(
-            charge_rate_kw, effective_charge_rate, battery_temp_c, derate
+            charge_rate_kw, effective_charge_rate, battery_temp_c, derate,
+            bms_rate_kw if bms_applied else None,
         )
+        rate_source = charge_rate_source(not derate, bms_applied, bms_rate_kw is not None)
 
         # Phase 13: nameplate rate loses ~8% to conversion; in-window house load
         # adds grid kWh (logged) but not window time.
@@ -553,6 +566,12 @@ class OvernightMixin:
             end_minutes = 5 * 60
             logic_branch = "full_window"
         flux1_end = minutes_to_hhmm(end_minutes)
+        # Phase 113 shadow: the window the BMS-limited rate would give (None while the option is on).
+        bms_shadow_end = None
+        if bms_rate_kw is not None and not bms_applied and not low_solar and derate:
+            bms_shadow_end = minutes_to_hhmm(
+                flux1_end_minutes(energy_needed_kwh / efficiency, round(min(used_charge_rate, bms_rate_kw), 2))
+            )
         # Phase 23: the lowest grid-charge current that still reaches the target
         # by 05:00. Logged only unless the live option is on; then the current
         # is written first and the window stays open to 05:00.
@@ -655,6 +674,11 @@ class OvernightMixin:
             "temp_deration_factor": temp_factor,
             "measured_charge_rate_kw": measured[0] if measured else None,
             "measured_charge_rate_live": measured_live and measured is not None,
+            "bms_charge_limit_a": bms_limit_a,
+            "bms_rate_kw": bms_rate_kw,
+            "bms_rate_live": bms_applied,
+            "rate_source": rate_source,
+            "bms_shadow_window_end": bms_shadow_end,
             "hourly_forecast_used": decision.hourly_forecast_used,
             "synthetic_ramp": decision.synthetic_ramp,
             "bridge_hour": decision.bridge_hour,
@@ -692,6 +716,19 @@ class OvernightMixin:
         await self._async_notify_import_plan(plan_state)
         if source != STARTUP_PLAN_SOURCE:
             await self._async_log_multi_day_shadow("plan", target_soc=target_soc)
+
+    async def _async_bms_charge_limit_a(self, dry_run: bool) -> float | None:
+        """BMS charge-current limit (A) from a snapshot under an hour old; refreshed first unless a dry run."""
+        stored = self.coordinator.state.battery_health or {}
+        checked = dt_util.parse_datetime(stored.get("checked") or "")
+        if not dry_run and (checked is None or (dt_util.now() - checked).total_seconds() > BMS_LIMIT_MAX_AGE_S):
+            await self._guarded(self.async_refresh_battery_health, "BMS limit read")
+            stored = self.coordinator.state.battery_health or {}
+            checked = dt_util.parse_datetime(stored.get("checked") or "")
+        if checked is None or (dt_util.now() - checked).total_seconds() > BMS_LIMIT_MAX_AGE_S:
+            return None
+        limit = (stored.get("latest") or {}).get("bms_charge_limit_a")
+        return limit if isinstance(limit, (int, float)) else None
 
     def _cancel_plan_retry(self) -> None:
         if self._plan_retry:
