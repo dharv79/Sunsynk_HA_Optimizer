@@ -56,6 +56,8 @@ from .planning import (
     auto_away,
     overnight_target_too_high,
     hourly_profile,
+    high_soc_hours,
+    high_soc_totals,
     reserve_hold_cost,
     no_battery_baseline,
     capacity_estimate_pending,
@@ -252,11 +254,15 @@ class CaptureMixin:
             free_credit,
             self._over_limit.get("kwh") if self._over_limit.get("date") == date else None,
         )
+        # Phase 116: hours at >=95% / 100% from the day buffer (partial after a restart; read-only).
+        buffer = self._hourly["samples"] if self._hourly.get("date") == date else []
+        high = high_soc_hours(buffer) or {"high_soc_hours": None, "full_soc_hours": None, "high_soc_sample_hours": None}
         record = {
             "date": date,
             "version": INTEGRATION_VERSION,
             "snapshot_times": sorted(snapshots),
             **kpis,
+            **high,
             "price_source": price_source(sources, *TARIFF_BANDS),
             "evening_reserve_soc": self._evening_reserve_soc(),
             "evening_load_kw_learned": self._evening_load_kw,
@@ -278,6 +284,9 @@ class CaptureMixin:
                 plan if plan.get("date") == date else {}, snapshots, self._capacity_kwh(cfg), late_load_kw, prices,
             ),
         }
+        # Phase 116: 30-day and year-to-date totals from earlier days plus today.
+        history = await self.data_logger.async_load_records(366)
+        record.update(high_soc_totals([*history, {"type": "day_kpis", "date": date, **high}], date))
         await self.data_logger.async_log_day_kpis(**record)
         causes = self._import_causes if self._import_causes.get("date") == date else {}
         total = round(sum((causes.get("kwh") or {}).values()), 2)

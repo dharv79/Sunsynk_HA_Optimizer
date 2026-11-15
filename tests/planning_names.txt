@@ -607,3 +607,7 @@ HOLD_END_MINUTES
 daytime_hold_floor
 daytime_hold_slot
 hold_readback_ok
+FULL_SOC_THRESHOLD
+HIGH_SOC_THRESHOLD
+high_soc_hours
+high_soc_totals

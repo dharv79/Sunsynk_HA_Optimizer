@@ -141,3 +141,9 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 ## CSV export service (13/11/2026, phase 109)
 
 `sunsynk_optimizer.export_data` writes the logged records as CSV (one file per record type plus a daily summary) to `<config>/sunsynk_optimizer_export/<timestamp>/`. The type list is `data_logger.RECORD_TYPES`, so a new record type must be added there (already required). See `docs/plans/phases/109-data-export.md`.
+
+## Time at high state of charge (15/11/2026, phase 116)
+
+`planning/high_soc.py`, read-only, runs in monitor mode. At 22:00 the `day_kpis` record gains `high_soc_hours` (SOC at or above 95%), `full_soc_hours` (100%) and `high_soc_sample_hours` (hours the samples cover). Hours come from the phase 86 day buffer (30-minute SOC samples), each step credited to the earlier sample. A step longer than 60 minutes (restart, outage) adds nothing, so a day after a restart reads as partial through `high_soc_sample_hours`, not as 0. Fewer than two usable samples gives `None`. The record also carries `high_soc_30d_hours` / `_days` and `high_soc_ytd_hours` / `_days`, summed from the logged `day_kpis` records plus today; only days with the field count, so a short history reads as few days.
+
+Not built: the battery health trend and monthly report rows. The totals are on `day_kpis` for now. Use them to decide a summer upper-SOC cap; whether the inverter can cap solar charging at all is unchecked.

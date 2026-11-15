@@ -638,6 +638,12 @@ from .hold import (
     daytime_hold_slot,
     hold_readback_ok,
 )
+from .high_soc import (
+    FULL_SOC_THRESHOLD,
+    HIGH_SOC_THRESHOLD,
+    high_soc_hours,
+    high_soc_totals,
+)
 from .shadow import (
     AGILE_SPIKE_PENCE,
     MPC_MAX_SLOTS,
@@ -1128,6 +1134,10 @@ __all__ = [
     "heating_scale",
     "hhmm_to_minutes",
     "hourly_profile",
+    "FULL_SOC_THRESHOLD",
+    "HIGH_SOC_THRESHOLD",
+    "high_soc_hours",
+    "high_soc_totals",
     "import_cause_step",
     "import_feedback_adjustment",
     "intraday_forecast_scale",
