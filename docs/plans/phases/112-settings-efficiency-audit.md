@@ -1,6 +1,6 @@
 # Phase 112 — Daily settings efficiency audit
 
-**Status:** Built (PR pending), see Build notes. **Size:** S, ~25-40k est. **Origin:** efficiency review of the inverter manuals and the user's settings screenshots, 15/11/2026. Builds on phase 107.
+**Status:** Done, merged (046eb50, PR #224), see Build notes. **Size:** S, ~25-40k est. **Origin:** efficiency review of the inverter manuals and the user's settings screenshots, 15/11/2026. Builds on phase 107.
 
 ## Goal
 
