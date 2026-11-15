@@ -220,11 +220,43 @@ def temp_deration_factor(battery_temp_c: float) -> float:
     return 0.55
 
 
+BMS_INVERTER_MAX_A = 90.0       # SYNK-3.6K-SG04LP1 battery current limit
+
+BMS_NOMINAL_VOLTAGE = 51.2
+
+BMS_LIMIT_MAX_AGE_S = 3600      # an older BMS reading is not "tonight's" limit
+
+
+def bms_limited_rate_kw(
+    limit_a: float | None,
+    battery_v: float | None = None,
+    inverter_max_a: float = BMS_INVERTER_MAX_A,
+) -> float | None:
+    """Charge rate (kW) the BMS allows: min(limit, inverter max) x battery voltage.
+
+    ``None`` when the limit is missing or not positive; a missing voltage uses nominal 51.2 V.
+    """
+    if not isinstance(limit_a, (int, float)) or isinstance(limit_a, bool) or limit_a <= 0:
+        return None
+    volts = battery_v if isinstance(battery_v, (int, float)) and battery_v > 0 else BMS_NOMINAL_VOLTAGE
+    return round(min(limit_a, inverter_max_a) * volts / 1000, 2)
+
+
+def charge_rate_source(measured_at_temp: bool, bms_applied: bool, bms_available: bool) -> str:
+    """Which rule set tonight's charge rate: measured (at temperature), bms (live), or bands."""
+    if measured_at_temp:
+        return "measured"
+    if bms_applied:
+        return "bms"
+    return "bands"
+
+
 def resolve_used_charge_rate(
     config_rate_kw: float,
     effective_rate_kw: float | None,
     battery_temp_c: float,
     derate: bool = True,
+    bms_rate_kw: float | None = None,
 ) -> tuple[float, float]:
     """Return (used_charge_rate_kw, temp_deration_factor).
 
@@ -232,11 +264,15 @@ def resolve_used_charge_rate(
     lower; either way the result is then derated for battery temperature.
     ``derate=False`` (phase 61) is for a rate already measured at tonight's
     temperature band: the factor is still returned for the log but not applied.
+    ``bms_rate_kw`` (phase 113) is the live BMS limit: when given and ``derate``
+    is on it caps the rate in place of the band factor.
     """
     rate = config_rate_kw
     if effective_rate_kw is not None and effective_rate_kw < config_rate_kw * 0.9:
         rate = min(config_rate_kw, effective_rate_kw)
     factor = temp_deration_factor(battery_temp_c)
+    if derate and bms_rate_kw is not None:
+        return round(min(rate, bms_rate_kw), 2), factor
     return round(rate * (factor if derate else 1.0), 2), factor
 
 

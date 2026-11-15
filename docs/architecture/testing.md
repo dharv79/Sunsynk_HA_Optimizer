@@ -62,6 +62,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_notify_policy.py` | Phase 108 title levels, quiet hours across midnight, send/hold rules, held list cap, morning brief |
 | `tests/test_export.py` | Phase 109 export rows, range and type filtering, CSV columns, masking, daily-summary join |
 | `tests/test_settings_efficiency.py` | Phase 112 efficiency flags (floors, bool settings, missing values, override), health flag count |
+| `tests/test_bms_rate.py` | Phase 113 BMS-limited charge rate, resolve with BMS cap, rate source, plan fields |
 | `tests/test_settings_audit.py` | Phase 107 snapshot filtering, diff (added/removed/numeric text), notification text |
 | `tests/test_weather_load.py` | Phase 105 load/temperature fit, daily comparison, monthly flag and base shift |
 | `tests/test_shiftable.py` | Phase 102 recurring-block detection, valuation, fit check, cheap-window and bad-day filtering |

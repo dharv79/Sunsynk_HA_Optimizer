@@ -318,3 +318,13 @@ Equal neighbours merge, and the longest slot is split on the half-hour until the
 ## Recent-nights load floor (12/11/2026)
 
 Root cause: the bridge load was the 28-night median overnight rate, which lagged a cold snap (0.417 kW used against 0.72 and 0.52 kW on the last two nights). Change: `learned_load_kw` returns the larger of the median and the mean of the last 3 nights (min 2, same day type when split). Verification: `test_learned_load_follows_recent_cold_snap`.
+
+## BMS charge limit as a rate input (15/11/2026, phase 113)
+
+`resolve_used_charge_rate` derates cold nights with fixed bands (x0.85 / x0.70 / x0.55). Phase 113 adds the live BMS limit (`DeyeBatChargeLimitCurrent`, from the phase 75 battery-health snapshot) as an alternative.
+
+- `planning.bms_limited_rate_kw(limit_a, battery_v)` = `min(limit, 90 A) x volts`; `None` for a missing or non-positive limit; nominal 51.2 V without a voltage.
+- The 01:55 plan reads the limit from a snapshot under an hour old, refreshing first (not on a dry run). Missing means bands, as before.
+- Shadow by default: the plan record logs `bms_charge_limit_a`, `bms_rate_kw`, `rate_source` (`bms` / `bands` / `measured`) and `bms_shadow_window_end` (the Flux 1 end the BMS rate would give).
+- Option `bms_rate_live` (off) makes the BMS rate cap the rate in place of the band factor. The phase 61 measured rate at tonight's temperature keeps priority.
+- Not built: the scorecard row comparing each rate with the measured 05:00 rate. Compare `bms_rate_kw` against `measured_charge_rate_kw` from the logged plans before turning the option on.
