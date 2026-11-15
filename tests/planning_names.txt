@@ -603,3 +603,7 @@ BMS_LIMIT_MAX_AGE_S
 BMS_NOMINAL_VOLTAGE
 bms_limited_rate_kw
 charge_rate_source
+HOLD_END_MINUTES
+daytime_hold_floor
+daytime_hold_slot
+hold_readback_ok

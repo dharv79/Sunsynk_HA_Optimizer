@@ -1,6 +1,6 @@
 # Phase 114 — Daytime hold floor via the native timer slots
 
-**Status:** On hold (slot key names unconfirmed, 15/11/2026). **Size:** M, ~50-80k est. **Origin:** efficiency review, 15/11/2026. Builds on phases 73 (native time-of-use shadow) and 59 (peak hold).
+**Status:** Built, shadow by default (option `daytime_hold_live`), PR pending. **Size:** M, ~50-80k est. **Origin:** efficiency review, 15/11/2026. Builds on phases 73 (native time-of-use shadow) and 59 (peak hold).
 
 ## Goal
 
@@ -47,3 +47,7 @@ Medium. A stuck hold leaves the battery idle into the evening. Restoring at 16:0
 The first step could not be met. The `#sunsynkdebug` stream (13 and 14 Nov) shows `tou_shadow` only as a name in `shadow_features`; the `tou_shadow` record itself, with `readable: true` and the inverter slots, is not in the stream. The `battery_floor` record does list `cap1`-`cap6` among the settings keys, so the SOC keys exist. The time keys (`sellTime1`-`sellTime6` / `time1on`) and the on/off flags are not confirmed, and `tou_slots_from_plan` assumes them.
 
 To release the hold: read the latest `tou_shadow` line from the monthly JSONL on the HA box (or send the record to the debug target) and confirm `readable: true`, six slots, and the time and SOC keys. Then build as designed. Phase 115 depends on the same confirmation.
+
+## Build notes (15/11/2026)
+
+Hold released: `sensor.tou_shadow` showed `readable: true` and six slots. Redesigned to write only the `cap` of the slot covering now→16:00 (slot 2, 05:00 on this inverter), because the Flux POST owns the slot layout. Design, limits and the one-watched-day live test are in `docs/architecture/export-control.md` (phase 114). Not built: the scorecard row.

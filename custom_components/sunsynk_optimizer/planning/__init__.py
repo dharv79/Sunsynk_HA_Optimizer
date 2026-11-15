@@ -632,6 +632,12 @@ from .reports import (
     upgrade_scenarios,
     upgrade_summary,
 )
+from .hold import (
+    HOLD_END_MINUTES,
+    daytime_hold_floor,
+    daytime_hold_slot,
+    hold_readback_ok,
+)
 from .shadow import (
     AGILE_SPIKE_PENCE,
     MPC_MAX_SLOTS,
@@ -1245,6 +1251,10 @@ __all__ = [
     "tou_settings_payload",
     "tou_slots_from_plan",
     "tou_slots_from_settings",
+    "HOLD_END_MINUTES",
+    "daytime_hold_floor",
+    "daytime_hold_slot",
+    "hold_readback_ok",
     "trailing_week",
     "trim_defer_kwh",
     "trim_target_soc",

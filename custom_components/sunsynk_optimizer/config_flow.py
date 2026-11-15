@@ -63,6 +63,8 @@ from .const import (
     CONF_MEASURED_RATE_LIVE,
     CONF_GENTLE_CHARGE_LIVE,
     CONF_PEAK_COVER_LIVE,
+    CONF_DAYTIME_HOLD_LIVE,
+    DEFAULT_DAYTIME_HOLD_LIVE,
     CONF_TRIM_DEFER_LIVE,
     CONF_FULL_CHARGE_SKIP_LIVE,
     CONF_BASELOAD_ALERT,
@@ -235,6 +237,10 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Required(
                 CONF_PEAK_COVER_LIVE,
                 default=values.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE),
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_DAYTIME_HOLD_LIVE,
+                default=values.get(CONF_DAYTIME_HOLD_LIVE, DEFAULT_DAYTIME_HOLD_LIVE),
             ): selector.BooleanSelector(),
             vol.Required(
                 CONF_TRIM_DEFER_LIVE,
