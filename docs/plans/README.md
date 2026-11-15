@@ -122,7 +122,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 112. Daily settings efficiency audit | Done, merged (046eb50, PR #224) | S, ~25-40k |
 | 113. Cold-battery charge input from the BMS limit | Done, merged (ffb4201, PR #225), shadow only | S-M, ~35k actual |
 | 114. Daytime hold floor via the native timer slots | Done, merged (5ea1b4e, PR #226), shadow by default | M, ~50k actual |
-| 115. Per-slot power limit | Planned, not built | M, ~40-70k |
+| 115. Per-slot power limit | On hold (power key names not confirmed) | M, ~40-70k |
 | 116. Time at high state of charge | Planned, not built | XS-S, ~20-35k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
