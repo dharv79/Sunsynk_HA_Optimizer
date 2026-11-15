@@ -296,3 +296,15 @@ Weekly (Sunday 18:00) read-only snapshot of the inverter settings, diffed agains
 ## Daily settings efficiency check (15/11/2026, phase 112)
 
 06:20 read-only check (`async_run_settings_efficiency`) of floors, trickle feed, Priority Load, Low Noise and Use Timer against `planning.EFFICIENCY_EXPECTED`. Debug `settings_flags` line daily; one notification when the flag set changes; flag count in the daily health line. Key names are matched by words and unverified: check `unmatched` in the first debug lines.
+
+## Daytime hold floor on the native timer slot (15/11/2026, phase 114)
+
+A peak-cover **hold** (SOC still at or above the peak requirement but heading below it by 16:00) can be held by raising the `cap<N>` floor of the inverter's timer slot that covers now→16:00, instead of pushing a Flux 1 slot. Top-ups still use Flux (the slot floor cannot charge).
+
+- **Confirmed on this inverter (15/11/2026):** the slots read back as `time`/`cap`/`grid_charge` ×6, but the Flux income POST owns them: slot 1 02:00 (Flux 1 target), slot 2 05:00 (floor, 20), slot 3 16:00 (Flux 2 target), slots 4-6 filler. `grid_charge` is false in every slot, so it is never written. The phase 73 `tou_shadow` proposal does not match this layout (diff noise); only slot 2's `cap` is used here.
+- **Pure logic:** `planning/hold.py` — `daytime_hold_slot` (slot covering now→16:00 with no slot change, else None), `daytime_hold_floor` (hold decisions only; floor must rise and not exceed the current SOC, so it never forces a grid charge), `hold_readback_ok`.
+- **Shadow by default.** Every actionable hold logs `hold_floor` in the `peak_cover` record: `slot`, `floor`, `current_cap`, `live`, `applied`. Shadow makes one extra settings read.
+- **Live (`daytime_hold_live`, needs `peak_cover_live`, off in monitor mode).** Write `cap<N>` through `_async_write_setting` (rule 5), read it back; a failed write or read-back restores the previous value and falls back to the Flux 1 hold. Each 30-minute check re-reads the cap and re-writes it if a Flux push reset it (skipped while a free event holds the slots, rule 7). 16:00 (`_async_peak_cover_end`) writes the previous cap back; the Flux plan is not re-pushed for a native hold.
+- **State is unpersisted** (`_peak_cover["hold_floor"]`): a reload mid-day loses the restore value. The slot floor then stays raised until the next Flux push or the 01:55 plan rewrites the slots. Check after any mid-day restart.
+- **Unverified:** whether the inverter honours a `cap2` change while the Flux product is active. Turn the option on for one watched day: the battery should stay at or above the hold SOC until 16:00.
+- **Not built:** the scorecard row (kWh round-trip saved, top-ups avoided). `gain_vs_topup_gbp` in the record already carries the saving per hold.

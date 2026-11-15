@@ -190,6 +190,8 @@ DEFAULT_BASELOAD_ALERT = True
 # now->16:00 holds the battery at the SOC the peak window needs, at the day rate.
 CONF_PEAK_COVER_LIVE = "peak_cover_live"
 DEFAULT_PEAK_COVER_LIVE = False
+CONF_DAYTIME_HOLD_LIVE = "daytime_hold_live"
+DEFAULT_DAYTIME_HOLD_LIVE = False
 CONF_TRIM_DEFER_LIVE = "trim_defer_live"
 DEFAULT_TRIM_DEFER_LIVE = False
 CONF_FULL_CHARGE_SKIP_LIVE = "full_charge_skip_live"

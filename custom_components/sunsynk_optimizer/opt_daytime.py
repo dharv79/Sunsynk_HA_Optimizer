@@ -28,6 +28,8 @@ from .const import (
     CONF_PEAK_EXPORT_LIVE,
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_PEAK_COVER_LIVE,
+    CONF_DAYTIME_HOLD_LIVE,
+    DEFAULT_DAYTIME_HOLD_LIVE,
     CONF_TRIM_DEFER_LIVE,
     CONF_BASELOAD_ALERT,
     DEFAULT_BASELOAD_ALERT,
@@ -41,6 +43,10 @@ from .const import (
 from .flux_helpers import price_source
 from .planning import (
     round_trip_shadow,
+    daytime_hold_floor,
+    daytime_hold_slot,
+    hold_readback_ok,
+    tou_slots_from_settings,
     BATTERY_BOTTOM_SOC,
     grid_online_from_voltage,
     outage_record,
@@ -971,6 +977,7 @@ class DaytimeMixin:
         if (self._peak_cover or {}).get("date") != today:
             self._peak_cover = {"date": today, "logged": False, "pushed": False}
         state = self._peak_cover
+        await self._async_reassert_hold_floor(state)
         if state["logged"]:
             return
         soc = self._essential_state(self.battery_soc_entity)
@@ -1015,9 +1022,11 @@ class DaytimeMixin:
             return
         live = bool(cfg.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE)) and self.operation_mode != "monitor"
         api_ok = None
+        hold_floor = await self._async_hold_floor_decide(plan, soc, minutes, actionable)
         if live and actionable:
             slot = {"startTime": now.strftime("%H:%M"), "endTime": "16:00", "targetSoc": plan["target_soc"]}
-            api_ok = await self.async_push_flux_override({"flux_1": slot})
+            native = hold_floor["live"] and await self._async_apply_hold_floor(state, hold_floor)
+            api_ok = True if native else await self.async_push_flux_override({"flux_1": slot})
             state["pushed"] = api_ok is True
             state["slot"] = slot
             hold = plan["decision"] == "hold"
@@ -1059,6 +1068,7 @@ class DaytimeMixin:
             ),
             "live": live,
             "api_ok": api_ok,
+            "hold_floor": hold_floor,
         }
         state["record"] = record
         await self.data_logger.async_log_peak_cover(**record)
@@ -1074,10 +1084,60 @@ class DaytimeMixin:
             charge_rate_kw, prices["day"], prices["peak"], margin=margin, wear_pence=self._wear_pence(),
         )["decision"]
 
+    async def _async_hold_floor_decide(self, plan: dict[str, Any], soc: float, minutes: int, actionable: bool) -> dict[str, Any]:
+        """Phase 114: what raising the daytime timer-slot floor would do for a peak-cover hold (read-only).
+
+        Always logged for a hold decision; written only behind daytime_hold_live (see _async_apply_hold_floor)."""
+        live = (
+            bool(self.cfg.get(CONF_DAYTIME_HOLD_LIVE, DEFAULT_DAYTIME_HOLD_LIVE))
+            and bool(self.cfg.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE))
+            and self.operation_mode != "monitor"
+        )
+        out: dict[str, Any] = {"live": False, "slot": None, "floor": None, "current_cap": None, "applied": False}
+        if plan["decision"] != "hold" or not actionable:
+            return out
+        settings = await self._async_api_read("Daytime hold slots", self.coordinator.api.async_read_settings, self.inverter_serial)
+        slot = daytime_hold_slot(tou_slots_from_settings(settings), minutes)
+        current = settings.get(f"cap{slot}") if slot and isinstance(settings, dict) else None
+        floor = daytime_hold_floor(plan["decision"], plan["required_soc"], current, soc)
+        out.update({"slot": slot, "floor": floor, "current_cap": current, "live": live and slot is not None and floor is not None})
+        return out
+
+    async def _async_apply_hold_floor(self, state: dict[str, Any], hold_floor: dict[str, Any]) -> bool:
+        """Write the hold floor to the slot's cap and read it back; True when it is in force.
+
+        False (nothing held) means the caller falls back to the Flux 1 hold."""
+        slot, floor = hold_floor["slot"], hold_floor["floor"]
+        ok, previous = await self._async_write_setting(f"cap{slot}", floor)
+        if ok is not True:
+            return False
+        settings = await self._async_api_read("Daytime hold read-back", self.coordinator.api.async_read_settings, self.inverter_serial)
+        if hold_readback_ok(settings, slot, floor) is not True:
+            await self._async_write_setting(f"cap{slot}", int(previous))
+            return False
+        state["hold_floor"] = {"slot": slot, "floor": floor, "previous": int(previous)}
+        hold_floor["applied"] = True
+        return True
+
+    async def _async_reassert_hold_floor(self, state: dict[str, Any]) -> None:
+        """Each 30-minute check: a later Flux push can reset the slot floor, so put the hold back."""
+        held = state.get("hold_floor")
+        if not held or state.get("date") != dt_util.now().date().isoformat() or self._slots_held():
+            return
+        if self.operation_mode == "monitor":
+            return
+        settings = await self._async_api_read("Daytime hold check", self.coordinator.api.async_read_settings, self.inverter_serial)
+        if hold_readback_ok(settings, held["slot"], held["floor"]) is False:
+            await self._async_write_setting(f"cap{held['slot']}", held["floor"])
+
     async def _async_peak_cover_end(self) -> None:
-        """16:00: put the normal Flux plan back after a live peak-cover top-up slot."""
+        """16:00: put the normal Flux plan back after a live peak-cover top-up slot, or the slot floor after a native hold."""
         state = self._peak_cover or {}
         if not state.get("pushed") or state.get("date") != dt_util.now().date().isoformat():
             return
         state["pushed"] = False
-        await self._async_restore_normal_plan()
+        held = state.pop("hold_floor", None)
+        if held:
+            await self._async_write_setting(f"cap{held['slot']}", held["previous"])
+        else:
+            await self._async_restore_normal_plan()
