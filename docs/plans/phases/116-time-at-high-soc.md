@@ -1,6 +1,6 @@
 # Phase 116 — Time at high state of charge
 
-**Status:** Built, PR pending. **Size:** XS-S, ~20-35k est. **Origin:** user question on the battery's upper limit, 15/11/2026.
+**Status:** Done, merged (50f130b, PR #227), read-only. **Size:** XS-S, ~20-35k est. **Origin:** user question on the battery's upper limit, 15/11/2026.
 
 ## Goal
 
