@@ -1,6 +1,6 @@
 # Phase 72 — Full digital twin: replay every subsystem on half-hourly history
 
-**Status:** Built, scoped (13/11/2026); SHA recorded in the next PR. **Size:** XL. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
+**Status:** Done, merged (0b386f6, PR #221), scoped (13/11/2026). **Size:** XL. **Category:** blue sky. **Origin:** idea sweep, 01/11/2026 (NOT vetted against code; estimates are the brainstormer's).
 
 ## Goal
 
