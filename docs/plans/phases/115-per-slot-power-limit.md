@@ -1,6 +1,6 @@
 # Phase 115 — Per-slot power limit
 
-**Status:** Planned, not built. **Size:** M, ~40-70k est. **Origin:** efficiency review, 15/11/2026. Builds on phase 73 and needs phase 114's write path.
+**Status:** On hold (15/11/2026), power key names not confirmed. **Size:** M, ~40-70k est. **Origin:** efficiency review, 15/11/2026. Builds on phase 73 and needs phase 114's write path.
 
 ## Goal
 
@@ -40,3 +40,9 @@ Medium-high. A limit set below the house load makes the house import from the gr
 - Shadow first. Live only behind the option and monitor-safe.
 - Docs, the plan index and `testing.md` updated.
 - py_compile, pyflakes and pytest pass.
+
+## On hold (15/11/2026)
+
+The first step could not be met. The `#sunsynkdebug` stream (12 to 14 Nov) lists `cap1`-`cap6` in the `battery_floor` record, but that list is filtered to floor-like names, so no power key (`sellTime1Pac`-style) appears. There is no `settings_flags` line in the stream yet. `sensor.tou_shadow` confirms only `time`, `soc` and `grid_charge` per slot. Writing a guessed key name could change the wrong setting, so nothing is built.
+
+**To release:** the `settings_flags` debug line (phase 112) or a raw settings read must show the six per-slot power key names. Once they do, build as designed. Phase 114's native write path is the one to reuse, with the house-peak floor on every limit.

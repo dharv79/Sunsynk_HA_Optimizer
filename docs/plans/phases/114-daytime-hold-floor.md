@@ -1,6 +1,6 @@
 # Phase 114 — Daytime hold floor via the native timer slots
 
-**Status:** Built, shadow by default (option `daytime_hold_live`), PR pending. **Size:** M, ~50-80k est. **Origin:** efficiency review, 15/11/2026. Builds on phases 73 (native time-of-use shadow) and 59 (peak hold).
+**Status:** Done, merged (5ea1b4e, PR #226), shadow by default (option `daytime_hold_live`). **Size:** M, ~50-80k est. **Origin:** efficiency review, 15/11/2026. Builds on phases 73 (native time-of-use shadow) and 59 (peak hold).
 
 ## Goal
 

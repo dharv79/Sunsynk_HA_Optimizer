@@ -1,6 +1,6 @@
 # Phase 116 — Time at high state of charge
 
-**Status:** Planned, not built. **Size:** XS-S, ~20-35k est. **Origin:** user question on the battery's upper limit, 15/11/2026.
+**Status:** Built, PR pending. **Size:** XS-S, ~20-35k est. **Origin:** user question on the battery's upper limit, 15/11/2026.
 
 ## Goal
 
@@ -33,3 +33,8 @@ None direct. It informs the cap decision (about £15-20 a winter at stake if a w
 - Pure logic in a `planning/` module with tests (rule 19). Missing data is `None`, never 0.
 - Docs (`data-logging.md`), the plan index and `testing.md` updated.
 - py_compile, pyflakes and pytest pass.
+
+## Build notes
+
+- `planning/high_soc.py`: `high_soc_hours` and `high_soc_totals`, with `tests/test_high_soc.py`. Fields are on the 22:00 `day_kpis` record (see `data-logging.md`).
+- Not built: the battery health trend and monthly report rows. The 30-day and year-to-date totals are on `day_kpis`.
