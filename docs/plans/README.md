@@ -79,7 +79,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 69. Receding-horizon MPC planner (48 h, half-hourly) in shadow | Done, merged (f860226, PR #141), shadow; 24 h horizon, `mpc_live` not built | L, ~55k actual |
 | 70. Self-learned probabilistic solar forecast (own P10/P50/P90) | Done, merged (f5a86eb, PR #142), shadow; no weather bins | M, ~35k actual |
 | 71. Half-hourly household load forecaster (weather and calendar aware) | Done, merged (2ee29b0, PR #143), shadow (`load_profile_live` off) | M, ~45k actual |
-| 72. Full digital twin: replay every subsystem on half-hourly history | Built, scoped (overnight planner + battery model); SHA pending | XL, ~60k actual |
+| 72. Full digital twin: replay every subsystem on half-hourly history | Done, merged (0b386f6, PR #221), scoped (overnight planner + battery model) | XL, ~60k actual |
 | 73. Native inverter time-of-use programming via the six system-mode slots | Done, merged (98b3280, PR #149), shadow; no writes | M, ~30k actual |
 | 74. Local Modbus/RS485 control path as a cloud-outage fallback | Planned, not built | XL |
 | 75. Battery state-of-health and degradation ledger | Done, merged (3b4ddb5, PR #137) | M, ~70k actual |
@@ -119,6 +119,10 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 109. Data export service (CSV) | Done, merged (9321907, PR #216) | S, ~20-35k |
 | 110. Marginal-forecast target blend and bridge margin | Done, merged (29e8028, PR #188) | XS, ~35k actual |
 | 111. Recent-nights floor on the learned overnight load | Done, merged (9ba6bb8, PR #192) | XS, ~30k actual |
+| 112. Daily settings efficiency audit | Planned, not built | S, ~25-40k |
+| 113. Cold-battery charge input from the BMS limit | Planned, not built | S-M, ~30-50k |
+| 114. Daytime hold floor via the native timer slots | Planned, not built | M, ~50-80k |
+| 115. Per-slot power limit | Planned, not built | M, ~40-70k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
@@ -137,6 +141,8 @@ Phases 82–85 come from the savings idea sweep of 08/11/2026 (20 ideas, excludi
 Phases 87–109 come from the code review and idea sweep of 11/11/2026 (user request: check the code, optimise, refactor, and 10 new ideas for efficiency, visibility and reporting). 87–96 are review findings, each verified against the code (87's two bugs and 93's bad-time crash were reproduced by running the functions; 90 and 94 are medium confidence and start with a re-vet). 97–99 are the refactor, behaviour-preserving, in three steps. 100–109 are new ideas, checked only for duplicates against phases 1–86 and for the excluded topics (tariff, heat pump, EV, diverter); vet each against the code before building. **Suggested build order: 87 → 89 → 88 → 96 → 90 → 93 → 92 → 91 → 94 → 95 → 97 → 98 → 99 → 100 → 101 → 104 → 103 → 102 → 105 → 107 → 109 → 108 → 106 → 10 → 72 → 74.** 87 first because phase 82 (released in 2.0.2) cannot use its cloud-cover data until it is fixed. The fixes come before the refactor so they are made once; the refactor comes before the new features so those land in the new layout. 101 before 74 because it measures whether the local Modbus path is needed.
 
 Phase 81 (security sweep, user request 06/11/2026) is independent and recommended before 72 and 74, because 74 adds a new local write path to the inverter.
+
+Phases 112–115 come from the efficiency review of 15/11/2026 (inverter datasheet and manuals, plus the user's settings screenshots). The settings review led to one manual change: battery Shut Down 15 / Low Batt 20 (was 20/25). Everything else stays as it is: Max Solar Power 3,800 W (user choice), MPPT scanning off (no shade), trickle feed 0, Priority Load on. **Suggested build order: 112 → 113 → 114 → 115**, then 10 → 74. 112 is read-only and confirms the floor change took effect. 113 is shadow-first and has no writes. 114 adds the first native timer-slot write, which 115 reuses. 114 and 115 start by confirming the setting key names from the phase 73 shadow log, and go On hold if they cannot be confirmed.
 
 Token actuals were not metered before this index existed; record them from phase 8 on.
 
