@@ -123,6 +123,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 113. Cold-battery charge input from the BMS limit | Planned, not built | S-M, ~30-50k |
 | 114. Daytime hold floor via the native timer slots | Planned, not built | M, ~50-80k |
 | 115. Per-slot power limit | Planned, not built | M, ~40-70k |
+| 116. Time at high state of charge | Planned, not built | XS-S, ~20-35k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
@@ -143,6 +144,8 @@ Phases 87–109 come from the code review and idea sweep of 11/11/2026 (user req
 Phase 81 (security sweep, user request 06/11/2026) is independent and recommended before 72 and 74, because 74 adds a new local write path to the inverter.
 
 Phases 112–115 come from the efficiency review of 15/11/2026 (inverter datasheet and manuals, plus the user's settings screenshots). The settings review led to one manual change: battery Shut Down 15 / Low Batt 20 (was 20/25). Everything else stays as it is: Max Solar Power 3,800 W (user choice), MPPT scanning off (no shade), trickle feed 0, Priority Load on. **Suggested build order: 112 → 113 → 114 → 115**, then 10 → 74. 112 is read-only and confirms the floor change took effect. 113 is shadow-first and has no writes. 114 adds the first native timer-slot write, which 115 reuses. 114 and 115 start by confirming the setting key names from the phase 73 shadow log, and go On hold if they cannot be confirmed.
+
+Phase 116 comes from the user's question on the battery's upper limit (15/11/2026). Decision: no upper SOC cap in winter and keep the weekly 100% charge, because the `soc_cap_shadow` log shows an 85% cap costs about £0.13 on each low-solar night and the battery is full for only a few hours. Review after summer 2027 with phase 116's data. 116 is independent and can be built at any point; building it before spring gives a full summer of data.
 
 Token actuals were not metered before this index existed; record them from phase 8 on.
 
