@@ -124,7 +124,8 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 114. Daytime hold floor via the native timer slots | Done, merged (5ea1b4e, PR #226), shadow by default | M, ~50k actual |
 | 115. Per-slot power limit | On hold (power key names not confirmed) | M, ~40-70k |
 | 116. Time at high state of charge | Done, merged (50f130b, PR #227), read-only | XS-S, ~25k actual |
-| 117. Weekly cost without solar and battery (user request 16/11/2026) | In review (PR pending) | S, ~35k |
+| 117. Weekly cost without solar and battery (user request 16/11/2026) | Done, merged (cdf187a, PR #229) | S, ~35k actual |
+| 118. Savings history and running total (user request 16/11/2026) | In review (PR pending) | S, ~30k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 

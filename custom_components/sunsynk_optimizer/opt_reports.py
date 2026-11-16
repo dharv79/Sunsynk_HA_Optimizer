@@ -73,6 +73,9 @@ from .planning import (
     weekly_forecast_error,
     weekly_import_causes,
     weekly_system_value,
+    backfill_text,
+    ledger_backfill,
+    ledger_totals,
     system_value_text,
     monthly_report_due,
     TARIFF_IMPORT_BANDS,
@@ -108,6 +111,9 @@ from .planning import (
     trailing_week,
     week_kpis,
 )
+
+BACKFILL_DAYS = 400  # a little over the 13 months of retained logs (phase 118)
+
 
 class ReportsMixin:
     """Weekly summary, AI insight, monthly reports, bill reconciliation, advisors (methods of SunsynkOptimizer)."""
@@ -220,6 +226,42 @@ class ReportsMixin:
         if text:
             await self.async_notify("🔋 Sunsynk: load vs the weather", text)
 
+    async def _async_savings_backfill_startup(self, _now) -> None:
+        await self._guarded(self.async_run_savings_backfill, "Savings back-date")
+
+    async def async_run_savings_backfill(self) -> None:
+        """Once: back-date the savings ledger from the stored meter snapshots (phase 118). Read-only; no inverter writes.
+
+        Prices every old day at today's tariff rates (the rates paid then are not logged), so those
+        days are flagged as estimates. Free-event days are left out. Days already logged are kept.
+        """
+        cfg = self.cfg
+        today = dt_util.now().date().isoformat()
+        snapshot_days = await self.data_logger.async_load_snapshot_days(BACKFILL_DAYS)
+        free_dates = {
+            r.get("date") for r in await self.data_logger.async_load_records(BACKFILL_DAYS)
+            if r.get("type") == "day_kpis" and (r.get("free_import_excluded_kwh") or 0) > 0
+        }
+        prices, _sources = self._tariff_prices(dt_util.now().date())
+        ledger, counts = ledger_backfill(
+            self.coordinator.state.savings_ledger, snapshot_days, prices,
+            flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"), free_dates, today,
+        )
+        totals = ledger_totals(ledger)
+        self.coordinator.update_state(
+            touch=False, savings_ledger=ledger, savings_total=totals, savings_backfilled=today
+        )
+        target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if target:
+            await self.async_notify_debug(
+                "Sunsynk Savings Back-date",
+                json.dumps({"type": "savings_backfill", "date": today, **counts, **{k: v for k, v in totals.items() if k != "by_month"}}),
+                target=target,
+            )
+        text = backfill_text(totals, counts)
+        if text:
+            await self.async_notify("🔋 Sunsynk: solar and battery savings back-dated", text)
+
     async def _async_weekly_digest(self) -> None:
         """Sunday 18:00: why the week cost what it did (phase 104). Read-only; stored for the summary, AI prompt and sensors.
 
@@ -255,7 +297,7 @@ class ReportsMixin:
             last_week_kpis={"date": today.isoformat(), "period_start": start, "period_end": end, **week_kpis(paired)},
             shadow_verdicts=verdicts,
         )
-        text = system_value_text(digest["system_value"])
+        text = system_value_text(digest["system_value"], self.coordinator.state.savings_total)
         if text:
             await self.async_notify("🔋 Sunsynk: last week with and without solar and battery", text)
 

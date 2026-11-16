@@ -155,6 +155,10 @@ class OptimizerState:
     # Phase 104: the Sunday digest (import causes, charge misses, forecast error, shadow verdict
     # changes), last week's KPI roll-up for the kpi_week_* sensors, and last week's shadow verdicts.
     weekly_digest: dict[str, Any] = field(default_factory=dict)
+    # Phase 118: {date: [no_system_gbp, actual_gbp, "day"|"est"]}, its all-time totals, and the date it was back-dated.
+    savings_ledger: dict[str, list[Any]] = field(default_factory=dict)
+    savings_total: dict[str, Any] = field(default_factory=dict)
+    savings_backfilled: str | None = None
     last_week_kpis: dict[str, Any] = field(default_factory=dict)
     shadow_verdicts: dict[str, str] = field(default_factory=dict)
     # Phase 101: latest day's cloud API counters and the last 14 days (for the 3-day alert and weekly line).
