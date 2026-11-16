@@ -31,3 +31,18 @@ def test_text_lines_and_limit(planning):
     assert text.startswith("k0: 1 → 2") and text.endswith("(+3 more)")
     assert planning.settings_change_text([]) is None
     assert "(none) → 2" in planning.settings_change_text([{"key": "n", "old": None, "new": "2"}])
+
+
+# ---- Phase 119: one-off settings dump ----
+
+def test_settings_dump_keeps_every_scalar_and_redacts_identifiers(planning):
+    raw = {
+        "sellTime1Pac": 3600, "cap1": "20", "sn": "2305123456", "id": 77, "apiKeyName": "abc",
+        "plantName": "x", "comment": "2305123456", "nested": {"a": 1}, "empty": None, "long": "z" * 200,
+    }
+    out = planning.settings_dump(raw, ("2305123456", "", "12"))
+    assert out["sellTime1Pac"] == "3600" and out["cap1"] == "20" and out["empty"] == ""
+    assert out["sn"] == out["id"] == out["apiKeyName"] == out["comment"] == "**REDACTED**"
+    assert "nested" not in out and len(out["long"]) == 80
+    assert list(out) == sorted(out)
+    assert planning.settings_dump("nope") == {}

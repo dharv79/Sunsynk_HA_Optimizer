@@ -173,6 +173,8 @@ class OptimizerState:
     # Phase 108: non-action notifications held for the morning brief ({when, title, message}).
     held_notifications: list[dict[str, Any]] = field(default_factory=list)
     deployed_version: str | None = None
+    # Phase 119: the version whose one-off settings dump has been sent.
+    settings_dump_version: str | None = None
     known_record_types: list[str] = field(default_factory=list)
     # Bill reconciliation (phase 36): month, billed_gbp (user-entered) and the last result.
     bill_reconciliation: dict[str, Any] = field(default_factory=dict)

@@ -620,3 +620,4 @@ backfill_text
 ledger_add
 ledger_backfill
 ledger_totals
+settings_dump

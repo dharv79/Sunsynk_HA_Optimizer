@@ -33,6 +33,31 @@ def snapshot_settings(settings: Any, ignore: frozenset[str] = AUDIT_IGNORE_KEYS)
     return out
 
 
+_DUMP_REDACT_PARTS = ("password", "username", "token", "secret", "key", "email", "plant", "serial", "account", "phone", "address")
+_DUMP_VALUE_CHARS = 80
+
+
+def settings_dump(settings: Any, identifiers: tuple[str, ...] = ()) -> dict[str, str]:
+    """Every scalar setting as {key: text} for a one-off look at the real key names (phase 119).
+
+    Unlike the audit snapshot nothing is dropped except identifiers: a key that names a credential or
+    account, the `sn` and `id` keys, and any value equal to one of `identifiers` (serial, plant id) read
+    "**REDACTED**". Long values are clipped. Non-dict input gives {}.
+    """
+    if not isinstance(settings, dict):
+        return {}
+    ids = {i for i in identifiers if i and len(str(i)) >= 4}
+    out: dict[str, str] = {}
+    for key, value in sorted(settings.items(), key=lambda kv: str(kv[0])):
+        if not (isinstance(value, (str, int, float, bool)) or value is None):
+            continue
+        name, text = str(key), "" if value is None else str(value)
+        if name in ("sn", "id") or any(p in name.lower() for p in _DUMP_REDACT_PARTS) or text in ids:
+            text = "**REDACTED**"
+        out[name] = text[:_DUMP_VALUE_CHARS]
+    return out
+
+
 def _same(old: str, new: str) -> bool:
     if old == new:
         return True
