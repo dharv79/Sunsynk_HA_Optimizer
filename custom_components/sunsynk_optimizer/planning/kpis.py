@@ -47,6 +47,9 @@ DAY_KPI_FIELDS = (
     "export_peak_gbp",
     "unused_charge_kwh",
     "battery_saving_gbp",  # phase 37
+    "no_system_gbp",  # phase 117: the house load priced as if all of it came from the grid
+    "system_actual_gbp",  # phase 117: metered import less export, same hours and prices
+    "system_saving_gbp",  # phase 117: no_system_gbp less system_actual_gbp
 )
 
 
@@ -356,6 +359,47 @@ def no_battery_baseline(
         "with_battery_gbp": round(actual / 100, 2),
         "battery_saving_gbp": round((baseline - actual - wear) / 100, 2),
         "battery_cycled_kwh": round(cycled, 2),
+    }
+
+
+def no_system_baseline(
+    snapshots: dict[str, dict[str, Any]],
+    prices_pence: dict[str, float | None],
+    export_bands: list[tuple[int, int, float]],
+    free_credit: dict[str, tuple[float, float]] | None = None,
+) -> dict[str, float | None]:
+    """What 00:00-22:00 cost with solar and battery vs with neither, from the meter snapshots (phase 117).
+
+    Without either, every kWh the house used comes from the grid at the band
+    import price, and nothing is exported. Actual = metered import less export
+    at the same prices, so both sides cover the same hours. A free event
+    (`free_credit`) costs nothing on both sides. Battery wear is not deducted
+    (it is in `battery_saving_gbp`). Any missing snapshot or needed price →
+    all None (the day is excluded, never 0).
+    """
+    empty = {"no_system_gbp": None, "system_actual_gbp": None, "system_saving_gbp": None}
+    without = actual = 0.0
+    for start, end, band, _sunny in _BASELINE_SEGMENTS:
+        load = _seg_value(snapshots, start, end, "load_kwh")
+        imp = _seg_value(snapshots, start, end, "grid_import_kwh")
+        exp = _seg_value(snapshots, start, end, "grid_export_kwh")
+        if load is None or imp is None or exp is None:
+            return empty
+        imp_price = prices_pence.get(band)
+        exp_price = price_at(export_bands, hhmm_to_minutes(start))
+        parts = (
+            _pence(load - _credit(free_credit, start, 1), imp_price),
+            _pence(imp - _credit(free_credit, start), imp_price),
+            _pence(exp, exp_price),
+        )
+        if any(p is None for p in parts):
+            return empty
+        without += parts[0]
+        actual += parts[1] - parts[2]
+    return {
+        "no_system_gbp": round(without / 100, 2),
+        "system_actual_gbp": round(actual / 100, 2),
+        "system_saving_gbp": round((without - actual) / 100, 2),
     }
 
 
@@ -677,6 +721,8 @@ def audit_summary(issues: list[dict[str, str]]) -> dict[str, Any]:
 # sensor key → (day_kpis field, name, unit, kind); kind "money" is a daily £ total, else a measurement.
 KPI_SENSORS = (
     ("kpi_avoidable_import", "avoidable_import_gbp", "Avoidable import today", "GBP", "money"),
+    ("kpi_no_system_cost", "no_system_gbp", "Cost without solar or battery today", "GBP", "money"),
+    ("kpi_system_saving", "system_saving_gbp", "Saved by solar and battery today", "GBP", "money"),
     ("kpi_export_peak", "export_peak_gbp", "Peak export income today", "GBP", "money"),
     ("kpi_self_sufficiency", "self_sufficiency_pct", "Self-sufficiency today", "%", "measurement"),
     ("kpi_unused_charge", "unused_charge_kwh", "Unused charge today", "kWh", "measurement"),
