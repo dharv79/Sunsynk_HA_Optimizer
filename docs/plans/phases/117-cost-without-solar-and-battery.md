@@ -1,6 +1,6 @@
 # Phase 117 — Weekly cost without solar and battery
 
-**Status:** Built, awaiting merge. **Size:** S, ~35k. **Origin:** user request, 16/11/2026.
+**Status:** Done, merged (cdf187a, PR #229). **Size:** S, ~35k. **Origin:** user request, 16/11/2026.
 
 ## Goal
 
