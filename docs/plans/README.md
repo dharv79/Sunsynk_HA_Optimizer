@@ -126,7 +126,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 116. Time at high state of charge | Done, merged (50f130b, PR #227), read-only | XS-S, ~25k actual |
 | 117. Weekly cost without solar and battery (user request 16/11/2026) | Done, merged (cdf187a, PR #229) | S, ~35k actual |
 | 118. Savings history and running total (user request 16/11/2026) | Done, merged (71fb4cf, PR #230) | S, ~30k actual |
-| 119. One-off settings dump (to confirm key names for 115 and 112) | In review (PR pending) | XS, ~20k |
+| 119. One-off settings dump (to confirm key names for 115 and 112) | Done, merged (46c0b04, PR #231) | XS, ~20k actual |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
