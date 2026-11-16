@@ -1,6 +1,6 @@
 # Phase 118 — Savings history and running total
 
-**Status:** In review. **Size:** S, ~30k. **Origin:** user request, 16/11/2026 (follows phase 117).
+**Status:** Done, merged (71fb4cf, PR #230). **Size:** S, ~30k. **Origin:** user request, 16/11/2026 (follows phase 117).
 
 ## Goal
 
