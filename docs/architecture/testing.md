@@ -89,7 +89,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_battery_floor.py` | Phase 84 inverter low-SOC floor: key detection, floor-day £ saving, away skip, `None` inputs, dedup |
 | `tests/test_load_profile.py` | Phase 71 load profile: `day_load_slots` shaping, `load_profile` day type/filters/summary, `heating_scale`, walk-forward backtest, MPC hand-off, `backtest.py --load-profile` |
 | `tests/test_dynamic_tariff.py` | Phase 76 Agile shadow: `cheapest_window_plan` (ordering, partial slot, spike guard, negative slots, two days), `mpc_slots` price vectors, `dynamic_tariff_summary` |
-| `tests/test_native_tou.py` | Phase 73 TOU shadow: `tou_slots_from_plan` mapping, padding, peak hold, merge, missing inputs; `tou_slots_from_settings` parsing; `tou_diff`; `tou_settings_payload` round trip |
+| `tests/test_native_tou.py` | Phase 73 TOU shadow: `tou_slots_from_plan` mapping, padding, peak hold, merge, missing inputs; `tou_slots_from_settings` parsing; `tou_diff`; `tou_settings_payload` round trip; phase 115 `slot_power_w` floors and caps, `house_peak_kw`, `tou_inverter_powers` |
 | `tests/test_flex_event.py` | Phase 77 flex event shadow: `flex_event_offer` floor/rate cap/decisions/wear, `flex_event_window` calendar and on/off entities |
 | `tests/test_electrification.py` | Phase 78 electrification advisor: `heat_pump_cop`, `mean_band_price`, `heat_pump_scenario`, `export_limit_scenario`, `electrification_summary` |
 | `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |

@@ -563,7 +563,14 @@ tariff_vat_percent
 temp_deration_factor
 time_field_errors
 to_csv
+TOU_EVENING_MARGIN
+TOU_INVERTER_LIMIT_W
+house_peak_kw
+slot_power_w
 tou_diff
+tou_inverter_powers
+tou_power_key
+tou_slot_powers
 tou_settings_payload
 tou_slots_from_plan
 tou_slots_from_settings

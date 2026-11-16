@@ -50,6 +50,9 @@ from .planning import (
     flex_event_window,
     tou_diff,
     tou_slots_from_plan,
+    house_peak_kw,
+    tou_inverter_powers,
+    tou_slot_powers,
     tou_slots_from_settings,
     dynamic_tariff_summary,
     MPC_MAX_SLOTS,
@@ -196,11 +199,17 @@ class ShadowMixin:
         )
         current = tou_slots_from_settings(settings)
         diffs = tou_diff(current, proposed)
+        # Phase 115 (shadow): the per-slot power limits the plan would set. The peak export is only
+        # known at 16:00, so peak slots read None here; nothing is written.
+        peak_kw = house_peak_kw(await self.data_logger.async_load_records(14))
+        powers = tou_slot_powers(proposed, self._evening_load_kw, peak_kw)
+        inverter_powers = tou_inverter_powers(settings)
         now = dt_util.now()
         record = {
             "date": now.date().isoformat(), "time": now.strftime("%H:%M"), "target_soc": plan.get("target_soc"),
             "proposed": proposed, "inverter": current, "readable": current is not None,
             "diffs": diffs, "diff_count": None if diffs is None else len(diffs),
+            "power_w": powers, "inverter_power_w": inverter_powers, "house_peak_kw": peak_kw,
         }
         await self.data_logger.async_log_tou_shadow(**record)
         self.coordinator.update_state(touch=False, tou_shadow=record)

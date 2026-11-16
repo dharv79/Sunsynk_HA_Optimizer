@@ -355,6 +355,85 @@ def _tou_setting_keys(n: int) -> tuple[str, str, str]:
     return f"sellTime{n}", f"cap{n}", f"time{n}on"
 
 
+TOU_INVERTER_LIMIT_W = 3600
+
+TOU_EVENING_MARGIN = 1.25
+
+
+def tou_power_key(n: int) -> str:
+    """Setting name of slot n's (1-6) power limit in watts (phase 115; confirmed from the 2.3.0 settings dump)."""
+    return f"sellTime{n}Pac"
+
+
+def slot_power_w(
+    slot_start: str,
+    evening_load_kw: float | None,
+    house_peak_kw: float | None,
+    peak_export_kwh: float | None = None,
+) -> int | None:
+    """The power limit (W) the plan would give the slot starting at slot_start (phase 115).
+
+    Slots from 16:00 to 19:00 spread the planned peak export (kWh) over the 3 h; slots from
+    19:00 carry the learned evening load plus a margin; every other slot keeps the inverter's
+    3,600 W. A limit never goes below the house peak (so the house never imports because of a
+    limit) and never above 3,600 W. None when an input the slot needs is missing: leave it.
+    """
+    minute = hhmm_to_minutes(slot_start or "")
+    if minute is None:
+        return None
+    if TOU_PEAK_FROM_MINUTES <= minute < TOU_PEAK_TO_MINUTES:
+        if not _is_number(peak_export_kwh):
+            return None
+        wanted = float(peak_export_kwh) / ((TOU_PEAK_TO_MINUTES - TOU_PEAK_FROM_MINUTES) / 60) * 1000
+    elif minute >= TOU_PEAK_TO_MINUTES:
+        if not _is_number(evening_load_kw):
+            return None
+        wanted = float(evening_load_kw) * TOU_EVENING_MARGIN * 1000
+    else:
+        return TOU_INVERTER_LIMIT_W
+    if not _is_number(house_peak_kw):
+        return None
+    return int(round(min(TOU_INVERTER_LIMIT_W, max(wanted, float(house_peak_kw) * 1000))))
+
+
+def house_peak_kw(records: list[dict[str, Any]] | None) -> float | None:
+    """Highest hourly-average house load (kW) in the hourly_profile records; None with no usable hour.
+
+    An hourly average understates a short spike, so it is a floor to respect, not the true peak."""
+    best: float | None = None
+    for rec in records or []:
+        if rec.get("type") != "hourly_profile":
+            continue
+        for row in rec.get("hourly") or []:
+            kwh = row.get("load_kwh") if isinstance(row, dict) else None
+            if _is_number(kwh) and (best is None or kwh > best):
+                best = float(kwh)
+    return best
+
+
+def tou_slot_powers(
+    slots: list[dict[str, Any]] | None,
+    evening_load_kw: float | None,
+    house_peak_kw: float | None,
+    peak_export_kwh: float | None = None,
+) -> list[int | None] | None:
+    """slot_power_w for each of the six slots; None when there are no slots."""
+    if not slots:
+        return None
+    return [slot_power_w(s["time"], evening_load_kw, house_peak_kw, peak_export_kwh) for s in slots]
+
+
+def tou_inverter_powers(settings: Any) -> list[int | None] | None:
+    """The six power limits (W) the inverter holds; an unreadable slot is None, no settings is None."""
+    if not isinstance(settings, dict):
+        return None
+    out: list[int | None] = []
+    for n in range(1, TOU_SLOT_COUNT + 1):
+        value = _as_float(settings.get(tou_power_key(n)))
+        out.append(None if value is None else int(round(value)))
+    return out
+
+
 def _tou_flag(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
