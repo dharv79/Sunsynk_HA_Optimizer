@@ -89,3 +89,36 @@ def test_settings_parse_variants_and_unreadable():
 def test_payload_needs_six_slots():
     assert planning.tou_settings_payload(None) is None
     assert planning.tou_settings_payload([{"time": "00:00", "soc": 25, "grid_charge": False}]) is None
+
+
+def test_slot_power_limits_and_house_peak_floor():
+    assert planning.slot_power_w("02:00", 0.4, 1.0) == 3600
+    # evening: load 0.8 kW + 25% = 1000 W, but the house peak (2.0 kW) is the floor
+    assert planning.slot_power_w("19:00", 0.8, 2.0) == 2000
+    assert planning.slot_power_w("19:00", 0.8, 0.5) == 1000
+    assert planning.slot_power_w("19:00", 5.0, 0.5) == 3600
+    # peak: 3 kWh over 3 h = 1000 W; floored at the house peak
+    assert planning.slot_power_w("16:00", 0.4, 0.6, 3.0) == 1000
+    assert planning.slot_power_w("16:00", 0.4, 1.5, 3.0) == 1500
+
+
+def test_slot_power_missing_inputs_are_none():
+    assert planning.slot_power_w("19:00", None, 1.0) is None
+    assert planning.slot_power_w("19:00", 0.8, None) is None
+    assert planning.slot_power_w("16:00", 0.8, 1.0, None) is None
+    assert planning.slot_power_w("bad", 0.8, 1.0) is None
+    assert planning.tou_slot_powers(None, 0.8, 1.0) is None
+
+
+def test_house_peak_and_inverter_powers():
+    recs = [
+        {"type": "hourly_profile", "hourly": [{"hour": 18, "load_kwh": 1.2}, {"hour": 19, "load_kwh": None}]},
+        {"type": "hourly_profile", "hourly": [{"hour": 8, "load_kwh": 2.4}]},
+        {"type": "other", "hourly": [{"load_kwh": 9}]},
+    ]
+    assert planning.house_peak_kw(recs) == 2.4
+    assert planning.house_peak_kw([]) is None
+    assert planning.tou_power_key(3) == "sellTime3Pac"
+    got = planning.tou_inverter_powers({"sellTime1Pac": "3600", "sellTime2Pac": "x"})
+    assert got[0] == 3600 and got[1] is None and len(got) == 6
+    assert planning.tou_inverter_powers(None) is None
