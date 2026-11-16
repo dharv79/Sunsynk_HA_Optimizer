@@ -299,6 +299,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         self.unsubs.append(async_call_later(self.hass, 60, self._async_initial_refresh))
         self.unsubs.append(async_call_later(self.hass, 90, self._async_spare_solar_startup))
         self.unsubs.append(async_call_later(self.hass, 45, self._async_deploy_check))  # phase 100
+        self.unsubs.append(async_call_later(self.hass, 100, self._async_settings_dump_startup))  # phase 119
         if self.coordinator.state.savings_backfilled is None:  # phase 118: back-date the savings ledger once
             self.unsubs.append(async_call_later(self.hass, 150, self._async_savings_backfill_startup))
         if capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):

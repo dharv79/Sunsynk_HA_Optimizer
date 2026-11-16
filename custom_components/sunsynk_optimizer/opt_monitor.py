@@ -32,6 +32,7 @@ from .planning import (
     settings_change_text,
     settings_changes,
     settings_efficiency_check,
+    settings_dump,
     snapshot_settings,
     battery_health_trend,
     bms_summary_line,
@@ -211,6 +212,35 @@ class MonitorMixin:
             await self.async_notify(
                 f"🔋 Sunsynk: Updated to {INTEGRATION_VERSION}", f"Was {old}.{added}"
             )
+
+    async def _async_settings_dump_startup(self, _now) -> None:
+        await self._guarded(self.async_run_settings_dump, "Settings dump")
+
+    async def async_run_settings_dump(self) -> None:
+        """Once per installed version: send every inverter setting name and value to the debug stream (phase 119).
+
+        Read-only (no writes, so also in monitor mode). Identifiers are redacted. It exists to confirm
+        the real key names, such as the per-slot power limits phase 115 needs. A failed read tries again
+        at the next start.
+        """
+        state = self.coordinator.state
+        target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if not target or INTEGRATION_VERSION is None or state.settings_dump_version == INTEGRATION_VERSION:
+            return
+        try:
+            settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
+        except Exception as exc:  # pragma: no cover - network
+            _LOGGER.debug("Settings dump read failed: %s", exc)
+            return
+        values = settings_dump(settings, (self.inverter_serial, self.plant_id))
+        if not values:
+            return
+        await self.async_notify_debug(
+            "Sunsynk Settings Dump",
+            json.dumps({"type": "settings_dump", "version": INTEGRATION_VERSION, "count": len(values), "values": values}),
+            target=target,
+        )
+        self.coordinator.update_state(touch=False, settings_dump_version=INTEGRATION_VERSION)
 
     async def _async_data_audit(self, _now) -> None:
         await self._guarded(self.async_run_data_audit, "Data audit")
