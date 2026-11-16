@@ -92,6 +92,32 @@ def weekly_charge_shortfalls(records: list[dict[str, Any]], start: str, end: str
     }
 
 
+def weekly_system_value(paired_days: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The week with solar and battery against with neither (phase 117); None when no day has both costs.
+
+    Only days with both figures count, so the two totals always cover the same days.
+    """
+    rows = [
+        (a, b) for d in paired_days
+        if (a := _num(d.get("no_system_gbp"))) is not None and (b := _num(d.get("system_actual_gbp"))) is not None
+    ]
+    if not rows:
+        return None
+    without, actual = round(sum(a for a, _ in rows), 2), round(sum(b for _, b in rows), 2)
+    return {"days": len(rows), "no_system_gbp": without, "actual_gbp": actual, "saving_gbp": round(without - actual, 2)}
+
+
+def system_value_text(value: dict[str, Any] | None) -> str:
+    """One plain line for the weekly notification; empty when there is no data."""
+    if not value:
+        return ""
+    return (
+        f"Without solar or battery your last {value['days']} days would have cost £{value['no_system_gbp']:.2f}. "
+        f"You paid £{value['actual_gbp']:.2f}, so they saved £{value['saving_gbp']:.2f}. "
+        "00:00-22:00 at your tariff rates; the house load priced as if it all came from the grid."
+    )
+
+
 def weekly_forecast_error(paired_days: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Raw against corrected solar forecast over the week's paired days (kWh); None with no complete day.
 
@@ -147,6 +173,9 @@ def digest_text(digest: dict[str, Any] | None) -> str:
     charge = d.get("charge")
     if charge:
         parts.append(f"{len(charge['missed'])} of {charge['nights']} nights missed the charge target.")
+    sv = system_value_text(d.get("system_value"))
+    if sv:
+        parts.append(sv)
     fc = d.get("forecast")
     if fc:
         parts.append(f"Solar forecast error: raw {fc['raw_mae_kwh']:g} kWh a day, corrected {fc['corrected_mae_kwh']:g} kWh.")

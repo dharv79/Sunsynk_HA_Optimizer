@@ -72,6 +72,8 @@ from .planning import (
     weekly_charge_shortfalls,
     weekly_forecast_error,
     weekly_import_causes,
+    weekly_system_value,
+    system_value_text,
     monthly_report_due,
     TARIFF_IMPORT_BANDS,
     TARIFF_LABELS,
@@ -243,6 +245,7 @@ class ReportsMixin:
             "import_causes": weekly_import_causes(records, paired, start, end),
             "charge": weekly_charge_shortfalls(records, start, end),
             "forecast": weekly_forecast_error(paired),
+            "system_value": weekly_system_value(paired),  # phase 117
             "shadow_changes": verdict_changes(self.coordinator.state.shadow_verdicts, verdicts),
             "round_trip": {k: trip[k] for k in ("battery_eff", "ac_eff", "warm", "cold", "intervals")},
         }
@@ -252,6 +255,9 @@ class ReportsMixin:
             last_week_kpis={"date": today.isoformat(), "period_start": start, "period_end": end, **week_kpis(paired)},
             shadow_verdicts=verdicts,
         )
+        text = system_value_text(digest["system_value"])
+        if text:
+            await self.async_notify("🔋 Sunsynk: last week with and without solar and battery", text)
 
     async def _async_send_weekly_cost_summary(self) -> None:
         """Sunday 18:00: roll up the 7 complete days ending yesterday (Sun–Sat) and send it as JSON.

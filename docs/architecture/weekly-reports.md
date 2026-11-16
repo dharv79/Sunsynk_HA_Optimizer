@@ -149,3 +149,7 @@ Both scenarios go into the report as `heat_pump` / `export_limit` (None when the
 ## Shiftable-load report (13/11/2026, phase 102)
 
 Monthly (first-Sunday catch-up in `_async_monthly_reports`). `planning.shiftable_loads` finds recurring day-rate import blocks in the logged half-hourly import and prices moving them to the cheap window; `_async_send_shiftable_report` sends the debug JSON line and a notification. Report only. See `docs/plans/phases/102-shiftable-load-report.md` for the baseline choice and deviations.
+
+## Cost without solar and battery (phase 117, 16/11/2026)
+
+`planning.no_system_baseline` prices each 00:00–22:00 segment's house load at the band import price as if it all came from the grid, against the metered import less export at the same prices. The three figures (`no_system_gbp`, `system_actual_gbp`, `system_saving_gbp`) ride on the 22:00 `day_kpis` record and `DAY_KPI_FIELDS`, so the weekly JSON carries `week_*` totals and `sensor.kpi_week_no_system_cost` / `kpi_week_system_saving` read them. `_async_weekly_digest` adds `digest.system_value` (only days with both costs) and sends the "last week with and without solar and battery" notification (report priority). Free events cost nothing on both sides; battery wear is not deducted (phase 37 carries it). Days logged before 117 are excluded.

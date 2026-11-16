@@ -330,6 +330,8 @@ from .digest import (
     weekly_charge_shortfalls,
     weekly_forecast_error,
     weekly_import_causes,
+    weekly_system_value,
+    system_value_text,
     weekly_kpi_values,
 )
 from .health import (
@@ -376,6 +378,7 @@ from .kpis import (
     kpi_sensor_values,
     ledger_point,
     no_battery_baseline,
+    no_system_baseline,
     over_limit_import_step,
     scorecard_summary,
     shadow_scorecard,
@@ -1181,6 +1184,7 @@ __all__ = [
     "newsvendor_target",
     "next_plan_date",
     "no_battery_baseline",
+    "no_system_baseline",
     "normalise_grid_notices",
     "normalise_inverter_counts",
     "normalise_inverter_events",
@@ -1282,6 +1286,8 @@ __all__ = [
     "weekly_charge_shortfalls",
     "weekly_forecast_error",
     "weekly_import_causes",
+    "weekly_system_value",
+    "system_value_text",
     "weekly_kpi_values",
     "weighted_forecast_correction",
     "window_grid_kwh",

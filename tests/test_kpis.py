@@ -875,3 +875,51 @@ def test_bill_period_calendar_month_and_start_day(planning):
     assert planning.bill_period(date(2027, 1, 3), 8)[:2] == (date(2026, 11, 8), date(2026, 12, 7))
     assert planning.bill_period(date(2026, 3, 30), 31)[:2] == (date(2026, 2, 28), date(2026, 3, 27))
     assert planning.bill_period(date(2026, 11, 5), None)[2] == "2026-10"
+
+
+# ---- Phase 117: cost with no solar and no battery ----
+
+def test_no_system_baseline_prices_all_load_at_the_band_rate(planning):
+    out = planning.no_system_baseline(_base_snaps(), _BASE_PRICES, _BASE_EXPORT)
+    # 00-02 1 kWh day 30p, 02-05 1 kWh offpeak 10p, 05-16 5 kWh day 150p, 16-19 3 kWh peak 120p, 19-22 2 kWh day 60p.
+    assert out["no_system_gbp"] == 3.70
+    assert out["system_actual_gbp"] == 0.30  # 6 kWh offpeak less 2 kWh exported at 15p
+    assert out["system_saving_gbp"] == 3.40
+
+
+def test_no_system_baseline_free_event_costs_nothing_on_both_sides(planning):
+    plain = planning.no_system_baseline(_base_snaps(), _BASE_PRICES, _BASE_EXPORT)
+    free = planning.no_system_baseline(_base_snaps(), _BASE_PRICES, _BASE_EXPORT, {"16:00": (0.0, 3.0)})
+    assert free["no_system_gbp"] == round(plain["no_system_gbp"] - 1.20, 2)
+
+
+def test_no_system_baseline_missing_snapshot_or_price_is_none(planning):
+    snaps = _base_snaps()
+    del snaps["16:00"]
+    assert planning.no_system_baseline(snaps, _BASE_PRICES, _BASE_EXPORT)["no_system_gbp"] is None
+    no_peak = {"offpeak": 10.0, "day": 30.0, "peak": None}
+    out = planning.no_system_baseline(_base_snaps(), no_peak, _BASE_EXPORT)
+    assert out == {"no_system_gbp": None, "system_actual_gbp": None, "system_saving_gbp": None}
+
+
+def test_no_system_fields_reach_the_weekly_roll_up_and_sensors(planning):
+    days = [{"no_system_gbp": 3.7, "system_saving_gbp": 3.4}, {"no_system_gbp": 4.0, "system_saving_gbp": 2.0}]
+    week = planning.week_kpis(days)
+    assert week["week_no_system_gbp"] == 7.7 and week["week_system_saving_gbp"] == 5.4
+    keys = [k for k, *_ in planning.KPI_SENSORS]
+    assert "kpi_no_system_cost" in keys and "kpi_system_saving" in keys
+
+
+def test_weekly_system_value_counts_only_days_with_both_costs(planning):
+    days = [
+        {"no_system_gbp": 3.7, "system_actual_gbp": 0.3},
+        {"no_system_gbp": 4.0, "system_actual_gbp": None},
+        {"no_system_gbp": 5.0, "system_actual_gbp": 1.0},
+        {},
+    ]
+    value = planning.weekly_system_value(days)
+    assert value == {"days": 2, "no_system_gbp": 8.7, "actual_gbp": 1.3, "saving_gbp": 7.4}
+    assert planning.weekly_system_value([{}]) is None
+    assert "£8.70" in planning.system_value_text(value) and "£7.40" in planning.system_value_text(value)
+    assert planning.system_value_text(None) == ""
+    assert "£8.70" in planning.digest_text({"system_value": value})

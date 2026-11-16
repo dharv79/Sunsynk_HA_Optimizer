@@ -60,6 +60,7 @@ from .planning import (
     high_soc_totals,
     reserve_hold_cost,
     no_battery_baseline,
+    no_system_baseline,
     capacity_estimate_pending,
     record_for_date,
     recent_soc,
@@ -279,6 +280,8 @@ class CaptureMixin:
                 snapshots, prices, flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"),
                 self._capacity_kwh(cfg), self._wear_pence(), free_credit,
             ),
+            # Phase 117: what the day would have cost with no solar and no battery.
+            **no_system_baseline(snapshots, prices, flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export"), free_credit),
             # Shadow: would an 85% cap on a low-solar night have cost anything? Free-event days skew SOC.
             "soc_cap_shadow": None if kpis["free_import_excluded_kwh"] else soc_cap_shadow(
                 plan if plan.get("date") == date else {}, snapshots, self._capacity_kwh(cfg), late_load_kw, prices,

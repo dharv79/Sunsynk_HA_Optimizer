@@ -305,6 +305,7 @@ def _pinned_ids() -> set[str]:
     """Ids the platform files give their entities: explicit ids, else <domain>.<slug of the name>."""
     slug = conftest._planning.entity_slug
     ids = {f"sensor.{spec[0]}" for spec in conftest._planning.KPI_SENSORS}
+    ids.update(f"sensor.{spec[0]}" for spec in conftest._planning.WEEKLY_KPI_SENSORS)
     for domain in _DOMAINS:
         src = (_PKG / f"{domain}.py").read_text("utf-8")
         assert "pin_entity_id(self," in src, domain

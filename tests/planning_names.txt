@@ -611,3 +611,6 @@ FULL_SOC_THRESHOLD
 HIGH_SOC_THRESHOLD
 high_soc_hours
 high_soc_totals
+no_system_baseline
+weekly_system_value
+system_value_text

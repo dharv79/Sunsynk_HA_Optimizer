@@ -25,7 +25,7 @@ HELD_TEXT_CHARS = 220
 _ACTION_FRAGMENTS = ("grid outage", "stopped short", "inverter event", "not running", "free event")
 _REPORT_FRAGMENTS = (
     "weekly insight", "tariff comparison", "battery value", "scorecard", "bigger system", "loads you could move",
-    "load vs the weather", "morning brief",
+    "load vs the weather", "morning brief", "solar and battery",
 )
 
 
