@@ -153,3 +153,7 @@ Monthly (first-Sunday catch-up in `_async_monthly_reports`). `planning.shiftable
 ## Cost without solar and battery (phase 117, 16/11/2026)
 
 `planning.no_system_baseline` prices each 00:00–22:00 segment's house load at the band import price as if it all came from the grid, against the metered import less export at the same prices. The three figures (`no_system_gbp`, `system_actual_gbp`, `system_saving_gbp`) ride on the 22:00 `day_kpis` record and `DAY_KPI_FIELDS`, so the weekly JSON carries `week_*` totals and `sensor.kpi_week_no_system_cost` / `kpi_week_system_saving` read them. `_async_weekly_digest` adds `digest.system_value` (only days with both costs) and sends the "last week with and without solar and battery" notification (report priority). Free events cost nothing on both sides; battery wear is not deducted (phase 37 carries it). Days logged before 117 are excluded.
+
+## Savings ledger (phase 118, 16/11/2026)
+
+`planning/savings.py` keeps `{date: [no_system_gbp, actual_gbp, basis]}` in `savings_ledger` (state, not pruned with the logs). The 22:00 day-KPI run adds the day (`day`, that day's rates). `async_run_savings_backfill` runs once at startup and adds every stored snapshot day at today's rates (`est`); free-event days and incomplete days are skipped. `savings_total` (all-time, per month) feeds `sensor.savings_total`, the "Savings by month" dashboard card and the Sunday line "Saved in total since …".

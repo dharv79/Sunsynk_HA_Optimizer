@@ -107,14 +107,17 @@ def weekly_system_value(paired_days: list[dict[str, Any]]) -> dict[str, Any] | N
     return {"days": len(rows), "no_system_gbp": without, "actual_gbp": actual, "saving_gbp": round(without - actual, 2)}
 
 
-def system_value_text(value: dict[str, Any] | None) -> str:
-    """One plain line for the weekly notification; empty when there is no data."""
+def system_value_text(value: dict[str, Any] | None, total: dict[str, Any] | None = None) -> str:
+    """One plain line for the weekly notification (plus the running total, phase 118); empty when there is no data."""
     if not value:
         return ""
+    since = ""
+    if total and total.get("days"):
+        since = f" Saved in total since {total['since']}: £{total['saving_gbp']:.2f} over {total['days']} days."
     return (
         f"Without solar or battery your last {value['days']} days would have cost £{value['no_system_gbp']:.2f}. "
         f"You paid £{value['actual_gbp']:.2f}, so they saved £{value['saving_gbp']:.2f}. "
-        "00:00-22:00 at your tariff rates; the house load priced as if it all came from the grid."
+        "00:00-22:00 at your tariff rates; the house load priced as if it all came from the grid." + since
     )
 
 

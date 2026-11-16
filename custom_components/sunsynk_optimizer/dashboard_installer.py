@@ -596,6 +596,15 @@ def _energy(s) -> dict[str, Any]:
         _tile("sensor.kpi_system_saving", "Saved today £", "mdi:piggy-bank-outline", "green"),
         _tile("sensor.kpi_week_no_system_cost", "Last week without £", "mdi:home-lightning-bolt-outline", "grey"),
         _tile("sensor.kpi_week_system_saving", "Last week saved £", "mdi:piggy-bank-outline", "green"),
+        _tile("sensor.savings_total", "Total saved £", "mdi:piggy-bank", "green"),
+        {"type": "markdown", "title": "Savings by month",
+         "content": (
+             "{% set m = state_attr('sensor.savings_total', 'by_month') or {} %}"
+             "Since {{ state_attr('sensor.savings_total', 'since') or '-' }} "
+             "({{ state_attr('sensor.savings_total', 'estimated_days') or 0 }} days estimated at today's rates)\n\n"
+             "| Month | Without £ | Paid £ | Saved £ | Days |\n|:--|--:|--:|--:|--:|\n"
+             "{% for k, v in m.items() %}| {{ k }} | {{ v.no_system_gbp }} | {{ v.actual_gbp }} | {{ v.saving_gbp }} | {{ v.days }} |\n{% endfor %}"
+         )},
         _tile("sensor.kpi_unused_charge", "Unused charge", "mdi:battery-alert-variant-outline", "orange"),
         _tile("sensor.kpi_over_limit_import", "Over-limit", "mdi:flash-alert-outline", "deep-orange"),
         {"type": "statistics-graph", "title": "£ per day", "chart_type": "line", "period": "hour",

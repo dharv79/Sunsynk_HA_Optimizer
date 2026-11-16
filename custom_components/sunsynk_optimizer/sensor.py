@@ -156,6 +156,7 @@ async def async_setup_entry(
                 coordinator, entry, "marginal_cost", "Cost of 1 kWh now", entity_id="sensor.cost_of_1_kwh_now"
             ),
         ]
+        + [SavingsTotalSensor(coordinator, entry)]
         + [KpiSensor(coordinator, entry, *spec) for spec in KPI_SENSORS]
         + [WeeklyKpiSensor(coordinator, entry, *spec) for spec in WEEKLY_KPI_SENSORS]
     )
@@ -191,6 +192,32 @@ class KpiSensor(CoordinatorEntity, SensorEntity):
             return None
         day = dt_util.parse_date(str(_as_dict(self.coordinator.state.last_day_kpis).get("date") or ""))
         return dt_util.start_of_local_day(day) if day else None
+
+
+class SavingsTotalSensor(CoordinatorEntity, SensorEntity):
+    """All-time £ saved by solar and battery against the grid-only cost (phase 118), with a monthly history."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "GBP"
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_name = "Solar and battery savings total"
+        self._attr_unique_id = f"{entry.entry_id}_savings_total"
+        pin_entity_id(self, "sensor", "Solar and battery savings total", "sensor.savings_total")
+        self._attr_device_info = optimizer_device_info(entry)
+
+    @property
+    def native_value(self) -> float | None:
+        total = _as_dict(self.coordinator.state.savings_total)
+        return total.get("saving_gbp") if total.get("days") else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        total = _as_dict(self.coordinator.state.savings_total)
+        return {k: total.get(k) for k in ("since", "days", "estimated_days", "no_system_gbp", "actual_gbp", "by_month")}
 
 
 class WeeklyKpiSensor(CoordinatorEntity, SensorEntity):

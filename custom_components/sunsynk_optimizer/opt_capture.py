@@ -61,6 +61,8 @@ from .planning import (
     reserve_hold_cost,
     no_battery_baseline,
     no_system_baseline,
+    ledger_add,
+    ledger_totals,
     capacity_estimate_pending,
     record_for_date,
     recent_soc,
@@ -298,7 +300,13 @@ class CaptureMixin:
             unknown=round((causes.get("kwh") or {}).get("unknown", 0.0), 2), attributed_kwh=total,
             grid_import_kwh=(snapshots.get("22:00") or {}).get("grid_import_kwh"),
         )
-        self.coordinator.update_state(touch=False, last_day_kpis=record)
+        # Phase 118: add the day to the running savings ledger (priced at that day's own rates).
+        ledger = ledger_add(
+            self.coordinator.state.savings_ledger, date, record.get("no_system_gbp"), record.get("system_actual_gbp")
+        )
+        self.coordinator.update_state(
+            touch=False, last_day_kpis=record, savings_ledger=ledger, savings_total=ledger_totals(ledger)
+        )
         return {"type": "day_kpis", **record}
 
     async def _async_capture_load_vs_expected(self, date: str, load_kwh: Any) -> None:

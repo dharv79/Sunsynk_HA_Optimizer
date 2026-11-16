@@ -923,3 +923,44 @@ def test_weekly_system_value_counts_only_days_with_both_costs(planning):
     assert "£8.70" in planning.system_value_text(value) and "£7.40" in planning.system_value_text(value)
     assert planning.system_value_text(None) == ""
     assert "£8.70" in planning.digest_text({"system_value": value})
+
+
+# ---- Phase 118: savings ledger ----
+
+def test_ledger_add_keeps_day_entries_over_estimates_and_skips_missing(planning):
+    ledger = planning.ledger_add({}, "2026-11-01", 3.7, 0.3)
+    assert ledger == {"2026-11-01": [3.7, 0.3, "day"]}
+    assert planning.ledger_add(ledger, "2026-11-01", 9.0, 1.0, planning.BASIS_ESTIMATE) == ledger
+    assert planning.ledger_add(ledger, "2026-11-02", None, 0.3) == ledger
+    est = planning.ledger_add({}, "2026-10-01", 2.0, 1.0, planning.BASIS_ESTIMATE)
+    assert planning.ledger_add(est, "2026-10-01", 2.5, 1.0)["2026-10-01"][2] == "day"
+
+
+def test_ledger_backfill_adds_complete_days_only(planning):
+    good, bad = _base_snaps(), _base_snaps()
+    del bad["16:00"]
+    days = {"2026-10-01": good, "2026-10-02": bad, "2026-10-03": good, "2026-10-04": good, "2026-10-05": good}
+    existing = {"2026-10-03": [1.0, 0.5, "day"]}
+    ledger, counts = planning.ledger_backfill(
+        existing, days, _BASE_PRICES, _BASE_EXPORT, skip_dates={"2026-10-04"}, today="2026-10-05"
+    )
+    assert counts == {"added": 1, "skipped_free": 1, "incomplete": 1}
+    assert ledger["2026-10-01"] == [3.7, 0.3, "est"]
+    assert ledger["2026-10-03"] == [1.0, 0.5, "day"] and "2026-10-05" not in ledger and "2026-10-04" not in ledger
+
+
+def test_ledger_totals_all_time_and_by_month(planning):
+    ledger = {"2026-10-31": [3.0, 1.0, "est"], "2026-11-01": [4.0, 1.5, "day"], "2026-11-02": [2.0, 0.5, "day"]}
+    totals = planning.ledger_totals(ledger)
+    assert (totals["days"], totals["estimated_days"], totals["since"]) == (3, 1, "2026-10-31")
+    assert totals["saving_gbp"] == 6.0 and totals["no_system_gbp"] == 9.0 and totals["actual_gbp"] == 3.0
+    assert totals["by_month"]["2026-11"] == {"no_system_gbp": 6.0, "actual_gbp": 2.0, "saving_gbp": 4.0, "days": 2}
+    assert planning.ledger_totals({})["since"] is None and planning.ledger_totals(None)["saving_gbp"] == 0.0
+
+
+def test_backfill_text_and_weekly_total(planning):
+    totals = planning.ledger_totals({"2026-10-31": [3.0, 1.0, "est"]})
+    assert "estimate" in planning.backfill_text(totals, {"added": 1})
+    assert planning.backfill_text(totals, {"added": 0}) == ""
+    value = {"days": 2, "no_system_gbp": 8.7, "actual_gbp": 1.3, "saving_gbp": 7.4}
+    assert "Saved in total since 2026-10-31: £2.00 over 1 days." in planning.system_value_text(value, totals)

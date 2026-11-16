@@ -614,3 +614,9 @@ high_soc_totals
 no_system_baseline
 weekly_system_value
 system_value_text
+BASIS_DAY
+BASIS_ESTIMATE
+backfill_text
+ledger_add
+ledger_backfill
+ledger_totals
