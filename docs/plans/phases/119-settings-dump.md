@@ -1,6 +1,6 @@
 # Phase 119 — One-off settings dump
 
-**Status:** In review. **Size:** XS, ~20k. **Origin:** phase 115 hold, 16/11/2026.
+**Status:** Done, merged (46c0b04, PR #231). **Size:** XS, ~20k. **Origin:** phase 115 hold, 16/11/2026.
 
 ## Goal
 
