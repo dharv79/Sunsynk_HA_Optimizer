@@ -1,6 +1,6 @@
 # Phase 120 — Payback tracker
 
-**Status:** In progress, built, PR open. **Size:** S, ~25k. **Origin:** user request, 17/11/2026 (follows phase 118).
+**Status:** Done, merged (f241c06, PR #235). **Size:** S, ~25k. **Origin:** user request, 17/11/2026 (follows phase 118).
 
 ## Goal
 
