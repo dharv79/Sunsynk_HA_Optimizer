@@ -597,6 +597,21 @@ def _energy(s) -> dict[str, Any]:
         _tile("sensor.kpi_week_no_system_cost", "Last week without £", "mdi:home-lightning-bolt-outline", "grey"),
         _tile("sensor.kpi_week_system_saving", "Last week saved £", "mdi:piggy-bank-outline", "green"),
         _tile("sensor.savings_total", "Total saved £", "mdi:piggy-bank", "green"),
+        _tile("sensor.payback", "Investment repaid %", "mdi:cash-check", "green"),
+        {"type": "gauge", "entity": "sensor.payback", "name": "Payback of GBP 9000", "min": 0, "max": 100,
+         "needle": True, "severity": {"green": 50, "yellow": 20, "red": 0}},
+        {"type": "markdown", "title": "Payback since June 2025",
+         "content": (
+             "{% set p = state_attr('sensor.payback', 'saved_gbp') %}"
+             "Saved **£{{ p if p is not none else '-' }}** of £{{ state_attr('sensor.payback', 'investment_gbp') }} "
+             "({{ states('sensor.payback') }}%). Left: £{{ state_attr('sensor.payback', 'remaining_gbp') }}.\n\n"
+             "Before tracking (you entered): £{{ state_attr('sensor.payback', 'opening_gbp') }}. "
+             "Tracked since {{ state_attr('sensor.savings_total', 'since') or '-' }}: £{{ state_attr('sensor.payback', 'tracked_gbp') }}.\n\n"
+             "Last 90 days: £{{ state_attr('sensor.payback', 'per_day_gbp') or '-' }}/day. "
+             "{% if state_attr('sensor.payback', 'payback_date') %}Paid back about {{ state_attr('sensor.payback', 'payback_date') }} "
+             "({{ state_attr('sensor.payback', 'years_left') }} years).{% else %}Payback date needs 7+ tracked days and a positive saving.{% endif %}"
+         )},
+        {"type": "entities", "title": "Payback input", "entities": ["number.saved_before_tracking"]},
         {"type": "markdown", "title": "Savings by month",
          "content": (
              "{% set m = state_attr('sensor.savings_total', 'by_month') or {} %}"

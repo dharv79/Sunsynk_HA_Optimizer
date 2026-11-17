@@ -627,4 +627,8 @@ backfill_text
 ledger_add
 ledger_backfill
 ledger_totals
+PAYBACK_INVESTMENT_GBP
+PAYBACK_START
+PAYBACK_WINDOW_DAYS
+payback_summary
 settings_dump
