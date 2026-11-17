@@ -16,6 +16,7 @@ is never replaced by an "est" one.
 
 from __future__ import annotations
 
+from datetime import date as date_cls, timedelta
 from typing import Any
 
 from .core import _num
@@ -107,3 +108,49 @@ def backfill_text(totals: dict[str, Any], counts: dict[str, int]) -> str:
         f"£{totals['no_system_gbp']:.2f}; you paid £{totals['actual_gbp']:.2f}, a saving of £{totals['saving_gbp']:.2f}. "
         "Old days use today's tariff rates, so treat them as an estimate. New days use that day's own rates."
     )
+
+
+PAYBACK_INVESTMENT_GBP = 9000.0
+PAYBACK_START = "2025-06-01"
+PAYBACK_WINDOW_DAYS = 90
+
+
+def payback_summary(
+    ledger: dict[str, list[Any]] | None,
+    opening_gbp: Any = 0.0,
+    today: str | None = None,
+    investment_gbp: float = PAYBACK_INVESTMENT_GBP,
+    window_days: int = PAYBACK_WINDOW_DAYS,
+) -> dict[str, Any]:
+    """Progress of the savings towards paying back the investment (phase 119).
+
+    saved = the user's opening balance (savings before tracking began) + the ledger total. The rate is the
+    saving per day over the last `window_days` of ledger days; with fewer than 7 such days, or a rate of 0 or
+    less, the payback date is None (unknown, never a guess).
+    """
+    opening = float(opening_gbp) if isinstance(opening_gbp, (int, float)) and not isinstance(opening_gbp, bool) else 0.0
+    rows = {d: r for d, r in (ledger or {}).items() if isinstance(r, (list, tuple)) and len(r) >= 2}
+    tracked = round(sum(r[0] - r[1] for r in rows.values()), 2)
+    saved = round(opening + tracked, 2)
+    remaining = round(max(investment_gbp - saved, 0.0), 2)
+    out: dict[str, Any] = {
+        "investment_gbp": round(investment_gbp, 2), "opening_gbp": round(opening, 2), "tracked_gbp": tracked,
+        "saved_gbp": saved, "remaining_gbp": remaining,
+        "percent": round(min(max(saved / investment_gbp * 100.0, 0.0), 100.0), 1) if investment_gbp > 0 else None,
+        "tracked_days": len(rows), "per_day_gbp": None, "payback_date": None, "years_left": None,
+    }
+    if not today:
+        return out
+    cutoff = (date_cls.fromisoformat(today) - timedelta(days=window_days)).isoformat()
+    recent = [r for d, r in rows.items() if cutoff < d < today]
+    if len(recent) < 7:
+        return out
+    per_day = sum(r[0] - r[1] for r in recent) / len(recent)
+    out["per_day_gbp"] = round(per_day, 2)
+    if remaining <= 0:
+        out["years_left"] = 0.0
+    elif per_day > 0:
+        days_left = remaining / per_day
+        out["years_left"] = round(days_left / 365.25, 1)
+        out["payback_date"] = (date_cls.fromisoformat(today) + timedelta(days=int(days_left))).isoformat()
+    return out

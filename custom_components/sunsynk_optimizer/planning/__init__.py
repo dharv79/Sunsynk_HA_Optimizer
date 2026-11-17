@@ -655,6 +655,10 @@ from .savings import (
     ledger_add,
     ledger_backfill,
     ledger_totals,
+    PAYBACK_INVESTMENT_GBP,
+    PAYBACK_START,
+    PAYBACK_WINDOW_DAYS,
+    payback_summary,
 )
 from .shadow import (
     AGILE_SPIKE_PENCE,
@@ -704,6 +708,10 @@ __all__ = [
     "ledger_add",
     "ledger_backfill",
     "ledger_totals",
+    "PAYBACK_INVESTMENT_GBP",
+    "PAYBACK_START",
+    "PAYBACK_WINDOW_DAYS",
+    "payback_summary",
     "AGILE_SPIKE_PENCE",
     "API_ALERT_DAYS",
     "API_ALERT_MIN_CALLS",

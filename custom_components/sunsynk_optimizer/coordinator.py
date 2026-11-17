@@ -159,6 +159,8 @@ class OptimizerState:
     savings_ledger: dict[str, list[Any]] = field(default_factory=dict)
     savings_total: dict[str, Any] = field(default_factory=dict)
     savings_backfilled: str | None = None
+    # Phase 119: savings before tracking began (user-entered £), counted towards the payback.
+    payback_opening_gbp: float = 0.0
     last_week_kpis: dict[str, Any] = field(default_factory=dict)
     shadow_verdicts: dict[str, str] = field(default_factory=dict)
     # Phase 101: latest day's cloud API counters and the last 14 days (for the 3-day alert and weekly line).

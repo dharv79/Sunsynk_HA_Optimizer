@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .data_logger import DataLogger
 from .entity import optimizer_device_info, pin_entity_id
-from .planning import KPI_SENSORS, WEEKLY_KPI_SENSORS, weekly_kpi_values, clip_text, explain_plan, free_event_attributes, kpi_sensor_values, pv_string_attributes, upgrade_options
+from .planning import PAYBACK_START, KPI_SENSORS, payback_summary, WEEKLY_KPI_SENSORS, weekly_kpi_values, clip_text, explain_plan, free_event_attributes, kpi_sensor_values, pv_string_attributes, upgrade_options
 
 
 _ADAPTIVE_THRESHOLDS = {
@@ -156,7 +156,7 @@ async def async_setup_entry(
                 coordinator, entry, "marginal_cost", "Cost of 1 kWh now", entity_id="sensor.cost_of_1_kwh_now"
             ),
         ]
-        + [SavingsTotalSensor(coordinator, entry)]
+        + [SavingsTotalSensor(coordinator, entry), PaybackSensor(coordinator, entry)]
         + [KpiSensor(coordinator, entry, *spec) for spec in KPI_SENSORS]
         + [WeeklyKpiSensor(coordinator, entry, *spec) for spec in WEEKLY_KPI_SENSORS]
     )
@@ -218,6 +218,34 @@ class SavingsTotalSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         total = _as_dict(self.coordinator.state.savings_total)
         return {k: total.get(k) for k in ("since", "days", "estimated_days", "no_system_gbp", "actual_gbp", "by_month")}
+
+
+class PaybackSensor(CoordinatorEntity, SensorEntity):
+    """% of the £9000 investment repaid by savings (phase 119), with the projected payback date."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:cash-check"
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_name = "Investment repaid"
+        self._attr_unique_id = f"{entry.entry_id}_payback"
+        pin_entity_id(self, "sensor", "Investment repaid", "sensor.payback")
+        self._attr_device_info = optimizer_device_info(entry)
+
+    def _summary(self) -> dict[str, Any]:
+        st = self.coordinator.state
+        return payback_summary(st.savings_ledger, st.payback_opening_gbp, dt_util.now().date().isoformat())
+
+    @property
+    def native_value(self) -> float | None:
+        return self._summary()["percent"]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        s = self._summary()
+        return {**s, "start": PAYBACK_START}
 
 
 class WeeklyKpiSensor(CoordinatorEntity, SensorEntity):

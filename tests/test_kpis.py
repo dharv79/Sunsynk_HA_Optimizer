@@ -964,3 +964,21 @@ def test_backfill_text_and_weekly_total(planning):
     assert planning.backfill_text(totals, {"added": 0}) == ""
     value = {"days": 2, "no_system_gbp": 8.7, "actual_gbp": 1.3, "saving_gbp": 7.4}
     assert "Saved in total since 2026-10-31: £2.00 over 1 days." in planning.system_value_text(value, totals)
+
+
+def test_payback_summary_progress_and_projection():
+    ledger = {f"2026-11-{d:02d}": [6.0, 2.0, "day"] for d in range(1, 11)}  # £4/day x10
+    s = planning.payback_summary(ledger, 1000.0, "2026-11-12")
+    assert s["tracked_gbp"] == 40.0 and s["saved_gbp"] == 1040.0 and s["remaining_gbp"] == 7960.0
+    assert s["percent"] == 11.6 and s["per_day_gbp"] == 4.0
+    assert s["payback_date"] is not None
+    assert s["years_left"] == 5.4
+
+
+def test_payback_summary_unknown_not_zero():
+    s = planning.payback_summary({"2026-11-01": [5.0, 2.0, "day"]}, None, "2026-11-12")
+    assert s["opening_gbp"] == 0.0 and s["per_day_gbp"] is None and s["payback_date"] is None
+    neg = planning.payback_summary({f"2026-11-{d:02d}": [2.0, 3.0, "day"] for d in range(1, 10)}, 0, "2026-11-12")
+    assert neg["payback_date"] is None and neg["per_day_gbp"] == -1.0
+    done = planning.payback_summary({f"2026-11-{d:02d}": [2.0, 1.0, "day"] for d in range(1, 10)}, 9000, "2026-11-12")
+    assert done["percent"] == 100.0 and done["years_left"] == 0.0

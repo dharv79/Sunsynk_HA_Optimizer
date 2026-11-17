@@ -28,7 +28,7 @@ async def async_setup_entry(
 ) -> None:
     """Register the billed-amount entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([BilledAmountEntity(coordinator, entry)])
+    async_add_entities([BilledAmountEntity(coordinator, entry), PaybackOpeningEntity(coordinator, entry)])
 
 
 class BilledAmountEntity(CoordinatorEntity, NumberEntity):
@@ -64,3 +64,29 @@ class BilledAmountEntity(CoordinatorEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.optimizer.async_set_billed_amount(round(float(value), 2))
+
+
+class PaybackOpeningEntity(CoordinatorEntity, NumberEntity):
+    """£ saved before the savings ledger began (June 2025 to 9 Oct 2026), counted towards the payback (phase 119)."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:cash-plus"
+    _attr_name = "Saved before tracking"
+    _attr_native_unit_of_measurement = "£"
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 100000.0
+    _attr_native_step = 0.01
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_payback_opening"
+        self._attr_device_info = optimizer_device_info(entry)
+        pin_entity_id(self, "number", "Saved before tracking")
+
+    @property
+    def native_value(self) -> float:
+        return float(self.coordinator.state.payback_opening_gbp or 0.0)
+
+    async def async_set_native_value(self, value: float) -> None:
+        self.coordinator.update_state(touch=False, payback_opening_gbp=round(float(value), 2))
