@@ -45,7 +45,7 @@ None direct. It keeps the floor change (about £15-25 a winter) and the charge s
 - Not built: Grid Amps, Max Solar Power, work mode and float checks (the first two are deliberate user choices; the last two have unknown value encodings), and options-flow overrides (defaults in `planning.EFFICIENCY_EXPECTED`, `expected` argument ready).
 - Daily health (phase 100) lists the flag count and turns to "Check".
 
-## Matchers fixed (18/11/2026)
+## Matchers fixed (18/11/2026, 588cc68, PR #237)
 
 The 2.3.2 `settings_dump` was checked against the user's app screens. Trickle, Priority Load and Use Timer matched no key. They now use `zeroExportPower` (Grid Trickle Feed, 0 W), `energyMode` (Priority Load, 1) and `peakAndVallery` (Use Timer, 1). The floor and Low Noise matchers already hit `batteryShutdownCap`, `batteryLowCap` and `lowNoiseMode`. Tests use the real names.
 
