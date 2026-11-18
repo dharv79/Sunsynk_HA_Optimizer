@@ -295,7 +295,7 @@ Weekly (Sunday 18:00) read-only snapshot of the inverter settings, diffed agains
 
 ## Daily settings efficiency check (15/11/2026, phase 112)
 
-06:20 read-only check (`async_run_settings_efficiency`) of floors, trickle feed, Priority Load, Low Noise and Use Timer against `planning.EFFICIENCY_EXPECTED`. Debug `settings_flags` line daily; one notification when the flag set changes; flag count in the daily health line. Key names are matched by words and unverified: check `unmatched` in the first debug lines.
+06:20 read-only check (`async_run_settings_efficiency`) of floors, trickle feed, Priority Load, Low Noise and Use Timer against `planning.EFFICIENCY_EXPECTED`. Debug `settings_flags` line daily; one notification when the flag set changes; flag count in the daily health line. Key names confirmed from the settings dump against the app (18/11/2026): `batteryShutdownCap`, `batteryLowCap`, `zeroExportPower` (Grid Trickle Feed), `energyMode` (1 = Priority Load), `lowNoiseMode`, `peakAndVallery` (Use Timer). A firmware rename would show in `unmatched`.
 
 ## Daytime hold floor on the native timer slot (15/11/2026, phase 114)
 
