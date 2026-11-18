@@ -1,21 +1,36 @@
 """Phase 112: daily inverter settings efficiency flags (pure)."""
 
+# Real cloud key names, confirmed from the 2.3.2 settings dump against the Sunsynk app.
+CLEAN = {
+    "batteryShutdownCap": "15", "batteryShutdownVolt": "46", "batteryLowCap": "20", "batteryRestartCap": "30",
+    "zeroExportPower": "0", "energyMode": "1", "lowNoiseMode": "0", "peakAndVallery": "1",
+}
+
 
 def test_clean_settings_no_flags(planning):
-    s = {"batteryShutdownCap": "15", "batteryLowCap": "20", "trickleFeed": "0", "priorityLoad": "1", "lowNoise": "0", "useTimer": "1"}
-    flags, matched, unmatched = planning.settings_efficiency_check(s)
+    flags, matched, unmatched = planning.settings_efficiency_check(CLEAN)
     assert flags == [] and unmatched == [] and len(matched) == 6
 
 
+def test_real_key_names_matched(planning):
+    _, matched, _ = planning.settings_efficiency_check(CLEAN)
+    assert matched == {
+        "shutdown": "batteryShutdownCap", "low_batt": "batteryLowCap", "trickle": "zeroExportPower",
+        "priority_load": "energyMode", "low_noise": "lowNoiseMode", "use_timer": "peakAndVallery",
+    }
+
+
 def test_floors_and_bools_flagged(planning):
-    s = {"batteryShutdownCap": "20", "batteryLowCap": "25", "trickleFeed": "50", "priorityLoad": "0", "lowNoise": "1", "useTimer": "false"}
+    s = {**CLEAN, "batteryShutdownCap": "20", "batteryLowCap": "25", "zeroExportPower": "50",
+         "energyMode": "0", "lowNoiseMode": "1", "peakAndVallery": "false"}
     flags = planning.settings_efficiency_flags(s)
-    assert [f["key"] for f in flags] == ["batteryLowCap", "batteryShutdownCap", "lowNoise", "priorityLoad", "trickleFeed", "useTimer"]
+    assert [f["key"] for f in flags] == ["batteryLowCap", "batteryShutdownCap", "energyMode", "lowNoiseMode",
+                                         "peakAndVallery", "zeroExportPower"]
     assert flags[0]["value"] == 25.0 and flags[0]["expected"] == "<= 20"
 
 
 def test_missing_or_unreadable_never_flagged(planning):
-    flags, matched, unmatched = planning.settings_efficiency_check({"batteryLowCap": "n/a", "priorityLoad": ""})
+    flags, matched, unmatched = planning.settings_efficiency_check({"batteryLowCap": "n/a", "energyMode": ""})
     assert flags == [] and "low_batt" in matched and "shutdown" in unmatched
 
 

@@ -44,3 +44,9 @@ None direct. It keeps the floor change (about £15-25 a winter) and the charge s
 - Rules find keys by name words (floors: `shutdown`, `low`+`cap`; `trickle`; `priority`; `noise`; `usetimer`). Unmatched rules are listed in the `settings_flags` debug line so real key names can be confirmed and the matchers corrected.
 - Not built: Grid Amps, Max Solar Power, work mode and float checks (the first two are deliberate user choices; the last two have unknown value encodings), and options-flow overrides (defaults in `planning.EFFICIENCY_EXPECTED`, `expected` argument ready).
 - Daily health (phase 100) lists the flag count and turns to "Check".
+
+## Matchers fixed (18/11/2026)
+
+The 2.3.2 `settings_dump` was checked against the user's app screens. Trickle, Priority Load and Use Timer matched no key. They now use `zeroExportPower` (Grid Trickle Feed, 0 W), `energyMode` (Priority Load, 1) and `peakAndVallery` (Use Timer, 1). The floor and Low Noise matchers already hit `batteryShutdownCap`, `batteryLowCap` and `lowNoiseMode`. Tests use the real names.
+
+The same dump also maps Max Solar Power to `solarMaxSellPower`, MPPT scanning to `mpptMulti`, Low Power Mode to `lowPowerMode` and PV Check to `pv1SelfCheck`/`pv2SelfCheck`. On 18/11/2026 the user set Max Solar Power 3,800 → 5,500 W (within the SYNK-3.6K's 7,000 W DC rating) and turned MPPT scanning, Low Power Mode and PV1/PV2 Check on. None of these is audited.

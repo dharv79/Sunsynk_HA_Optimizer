@@ -98,9 +98,9 @@ def settings_change_text(changes: list[dict[str, str | None]], limit: int = AUDI
 
 
 # ---- Phase 112: daily efficiency flags -------------------------------------------------------------
-# Each rule finds its setting by key-name words (the cloud key names are unverified), then compares the
-# value with a recommended one. A rule that matches no key is reported as unmatched so the first live
-# run shows which names to add; a missing or unreadable value is never flagged (rule 11 spirit).
+# Each rule finds its setting by key-name words, then compares the value with a recommended one. A rule
+# that matches no key is reported as unmatched (a firmware rename would show there); a missing or
+# unreadable value is never flagged (rule 11 spirit).
 
 EFFICIENCY_EXPECTED: dict[str, float] = {"max_shutdown_soc": 15.0, "max_low_batt_soc": 20.0, "max_trickle_w": 0.0}
 
@@ -142,10 +142,12 @@ def settings_efficiency_check(
     rules: list[tuple[str, tuple[str, ...], tuple[str, ...], str, Any, str]] = [
         ("shutdown", ("shutdown",), (), "max", exp["max_shutdown_soc"], "Shut Down floor higher than the battery needs"),
         ("low_batt", ("low", "cap"), ("shutdown", "restart"), "max", exp["max_low_batt_soc"], "Low Batt floor higher than the battery needs"),
-        ("trickle", ("trickle",), (), "max", exp["max_trickle_w"], "grid trickle feed above 0 imports needlessly"),
-        ("priority_load", ("priority",), (), "on", True, "Priority Load off"),
+        # Cloud names confirmed from the settings dump against the app (18/11/2026): Grid Trickle Feed is
+        # zeroExportPower, Priority Load is energyMode (1 = Priority Load), Use Timer is peakAndVallery.
+        ("trickle", ("zeroexportpower",), (), "max", exp["max_trickle_w"], "grid trickle feed above 0 imports needlessly"),
+        ("priority_load", ("energymode",), (), "on", True, "Priority Load off"),
         ("low_noise", ("noise",), (), "on", False, "Low Noise Mode throttles the inverter"),
-        ("use_timer", ("usetimer",), (), "on", True, "Use Timer off, so the plan's slots are ignored"),
+        ("use_timer", ("peakandvallery",), (), "on", True, "Use Timer off, so the plan's slots are ignored"),
     ]
     flags: list[dict[str, Any]] = []
     matched: dict[str, str] = {}
