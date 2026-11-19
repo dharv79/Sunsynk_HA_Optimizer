@@ -119,7 +119,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 109. Data export service (CSV) | Done, merged (9321907, PR #216) | S, ~20-35k |
 | 110. Marginal-forecast target blend and bridge margin | Done, merged (29e8028, PR #188) | XS, ~35k actual |
 | 111. Recent-nights floor on the learned overnight load | Done, merged (9ba6bb8, PR #192) | XS, ~30k actual |
-| 112. Daily settings efficiency audit | Done, merged (046eb50, PR #224) | S, ~25-40k |
+| 112. Daily settings efficiency audit | Done, merged (046eb50, PR #224; matchers fixed 588cc68, PR #237) | S, ~25-40k |
 | 113. Cold-battery charge input from the BMS limit | Done, merged (ffb4201, PR #225), shadow only | S-M, ~35k actual |
 | 114. Daytime hold floor via the native timer slots | Done, merged (5ea1b4e, PR #226), shadow by default | M, ~50k actual |
 | 115. Per-slot power limit | In progress: shadow built, merged (e55575a, PR #233); live write not built | M, ~40-70k |
