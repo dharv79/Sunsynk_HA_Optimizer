@@ -1,6 +1,6 @@
 # Phase 121 — Find and stop the daily API "other" failures
 
-**Status:** In progress, built, PR open. **Size:** XS-S, ~15-25k. **Origin:** user request, 19/11/2026 (debug stream review).
+**Status:** Done, merged (46a6a5b, PR #239), released in 2.3.4. **Size:** XS-S, ~15-25k. **Origin:** user request, 19/11/2026 (debug stream review).
 
 ## Goal
 
