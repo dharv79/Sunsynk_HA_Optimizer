@@ -59,6 +59,8 @@ from .planning import (
     api_alert_due,
     api_unreliable_streak,
     append_api_day,
+    failure_detail,
+    read_back_should_stop,
     CLIPPED_SOC_PCT,
     daily_health,
     deploy_changes,
@@ -321,8 +323,17 @@ class MonitorMixin:
         try:
             actual = await self.coordinator.api.async_read_flux_products(self.plant_id)
         except Exception as exc:  # pragma: no cover - network
+            # Phase 121: an undocumented route that keeps failing stops until restart, not every 2 h.
+            self._flux_read_failures += 1
             _LOGGER.debug("Flux read-back failed: %s", exc)
+            if read_back_should_stop(self._flux_read_failures):
+                _LOGGER.warning(
+                    "Plant income read failed %d times in a row (%s); Flux drift check off until restart",
+                    self._flux_read_failures, failure_detail(exc),
+                )
+                self._flux_read_supported = False
             return []
+        self._flux_read_failures = 0
         if actual is None:
             _LOGGER.warning("Plant income read returned no fluxProducts; Flux drift check off until restart")
             self._flux_read_supported = False

@@ -21,7 +21,7 @@ import aiohttp
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from .planning.api_health import ApiStats, classify_failure
+from .planning.api_health import ApiStats, api_route, classify_failure, failure_detail
 
 BASE_WEB = "https://www.sunsynk.net"
 BASE_API = "https://api.sunsynk.net"
@@ -163,7 +163,9 @@ class SunsynkApiClient:
         try:
             data = await self._authorized_json_inner(method, url, payload)
         except Exception as exc:
-            self.stats.record(classify_failure(exc), time.monotonic() - started)
+            self.stats.record(
+                classify_failure(exc), time.monotonic() - started, route=f"{method} {api_route(url)}", detail=failure_detail(exc)
+            )
             raise
         self.stats.record(None, time.monotonic() - started)
         return data
