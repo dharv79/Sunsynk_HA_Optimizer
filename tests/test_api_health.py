@@ -77,3 +77,49 @@ def test_week_totals(planning):
     assert w["calls"] == 200 and w["failures_total"] == 10 and w["success_rate_pct"] == 95.0
     assert w["worst_latency_s"] == 12.0 and w["relogins"] == 1 and w["push_retries"] == 2
     assert planning.api_week([])["success_rate_pct"] is None
+
+
+# ---- Phase 121: per-route failures, identifier-free detail, read-back stop -----------------------------
+
+
+class _Err(Exception):
+    def __init__(self, msg, status=None):
+        super().__init__(msg)
+        if status is not None:
+            self.status = status
+
+
+def test_api_route_strips_ids_and_query(planning):
+    r = planning.api_route
+    assert r("https://api.sunsynk.net/api/v1/plant/123456/income") == "/api/v1/plant/{id}/income"
+    assert r("https://api.sunsynk.net/api/v1/event/2305A1234/realtime?lan=en") == "/api/v1/event/{id}/realtime"
+    assert r("https://api.sunsynk.net/api/v1/workdata/dynamic?sn=2305A1234&page=1") == "/api/v1/workdata/dynamic"
+    assert r("https://api.sunsynk.net/api/v1/inverters/count") == "/api/v1/inverters/count"
+
+
+def test_failure_detail_masks_identifiers(planning):
+    d = planning.failure_detail(_Err("{'code': 102, 'msg': 'plant 1234567 for a@b.com', 'url': 'https://x/1'}", 404))
+    assert d.startswith("_Err 404: ")
+    assert "1234567" not in d and "a@b.com" not in d and "https://" not in d and "102" in d
+    assert len(planning.failure_detail(_Err("x" * 500))) == planning.API_DETAIL_CHARS
+    assert planning.failure_detail(TimeoutError()) == "TimeoutError"
+
+
+def test_failures_counted_per_route_first_detail_kept(planning):
+    s = planning.ApiStats()
+    s.record("other", 0.1, route="GET /a", detail="first")
+    s.record("other", 0.1, route="GET /a", detail="second")
+    s.record("timeout", 30.0, route="GET /b", detail="slow")
+    s.record(None, 0.1, route="GET /a")
+    s.record("other", 0.1)  # no route: kind counted, route map untouched
+    out = s.take("d")
+    assert out["failures_by_route"] == {"GET /a": 2, "GET /b": 1}
+    assert out["failure_detail"] == {"GET /a": "first", "GET /b": "slow"}
+    assert out["failures"]["other"] == 3
+    assert s.take("e")["failures_by_route"] == {}
+
+
+def test_read_back_stops_after_limit(planning):
+    assert not planning.read_back_should_stop(0)
+    assert not planning.read_back_should_stop(planning.READ_BACK_FAIL_LIMIT - 1)
+    assert planning.read_back_should_stop(planning.READ_BACK_FAIL_LIMIT)

@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from .core import _num, median
 
@@ -21,6 +23,33 @@ API_ALERT_DAYS = 3              # consecutive unreliable days before the Repairs
 API_HISTORY_DAYS = 14
 API_LATENCY_KEEP = 500          # per-day cap on stored latencies
 FAILURE_KINDS = ("timeout", "401", "5xx", "other")
+API_DETAIL_CHARS = 120          # phase 121: first error text kept per route
+READ_BACK_FAIL_LIMIT = 2        # phase 121: consecutive read-back failures before it stops until restart
+
+
+def api_route(url: str) -> str:
+    """Route label for a cloud URL (phase 121): the path without query, any segment holding a digit -> {id}.
+
+    So a plant id or inverter serial never reaches the log; "/api/v1/plant/123/income" -> "/api/v1/plant/{id}/income".
+    """
+    path = urlsplit(str(url)).path or "/"
+    parts = ["{id}" if re.search(r"\d", p) and not re.fullmatch(r"v\d+", p) else p for p in path.split("/")]
+    return "/".join(parts)
+
+
+def failure_detail(exc: BaseException) -> str:
+    """Short, identifier-free text for one failure: class, HTTP status, message with digit runs and emails masked."""
+    status = getattr(exc, "status", None)
+    head = type(exc).__name__ + (f" {status}" if isinstance(status, int) else "")
+    text = re.sub(r"\S+@\S+", "<email>", str(exc))
+    text = re.sub(r"\d{4,}", "#", text)
+    text = re.sub(r"https?://\S+", "<url>", text)
+    return (f"{head}: {text}" if text else head)[:API_DETAIL_CHARS]
+
+
+def read_back_should_stop(consecutive_failures: int) -> bool:
+    """True once an optional read-back has failed READ_BACK_FAIL_LIMIT times in a row (phase 121)."""
+    return consecutive_failures >= READ_BACK_FAIL_LIMIT
 
 
 def classify_failure(exc: BaseException) -> str:
@@ -47,12 +76,20 @@ class ApiStats:
         self.relogins = 0
         self.push_retries = 0
         self._latencies: list[float] = []
+        self.failures_by_route: dict[str, int] = {}
+        self.failure_detail: dict[str, str] = {}
 
-    def record(self, kind: str | None, latency_s: float) -> None:
-        """One finished call: kind None for success, else a FAILURE_KINDS value."""
+    def record(self, kind: str | None, latency_s: float, route: str | None = None, detail: str | None = None) -> None:
+        """One finished call: kind None for success, else a FAILURE_KINDS value.
+
+        A failure with a route is also counted per route, keeping the first `detail` seen for it (phase 121)."""
         self.calls += 1
         if kind is not None:
             self.failures[kind if kind in self.failures else "other"] += 1
+            if route:
+                self.failures_by_route[route] = self.failures_by_route.get(route, 0) + 1
+                if detail and route not in self.failure_detail:
+                    self.failure_detail[route] = detail[:API_DETAIL_CHARS]
         if len(self._latencies) < API_LATENCY_KEEP:
             self._latencies.append(latency_s)
 
@@ -76,6 +113,8 @@ class ApiStats:
             "success_rate_pct": round(100 * (self.calls - failed) / self.calls, 1) if self.calls else None,
             "median_latency_s": round(median(self._latencies), 2) if self._latencies else None,
             "worst_latency_s": round(max(self._latencies), 2) if self._latencies else None,
+            "failures_by_route": dict(sorted(self.failures_by_route.items())),
+            "failure_detail": dict(sorted(self.failure_detail.items())),
         }
         self._reset()
         return out

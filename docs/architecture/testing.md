@@ -70,7 +70,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_shiftable.py` | Phase 102 recurring-block detection, valuation, fit check, cheap-window and bad-day filtering |
 | `tests/test_round_trip.py` | Phase 103 intervals, SOC correction, warm/cold groups, AC conversion, decision shadow, scorecard line |
 | `tests/test_weekly_digest.py` | Phase 104 import causes by week, charge shortfalls, forecast error, verdict changes, weekly KPI sensors |
-| `tests/test_api_health.py` | Phase 101 API counters, failure classes, history, 3-day alert, weekly totals |
+| `tests/test_api_health.py` | Phase 101 API counters, failure classes, history, 3-day alert, weekly totals; phase 121 per-route failures, masked detail, read-back stop |
 | `tests/test_daily_health.py` | Phase 100 health verdict, records-today count, deploy changes, record-type registry |
 | `tests/test_data_audit.py` | Phase 45 audit rules, summary, config redaction |
 | `tests/test_kpi_sensors.py` | Phase 47 KPI sensor values (None, never 0) |

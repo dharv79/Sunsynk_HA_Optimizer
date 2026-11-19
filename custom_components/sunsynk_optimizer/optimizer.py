@@ -170,6 +170,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         # until restart). Both unpersisted.
         self._drift_check_unsub = None
         self._flux_read_supported: bool | None = None
+        self._flux_read_failures = 0  # phase 121: consecutive read-back failures
         # Today's 16:00 peak export decision (phase 17). Not persisted: after a
         # restart mid-window a trim may replace a live export window, and the
         # 22:00 bundle omits the line (the JSONL record survives).
