@@ -1,6 +1,6 @@
 # Phase 115 — Per-slot power limit
 
-**Status:** Shadow built and merged (e55575a, PR #233, 16/11/2026); live write not built. Keys confirmed from the 2.3.0 settings dump. **Size:** M, ~40-70k est. **Origin:** efficiency review, 15/11/2026. Builds on phase 73 and needs phase 114's write path.
+**Status:** On hold (20/11/2026). Shadow built and merged (e55575a, PR #233, 16/11/2026); live write not built. Keys confirmed from the 2.3.0 settings dump. **Size:** M, ~40-70k est. **Origin:** efficiency review, 15/11/2026. Builds on phase 73 and needs phase 114's write path.
 
 ## Goal
 
@@ -53,3 +53,18 @@ The first step could not be met. The `#sunsynkdebug` stream (12 to 14 Nov) lists
 - `planning.slot_power_w` / `tou_slot_powers`: slots 16:00-19:00 spread the planned peak kWh over 3 h; slots from 19:00 use the learned evening load x 1.25; others 3,600 W. Floored at the house peak (`planning.house_peak_kw`, the highest hourly-average load in the last 14 days' `hourly_profile` records, a floor not the true spike), capped at 3,600 W. Missing input is `None`.
 - `tou_shadow` record now carries `power_w`, `inverter_power_w` and `house_peak_kw`. The peak export is only known at 16:00, so peak slots log `None` at plan time.
 - No write, no `slot_power_live` option yet. Next: review a few days of records, then add the live write (phase 114 path, house-peak floor, read-back) and the twin scoring.
+
+## On hold (20/11/2026): the shadow proposes no change
+
+The 20/11 01:55 `sensor.tou_shadow` read gave `power_w` 3600 for every slot
+(peak `None`, unknown until 16:00) against `inverter_power_w` 3600 throughout.
+`house_peak_kw` is 4.5, above the 3,600 W cap, so the house-peak floor lifts
+every limit to the maximum: the evening ~0.7 kW (learned load x 1.25) never
+survives. Lowering the floor is the import risk the design rules out, and the
+peak spread only matters with a surplus, which winter days rarely have
+(`peak_export` decision `no_surplus` on 20/11). A live write would set what the
+inverter already holds.
+
+**To release:** `house_peak_kw` falls below 3.6 kW over 14 days, or a tariff
+rewards shaped peak export. Then build the twin scoring and the live write as
+designed.

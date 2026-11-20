@@ -122,7 +122,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 112. Daily settings efficiency audit | Done, merged (046eb50, PR #224; matchers fixed 588cc68, PR #237) | S, ~25-40k |
 | 113. Cold-battery charge input from the BMS limit | Done, merged (ffb4201, PR #225), shadow only | S-M, ~35k actual |
 | 114. Daytime hold floor via the native timer slots | Done, merged (5ea1b4e, PR #226), shadow by default | M, ~50k actual |
-| 115. Per-slot power limit | In progress: shadow built, merged (e55575a, PR #233); live write not built | M, ~40-70k |
+| 115. Per-slot power limit | On hold: shadow built, merged (e55575a, PR #233); every limit clamps to 3,600 W (house peak 4.5 kW), live write not built | M, ~40-70k |
 | 116. Time at high state of charge | Done, merged (50f130b, PR #227), read-only | XS-S, ~25k actual |
 | 117. Weekly cost without solar and battery (user request 16/11/2026) | Done, merged (cdf187a, PR #229) | S, ~35k actual |
 | 118. Savings history and running total (user request 16/11/2026) | Done, merged (71fb4cf, PR #230) | S, ~30k actual |
@@ -131,7 +131,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 121. Find and stop the daily API "other" failures (user request 19/11/2026) | Done, merged (46a6a5b, PR #239) | XS-S, ~15-25k |
 | 122. Peak minimum SOC, respect a user-raised hold, unsupported Flux read-back (user request 20/11/2026) | Done, merged (fcfb87a, PR #241) | XS-S, ~20-35k |
 | 123. Peak-load recent high with cold margin (user request 20/11/2026) | Done, merged (54e603d, PR #242) | XS, ~15-25k |
-| 124. Flux 2 only pushes keep tonight's Flux 1 slot (user request 20/11/2026) | In progress | XS, ~15-25k |
+| 124. Flux 2 only pushes keep tonight's Flux 1 slot (user request 20/11/2026) | Done, merged (8cff51e, PR #243) | XS, ~15-25k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
