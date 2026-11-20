@@ -1,6 +1,6 @@
 # Phase 115 — Per-slot power limit
 
-**Status:** On hold (20/11/2026). Shadow built and merged (e55575a, PR #233, 16/11/2026); live write not built. Keys confirmed from the 2.3.0 settings dump. **Size:** M, ~40-70k est. **Origin:** efficiency review, 15/11/2026. Builds on phase 73 and needs phase 114's write path.
+**Status:** On hold (20/11/2026, bc41bb2, PR #244). Shadow built and merged (e55575a, PR #233, 16/11/2026); live write not built. Keys confirmed from the 2.3.0 settings dump. **Size:** M, ~40-70k est. **Origin:** efficiency review, 15/11/2026. Builds on phase 73 and needs phase 114's write path.
 
 ## Goal
 
