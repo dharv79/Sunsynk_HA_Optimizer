@@ -331,3 +331,14 @@ for 46% after a 6.1 kWh evening on 19/11 that drained to the floor by 18:00).
 
 Verification: `tests/test_peak_cover.py` (`peak_load_recent_high`); the
 20/11 history gives 4.35 kWh x 1.1, a 70% 16:00 requirement.
+
+## Flux 2 pushes keep the planned Flux 1 slot (20/11/2026, phase 124)
+
+A Flux 2 only push (export pause, trim, free-event sell) used to rebuild Flux 1
+from the stored config baseline, which older installs hold as 02:00-04:30, so
+the inverter showed a 04:30 charge end until the 01:55 re-plan.
+`async_push_flux_override` now runs `planning.carry_plan_flux1` after the
+peak-cover hold carry, adding the latest import plan's `flux_1` when a push
+names none. The default baseline now ends at 05:00. The export pause still sets
+the 16:00 slot to 100% by design. Tests: `test_planning.py`
+(`test_carry_plan_flux1_keeps_tonights_slot`).

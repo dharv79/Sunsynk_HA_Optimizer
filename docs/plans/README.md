@@ -131,6 +131,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 121. Find and stop the daily API "other" failures (user request 19/11/2026) | Done, merged (46a6a5b, PR #239) | XS-S, ~15-25k |
 | 122. Peak minimum SOC, respect a user-raised hold, unsupported Flux read-back (user request 20/11/2026) | Done, merged (fcfb87a, PR #241) | XS-S, ~20-35k |
 | 123. Peak-load recent high with cold margin (user request 20/11/2026) | Done, merged (54e603d, PR #242) | XS, ~15-25k |
+| 124. Flux 2 only pushes keep tonight's Flux 1 slot (user request 20/11/2026) | In progress | XS, ~15-25k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 

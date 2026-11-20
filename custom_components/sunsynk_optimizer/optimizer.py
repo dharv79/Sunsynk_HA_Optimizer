@@ -59,6 +59,7 @@ from .flux_helpers import (
     merge_entry_data,
 )
 from .planning import (
+    carry_plan_flux1,
     delivery,
     hhmm_to_minutes,
     hold_item,
@@ -511,6 +512,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         the new config.
         """
         config = self.cfg
+        payload = carry_plan_flux1(payload, self.coordinator.state.last_import_plan)
         flux_products = apply_flux_override(
             config.get(CONF_FLUX_PRODUCTS, []),
             payload.get("flux_1"),

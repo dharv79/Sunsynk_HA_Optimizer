@@ -912,6 +912,21 @@ def carry_held_flux1(payload: dict[str, Any], hold_flux1: dict[str, Any] | None,
     return {**payload, "flux_1": dict(hold_flux1)}
 
 
+def carry_plan_flux1(payload: dict[str, Any], plan: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep tonight's planned Flux 1 slot when a push names only Flux 2 (phase 124).
+
+    A Flux 2 only push (export pause, trim, free-event sell) rebuilds Flux 1
+    from the stored config baseline, which on older installs ends at 04:30
+    rather than the plan's 05:00. Carrying the latest plan's slot keeps the
+    overnight charge as planned. A push that names Flux 1 (plan, hold) wins.
+    """
+    plan_payload = plan.get("payload") if isinstance(plan, dict) else None
+    flux_1 = plan_payload.get("flux_1") if isinstance(plan_payload, dict) else None
+    if payload.get("flux_1") or not isinstance(flux_1, dict) or not flux_1.get("endTime"):
+        return payload
+    return {**payload, "flux_1": dict(flux_1)}
+
+
 GRID_CURRENT_DRIFT_TOLERANCE_A = 1.0
 
 _FLUX_TIME_FIELDS = ("startTime", "endTime")
