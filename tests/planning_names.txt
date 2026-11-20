@@ -647,3 +647,4 @@ PEAK_COVER_RECENT_MIN_DAYS
 PEAK_COVER_COLD_C
 PEAK_COVER_COLD_MARGIN
 peak_load_recent_high
+carry_plan_flux1

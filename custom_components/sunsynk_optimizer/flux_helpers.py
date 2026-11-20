@@ -50,7 +50,7 @@ def default_flux_products() -> list[dict[str, Any]]:
     These indices are fixed by the Sunsynk API — never reorder them.
     """
     return [
-        {"provider": 2, "direction": 1, "startTime": "02:00", "endTime": "04:30", "targetSoc": 100},
+        {"provider": 2, "direction": 1, "startTime": "02:00", "endTime": "05:00", "targetSoc": 100},
         {"provider": 2, "direction": 0, "startTime": "16:00", "endTime": "16:15", "targetSoc": 85},
     ]
 

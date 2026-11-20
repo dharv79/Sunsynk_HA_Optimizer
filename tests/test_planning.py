@@ -1041,6 +1041,22 @@ def test_carry_held_flux1_keeps_peak_cover_hold(planning):
     assert planning.carry_held_flux1(plan, hold, 13 * 60) is plan        # a push naming Flux 1 wins
 
 
+def test_carry_plan_flux1_keeps_tonights_slot(planning):
+    plan = {"payload": {"flux_1": {"startTime": "02:00", "endTime": "05:00", "targetSoc": 100}}}
+    pause = {"flux_2": {"startTime": "16:00", "endTime": "16:15", "targetSoc": 100}}
+    out = planning.carry_plan_flux1(pause, plan)
+    assert out == {**pause, "flux_1": plan["payload"]["flux_1"]}
+    assert out["flux_1"] is not plan["payload"]["flux_1"] and "flux_1" not in pause
+    hold = {"flux_1": {"startTime": "12:30", "endTime": "16:00", "targetSoc": 60}}
+    assert planning.carry_plan_flux1(hold, plan) is hold                 # a push naming Flux 1 wins
+    for empty in (None, {}, {"payload": None}, {"payload": {"flux_1": {}}}):
+        assert planning.carry_plan_flux1(pause, empty) is pause          # no plan yet: config baseline
+
+
+def test_default_flux1_ends_with_the_cheap_window(flux_helpers):
+    assert flux_helpers.default_flux_products()[0]["endTime"] == "05:00"
+
+
 def test_trim_target_never_sells_below_a_hold(planning):
     assert planning.trim_target_soc(95, 30, minutes=13 * 60) == 82
     assert planning.trim_target_soc(95, 30, minutes=13 * 60, hold_soc=90) == 90

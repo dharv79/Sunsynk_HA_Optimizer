@@ -1,6 +1,6 @@
 # Phase 123: peak-load recent high with cold margin
 
-Status: In progress
+Status: Done, merged (54e603d, PR #242), released in 2.3.6
 
 ## Why
 
