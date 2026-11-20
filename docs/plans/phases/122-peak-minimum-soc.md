@@ -1,6 +1,6 @@
 # Phase 122 — Peak minimum SOC, respect a user-raised hold, unsupported read-back
 
-**Status:** In progress (PR open). **Size:** XS-S, ~20-35k. **Origin:** user request, 20/11/2026.
+**Status:** Done, merged (fcfb87a, PR #241), released in 2.3.5. **Size:** XS-S, ~20-35k. **Origin:** user request, 20/11/2026.
 
 ## Goal
 
