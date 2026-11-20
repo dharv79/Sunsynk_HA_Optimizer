@@ -642,3 +642,8 @@ route_unsupported
 peak_required_soc
 hold_floor_needs_reassert
 hold_floor_restore_due
+PEAK_COVER_RECENT_DAYS
+PEAK_COVER_RECENT_MIN_DAYS
+PEAK_COVER_COLD_C
+PEAK_COVER_COLD_MARGIN
+peak_load_recent_high

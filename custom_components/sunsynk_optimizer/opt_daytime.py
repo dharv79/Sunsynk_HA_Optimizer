@@ -85,6 +85,7 @@ from .planning import (
     peak_export_skip_reason,
     peak_load_estimate_kwh,
     peak_load_estimate_split,
+    peak_load_recent_high,
     peak_need_soc,
     over_limit_import_step,
     intraday_forecast_scale,
@@ -993,12 +994,19 @@ class DaytimeMixin:
         load_at_05 = (snapshots.get("05:00") or {}).get("load_kwh")
         load_now = self._essential_state(self.day_load_entity)
         load_kw, load_source = daytime_load_kw(load_now, load_at_05, now.hour + now.minute / 60.0 - 5.0, fallback_kw)
+        peak_days = await self.data_logger.async_recent_peak_load_days()
         peak_load_kwh, peak_load_source, peak_margin = peak_load_estimate_split(
-            await self.data_logger.async_recent_peak_load_days(), 3.0 * load_kw, now.weekday() >= 5
+            peak_days, 3.0 * load_kw, now.weekday() >= 5
         )
         profile_peak_kwh = (self._load_profile or {}).get("peak_kwh")
         if self._profile_live() is not None and profile_peak_kwh is not None:  # phase 71 live
             peak_load_kwh, peak_load_source, peak_margin = profile_peak_kwh, "load_profile", 1.0
+        base_load_kwh, base_load_source, base_margin = peak_load_kwh, peak_load_source, peak_margin
+        peak_load_kwh, recent_source, peak_margin = peak_load_recent_high(
+            peak_days, peak_load_kwh, peak_margin, self._outside_temp_now()
+        )
+        if recent_source:
+            peak_load_source = recent_source
         # Pessimistic solar, like the low-solar decisions: the raw (uncorrected) forecast.
         hourly = self._hourly_or_synthetic_forecast(cfg, now)
         solar_kwh = solar_until_kwh(hourly, now.hour + now.minute / 60.0)
@@ -1061,6 +1069,9 @@ class DaytimeMixin:
             "peak_load_source": peak_load_source,
             "peak_load_kwh_profile": profile_peak_kwh,
             "peak_margin": peak_margin,
+            "peak_load_kwh_base": base_load_kwh,
+            "peak_load_source_base": base_load_source,
+            "peak_margin_base": base_margin,
             "wear_cost_p": self._wear_pence(),
             "day_pence": prices["day"],
             "peak_pence": prices["peak"],
