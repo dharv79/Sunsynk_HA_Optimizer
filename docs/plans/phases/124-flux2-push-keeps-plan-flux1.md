@@ -1,6 +1,6 @@
 # Phase 124: Flux 2 only pushes keep tonight's Flux 1 slot
 
-Status: Done, merged (8cff51e, PR #243)
+Status: Done, merged (8cff51e, PR #243), released in 2.3.7
 
 ## Why
 

@@ -122,7 +122,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 112. Daily settings efficiency audit | Done, merged (046eb50, PR #224; matchers fixed 588cc68, PR #237) | S, ~25-40k |
 | 113. Cold-battery charge input from the BMS limit | Done, merged (ffb4201, PR #225), shadow only | S-M, ~35k actual |
 | 114. Daytime hold floor via the native timer slots | Done, merged (5ea1b4e, PR #226), shadow by default | M, ~50k actual |
-| 115. Per-slot power limit | In progress: shadow built, merged (e55575a, PR #233); live write not built | M, ~40-70k |
+| 115. Per-slot power limit | On hold: shadow built, merged (e55575a, PR #233); every limit clamps to 3,600 W (house peak 4.5 kW), live write not built | M, ~40-70k |
 | 116. Time at high state of charge | Done, merged (50f130b, PR #227), read-only | XS-S, ~25k actual |
 | 117. Weekly cost without solar and battery (user request 16/11/2026) | Done, merged (cdf187a, PR #229) | S, ~35k actual |
 | 118. Savings history and running total (user request 16/11/2026) | Done, merged (71fb4cf, PR #230) | S, ~30k actual |
