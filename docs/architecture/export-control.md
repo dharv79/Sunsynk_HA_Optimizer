@@ -317,3 +317,17 @@ A peak-cover **hold** (SOC still at or above the peak requirement but heading be
 **Design.** `number.peak_minimum_soc` (0 = off) sets a floor on peak cover's `required_soc` (`planning.peak_required_soc`); `peak_cover` logs `peak_min_soc`. The hold check rewrites the slot only when it reads below the hold (`hold_floor_needs_reassert`), and the 16:00 restore leaves a slot the user raised above it (`hold_floor_restore_due`). The Flux read-back's HTTP 404/405 is logged under `api_health.unsupported`, not as a failure, and stops the read-back at once (`route_unsupported`).
 
 **Verification.** Tests in `test_peak_cover.py`, `test_daytime_hold.py`, `test_api_health.py`. Live: with the minimum at 65 and SOC below it at 14:00, the `peak_cover` line shows `decision: top_up`, `target_soc: 65`, `peak_min_soc: 65`; the next `api_health` line shows `unsupported` and no failures from the income route.
+
+## Peak-load recent high (20/11/2026, phase 123)
+
+Design: the 14:00 peak cover estimate is raised to the p75 of the last 7 logged
+16:00-19:00 windows (any day type, >= 4 days), times 1.1 below 8 °C outside,
+whenever that exceeds the phase 60 weekday median / p75 x margin or the live
+load profile. It never lowers the estimate. Base figures are logged as
+`peak_load_kwh_base`, `peak_load_source_base`, `peak_margin_base`.
+
+Root cause: the weekday median with no margin lagged a cold snap (20/11 asked
+for 46% after a 6.1 kWh evening on 19/11 that drained to the floor by 18:00).
+
+Verification: `tests/test_peak_cover.py` (`peak_load_recent_high`); the
+20/11 history gives 4.35 kWh x 1.1, a 70% 16:00 requirement.

@@ -197,6 +197,45 @@ def peak_load_estimate_split(
     return kwh, source, PEAK_COVER_MARGIN
 
 
+PEAK_COVER_RECENT_DAYS = 7  # last N logged 16:00-19:00 windows, any day type (phase 123)
+
+PEAK_COVER_RECENT_MIN_DAYS = 4
+
+PEAK_COVER_COLD_C = 8.0  # outside temperature below which the recent high gets the margin
+
+PEAK_COVER_COLD_MARGIN = 1.1
+
+
+def peak_load_recent_high(
+    samples: list[tuple[str, float]], kwh: float, margin: float, outside_temp_c: float | None = None,
+) -> tuple[float, str, float]:
+    """Raise the 16:00-19:00 estimate to the recent high when that is bigger (phase 123).
+
+    The weekday median over 14 days is pulled down by light days and lags a cold
+    snap. The p75 of the last PEAK_COVER_RECENT_DAYS logged windows (any day
+    type), times PEAK_COVER_COLD_MARGIN below PEAK_COVER_COLD_C, replaces
+    (kwh, margin) when kWh x margin is lower. Thin history or no temperature
+    keeps the cold margin off; it never lowers the estimate.
+    """
+    dated = []
+    for day, value in samples:
+        try:
+            date.fromisoformat(str(day))
+        except ValueError:
+            continue
+        if _is_number(value) and value >= 0:
+            dated.append((str(day), float(value)))
+    recent = [v for _, v in sorted(dated)[-PEAK_COVER_RECENT_DAYS:]]
+    if len(recent) < PEAK_COVER_RECENT_MIN_DAYS:
+        return kwh, "", margin
+    high = round(percentile(recent, PEAK_COVER_LOAD_PERCENTILE), 2)
+    cold = _is_number(outside_temp_c) and outside_temp_c < PEAK_COVER_COLD_C
+    high_margin = PEAK_COVER_COLD_MARGIN if cold else 1.0
+    if high * high_margin <= kwh * margin:
+        return kwh, "", margin
+    return high, "recent_high_cold" if cold else "recent_high", high_margin
+
+
 BASELOAD_MIN_NIGHTS = 7
 
 BASELOAD_FACTOR = 1.5

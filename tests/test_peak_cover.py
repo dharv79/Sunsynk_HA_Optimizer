@@ -179,3 +179,26 @@ def test_peak_required_soc(planning):
     assert planning.peak_required_soc(70.1, 65) == 71
     assert planning.peak_required_soc(99.5, 120) == 100
     assert planning.peak_required_soc(45.2, None) == 46
+
+
+def test_recent_high_lifts_a_low_weekday_median(planning):
+    # 11-19 Nov 2026: light days pulled the weekday median down; the last two weekdays were heavy.
+    days = [("2026-11-11", 1.0), ("2026-11-12", 1.9), ("2026-11-13", 1.8), ("2026-11-14", 2.9),
+            ("2026-11-15", 5.7), ("2026-11-18", 3.0), ("2026-11-19", 6.1)]
+    kwh, src, margin = planning.peak_load_recent_high(days, 1.9, 1.0, outside_temp_c=6.7)
+    assert (kwh, src, margin) == (4.35, "recent_high_cold", planning.PEAK_COVER_COLD_MARGIN)
+    assert planning.peak_load_recent_high(days, 1.9, 1.0, outside_temp_c=12.0) == (4.35, "recent_high", 1.0)
+    assert planning.peak_load_recent_high(days, 1.9, 1.0) == (4.35, "recent_high", 1.0)
+    # 16:00 SOC need rises from ~39% to ~69% for this house.
+    need = planning.peak_required_soc(20 + planning.peak_need_soc(kwh, 10.6, margin))
+    assert need == 70
+
+
+def test_recent_high_never_lowers_and_needs_history(planning):
+    days = [("2026-11-1%d" % i, 2.0) for i in range(7)]
+    assert planning.peak_load_recent_high(days, 3.0, 1.1, 2.0) == (3.0, "", 1.1)
+    assert planning.peak_load_recent_high(days[:3], 1.0, 1.0, 2.0) == (1.0, "", 1.0)
+    assert planning.peak_load_recent_high([("bad", 9.0)] * 5, 1.0, 1.0) == (1.0, "", 1.0)
+    # only the newest PEAK_COVER_RECENT_DAYS count, whatever the input order
+    old = [("2026-10-0%d" % i, 9.0) for i in range(1, 8)]
+    assert planning.peak_load_recent_high(days + old, 1.0, 1.0, 20.0) == (2.0, "recent_high", 1.0)
