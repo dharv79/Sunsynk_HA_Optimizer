@@ -45,6 +45,8 @@ from .planning import (
     round_trip_shadow,
     daytime_hold_floor,
     daytime_hold_slot,
+    hold_floor_needs_reassert,
+    hold_floor_restore_due,
     hold_readback_ok,
     tou_slots_from_settings,
     BATTERY_BOTTOM_SOC,
@@ -1014,6 +1016,7 @@ class DaytimeMixin:
         plan = peak_cover_plan(
             soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, solar_kwh, load_kw, peak_load_kwh,
             charge_rate_kw, prices["day"], prices["peak"], margin=peak_margin, wear_pence=self._wear_pence(),
+            min_soc=self.coordinator.state.peak_min_soc,
         )
         actionable = plan["decision"] in ("top_up", "hold") and plan["push_now"]
         if minutes < PEAK_COVER_FROM_MINUTES and plan["decision"] != "hold":
@@ -1082,6 +1085,7 @@ class DaytimeMixin:
         return peak_cover_plan(
             soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, min(raw_kwh, scaled_kwh), load_kw, peak_load_kwh,
             charge_rate_kw, prices["day"], prices["peak"], margin=margin, wear_pence=self._wear_pence(),
+            min_soc=self.coordinator.state.peak_min_soc,
         )["decision"]
 
     async def _async_hold_floor_decide(self, plan: dict[str, Any], soc: float, minutes: int, actionable: bool) -> dict[str, Any]:
@@ -1127,7 +1131,8 @@ class DaytimeMixin:
         if self.operation_mode == "monitor":
             return
         settings = await self._async_api_read("Daytime hold check", self.coordinator.api.async_read_settings, self.inverter_serial)
-        if hold_readback_ok(settings, held["slot"], held["floor"]) is False:
+        # Phase 122: only a floor that dropped below the hold is put back; a value the user raised is kept.
+        if hold_floor_needs_reassert(settings, held["slot"], held["floor"]):
             await self._async_write_setting(f"cap{held['slot']}", held["floor"])
 
     async def _async_peak_cover_end(self) -> None:
@@ -1138,6 +1143,8 @@ class DaytimeMixin:
         state["pushed"] = False
         held = state.pop("hold_floor", None)
         if held:
-            await self._async_write_setting(f"cap{held['slot']}", held["previous"])
+            settings = await self._async_api_read("Daytime hold end", self.coordinator.api.async_read_settings, self.inverter_serial)
+            if hold_floor_restore_due(settings, held["slot"], held["floor"]):  # phase 122: a user-raised slot is left alone
+                await self._async_write_setting(f"cap{held['slot']}", held["previous"])
         else:
             await self._async_restore_normal_plan()

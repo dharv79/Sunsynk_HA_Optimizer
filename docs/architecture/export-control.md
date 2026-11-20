@@ -308,3 +308,12 @@ A peak-cover **hold** (SOC still at or above the peak requirement but heading be
 - **State is unpersisted** (`_peak_cover["hold_floor"]`): a reload mid-day loses the restore value. The slot floor then stays raised until the next Flux push or the 01:55 plan rewrites the slots. Check after any mid-day restart.
 - **Unverified:** whether the inverter honours a `cap2` change while the Flux product is active. Turn the option on for one watched day: the battery should stay at or above the hold SOC until 16:00.
 - **Not built:** the scorecard row (kWh round-trip saved, top-ups avoided). `gain_vs_topup_gbp` in the record already carries the saving per hold.
+
+
+## Peak minimum SOC and user-raised holds (20/11/2026, phase 122)
+
+**Root cause.** 19/11 the peak window used 6.1 kWh against a 3.0 kWh history, so the 61% top-up ran out by 18:00. 20/11 the user raised a 46% hold to 65% in the Sunsynk app, and the 30-minute hold check wrote 46% back because it treated any value other than the hold as drift.
+
+**Design.** `number.peak_minimum_soc` (0 = off) sets a floor on peak cover's `required_soc` (`planning.peak_required_soc`); `peak_cover` logs `peak_min_soc`. The hold check rewrites the slot only when it reads below the hold (`hold_floor_needs_reassert`), and the 16:00 restore leaves a slot the user raised above it (`hold_floor_restore_due`). The Flux read-back's HTTP 404/405 is logged under `api_health.unsupported`, not as a failure, and stops the read-back at once (`route_unsupported`).
+
+**Verification.** Tests in `test_peak_cover.py`, `test_daytime_hold.py`, `test_api_health.py`. Live: with the minimum at 65 and SOC below it at 14:00, the `peak_cover` line shows `decision: top_up`, `target_soc: 65`, `peak_min_soc: 65`; the next `api_health` line shows `unsupported` and no failures from the income route.

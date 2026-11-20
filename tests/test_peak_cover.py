@@ -161,3 +161,21 @@ def test_no_hold_when_projection_meets_the_requirement_or_price_missing(planning
     assert _plan(planning, soc=70.0, day_pence=None)["decision"] == "no_price"
     # Peak no dearer than the day rate: nothing to protect, and a top-up is not worth it either.
     assert _plan(planning, soc=70.0, day_pence=40.0)["decision"] == "not_worth_it"
+
+
+def test_peak_minimum_soc_raises_the_requirement(planning):
+    # Phase 122: SOC 46 would hold at the estimate; a 65% minimum makes it a top-up to 65.
+    base = _plan(planning, soc=46.0, solar_kwh=0.0, load_kw=0.5)
+    raised = _plan(planning, soc=46.0, solar_kwh=0.0, load_kw=0.5, min_soc=65)
+    assert raised["required_soc"] == 65 and raised["target_soc"] == 65 and raised["decision"] == "top_up"
+    assert raised["peak_min_soc"] == 65 and base["peak_min_soc"] is None
+    assert base["required_soc"] < 65
+    assert _plan(planning, min_soc=0)["required_soc"] == base["required_soc"]
+
+
+def test_peak_required_soc(planning):
+    assert planning.peak_required_soc(45.2) == 46
+    assert planning.peak_required_soc(45.2, 65) == 65
+    assert planning.peak_required_soc(70.1, 65) == 71
+    assert planning.peak_required_soc(99.5, 120) == 100
+    assert planning.peak_required_soc(45.2, None) == 46

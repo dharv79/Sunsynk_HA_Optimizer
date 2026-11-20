@@ -62,7 +62,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_notify_policy.py` | Phase 108 title levels, quiet hours across midnight, send/hold rules, held list cap, morning brief |
 | `tests/test_export.py` | Phase 109 export rows, range and type filtering, CSV columns, masking, daily-summary join |
 | `tests/test_settings_efficiency.py` | Phase 112 efficiency flags (floors, bool settings, missing values, override), health flag count |
-| `tests/test_daytime_hold.py` | Phase 114 slot covering now→16:00, hold floor rules, cap read-back |
+| `tests/test_daytime_hold.py` | Phase 114 slot covering now→16:00, hold floor rules, cap read-back; phase 122 reassert only below the hold, user raise kept |
 | `tests/test_high_soc.py` | Phase 116 hours at ≥95% / 100%, gap handling, 30-day and year-to-date totals |
 | `tests/test_bms_rate.py` | Phase 113 BMS-limited charge rate, resolve with BMS cap, rate source, plan fields |
 | `tests/test_settings_audit.py` | Phase 107 snapshot filtering, diff (added/removed/numeric text), notification text |
@@ -70,7 +70,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_shiftable.py` | Phase 102 recurring-block detection, valuation, fit check, cheap-window and bad-day filtering |
 | `tests/test_round_trip.py` | Phase 103 intervals, SOC correction, warm/cold groups, AC conversion, decision shadow, scorecard line |
 | `tests/test_weekly_digest.py` | Phase 104 import causes by week, charge shortfalls, forecast error, verdict changes, weekly KPI sensors |
-| `tests/test_api_health.py` | Phase 101 API counters, failure classes, history, 3-day alert, weekly totals; phase 121 per-route failures, masked detail, read-back stop |
+| `tests/test_api_health.py` | Phase 101 API counters, failure classes, history, 3-day alert, weekly totals; phase 121 per-route failures, masked detail, read-back stop; phase 122 unsupported (404/405) route |
 | `tests/test_daily_health.py` | Phase 100 health verdict, records-today count, deploy changes, record-type registry |
 | `tests/test_data_audit.py` | Phase 45 audit rules, summary, config redaction |
 | `tests/test_kpi_sensors.py` | Phase 47 KPI sensor values (None, never 0) |
@@ -92,7 +92,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_native_tou.py` | Phase 73 TOU shadow: `tou_slots_from_plan` mapping, padding, peak hold, merge, missing inputs; `tou_slots_from_settings` parsing; `tou_diff`; `tou_settings_payload` round trip; phase 115 `slot_power_w` floors and caps, `house_peak_kw`, `tou_inverter_powers` |
 | `tests/test_flex_event.py` | Phase 77 flex event shadow: `flex_event_offer` floor/rate cap/decisions/wear, `flex_event_window` calendar and on/off entities |
 | `tests/test_electrification.py` | Phase 78 electrification advisor: `heat_pump_cop`, `mean_band_price`, `heat_pump_scenario`, `export_limit_scenario`, `electrification_summary` |
-| `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback) |
+| `tests/test_peak_cover.py` | Phase 30 `peak_cover_plan` (shortfall, timing, solar, prices), `solar_until_kwh`, `daytime_load_kw`, `peak_load_estimate_kwh`, `data_logger.latest_record` (22:00 report fallback); phase 122 `min_soc` / `peak_required_soc` |
 | `tests/test_dashboard.py` | Dashboard structure and views, sanitised ids, allowed custom cards, confirmed actions, no surrogate escapes, apexcharts keys, flow card and day chart config/JS, `card_resource` serves every bundled card |
 | `tests/test_cards.py` | The bundled cards in Node (skipped without Node): the flow card redraws only for watched entities, the day chart follows today past midnight and a pointer move redraws only the cursor |
 | `tests/test_security.py` | `_safe_id` sanitising of entity IDs in generated YAML (b37 hardening); phase 81: nested redaction, URL-quoted ids, card allow-list and `innerHTML`, safe override parsing, pinned workflow actions |

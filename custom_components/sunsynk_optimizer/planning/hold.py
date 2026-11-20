@@ -64,6 +64,22 @@ def daytime_hold_floor(decision: Any, required_soc: Any, current_cap: Any, soc: 
     return hold
 
 
+def hold_floor_needs_reassert(settings: Any, slot: int, floor: Any) -> bool:
+    """Phase 122: put the hold back only when ``cap<slot>`` reads below it; a higher value is the user's, kept."""
+    if not isinstance(settings, dict) or not _is_number(floor):
+        return False
+    value = _as_float(settings.get(f"cap{slot}"))
+    return value is not None and value < float(floor)
+
+
+def hold_floor_restore_due(settings: Any, slot: int, floor: Any) -> bool:
+    """Phase 122: at 16:00 put the old floor back unless the user raised the slot above the hold (unreadable: restore)."""
+    if not isinstance(settings, dict) or not _is_number(floor):
+        return True
+    value = _as_float(settings.get(f"cap{slot}"))
+    return value is None or value <= float(floor)
+
+
 def hold_readback_ok(settings: Any, slot: int, expected: Any) -> bool | None:
     """True when ``cap<slot>`` reads back as ``expected``; None when it can't be read."""
     if not isinstance(settings, dict) or not _is_number(expected):

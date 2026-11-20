@@ -25,6 +25,7 @@ API_LATENCY_KEEP = 500          # per-day cap on stored latencies
 FAILURE_KINDS = ("timeout", "401", "5xx", "other")
 API_DETAIL_CHARS = 120          # phase 121: first error text kept per route
 READ_BACK_FAIL_LIMIT = 2        # phase 121: consecutive read-back failures before it stops until restart
+UNSUPPORTED_STATUSES = (404, 405)  # phase 122: the route doesn't exist, so retrying can't help
 
 
 def api_route(url: str) -> str:
@@ -47,9 +48,15 @@ def failure_detail(exc: BaseException) -> str:
     return (f"{head}: {text}" if text else head)[:API_DETAIL_CHARS]
 
 
-def read_back_should_stop(consecutive_failures: int) -> bool:
-    """True once an optional read-back has failed READ_BACK_FAIL_LIMIT times in a row (phase 121)."""
-    return consecutive_failures >= READ_BACK_FAIL_LIMIT
+def route_unsupported(exc: BaseException) -> bool:
+    """Phase 122: the cloud says the route doesn't exist (HTTP 404/405), a permanent answer, not a failure."""
+    return getattr(exc, "status", None) in UNSUPPORTED_STATUSES
+
+
+def read_back_should_stop(consecutive_failures: int, exc: BaseException | None = None) -> bool:
+    """True once an optional read-back has failed READ_BACK_FAIL_LIMIT times in a row (phase 121),
+    or at once when the route is unsupported (phase 122)."""
+    return consecutive_failures >= READ_BACK_FAIL_LIMIT or (exc is not None and route_unsupported(exc))
 
 
 def classify_failure(exc: BaseException) -> str:
@@ -78,6 +85,7 @@ class ApiStats:
         self._latencies: list[float] = []
         self.failures_by_route: dict[str, int] = {}
         self.failure_detail: dict[str, str] = {}
+        self.unsupported: dict[str, int] = {}
 
     def record(self, kind: str | None, latency_s: float, route: str | None = None, detail: str | None = None) -> None:
         """One finished call: kind None for success, else a FAILURE_KINDS value.
@@ -92,6 +100,11 @@ class ApiStats:
                     self.failure_detail[route] = detail[:API_DETAIL_CHARS]
         if len(self._latencies) < API_LATENCY_KEEP:
             self._latencies.append(latency_s)
+
+    def note_unsupported(self, route: str, latency_s: float) -> None:
+        """Phase 122: an optional call to a route the cloud doesn't offer; counted as a call, not a failure."""
+        self.record(None, latency_s)
+        self.unsupported[route] = self.unsupported.get(route, 0) + 1
 
     def note_relogin(self) -> None:
         self.relogins += 1
@@ -115,6 +128,7 @@ class ApiStats:
             "worst_latency_s": round(max(self._latencies), 2) if self._latencies else None,
             "failures_by_route": dict(sorted(self.failures_by_route.items())),
             "failure_detail": dict(sorted(self.failure_detail.items())),
+            "unsupported": dict(sorted(self.unsupported.items())),
         }
         self._reset()
         return out
