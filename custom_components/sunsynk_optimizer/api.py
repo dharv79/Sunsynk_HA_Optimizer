@@ -21,7 +21,7 @@ import aiohttp
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from .planning.api_health import ApiStats, api_route, classify_failure, failure_detail
+from .planning.api_health import ApiStats, api_route, classify_failure, failure_detail, route_unsupported
 
 BASE_WEB = "https://www.sunsynk.net"
 BASE_API = "https://api.sunsynk.net"
@@ -157,15 +157,21 @@ class SunsynkApiClient:
                 self.stats.note_relogin()
             await self.async_login()
 
-    async def _authorized_json(self, method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Authenticated request returning parsed JSON, timed and counted for the reliability log (phase 101)."""
+    async def _authorized_json(
+        self, method: str, url: str, payload: dict[str, Any] | None = None, optional: bool = False
+    ) -> dict[str, Any]:
+        """Authenticated request returning parsed JSON, timed and counted for the reliability log (phase 101).
+
+        `optional` (phase 122): a 404/405 is the route not existing, logged as unsupported, not a failure."""
         started = time.monotonic()
         try:
             data = await self._authorized_json_inner(method, url, payload)
         except Exception as exc:
-            self.stats.record(
-                classify_failure(exc), time.monotonic() - started, route=f"{method} {api_route(url)}", detail=failure_detail(exc)
-            )
+            route = f"{method} {api_route(url)}"
+            if optional and route_unsupported(exc):
+                self.stats.note_unsupported(route, time.monotonic() - started)
+            else:
+                self.stats.record(classify_failure(exc), time.monotonic() - started, route=route, detail=failure_detail(exc))
             raise
         self.stats.record(None, time.monotonic() - started)
         return data
@@ -197,7 +203,7 @@ class SunsynkApiClient:
     async def async_read_flux_products(self, plant_id: str) -> list[dict[str, Any]] | None:
         """Read back the plant's income config; its fluxProducts, or None when the
         response doesn't carry them (the GET twin of async_post_income is undocumented)."""
-        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/plant/{_seg(plant_id)}/income")
+        data = await self._authorized_json("GET", f"{BASE_API}/api/v1/plant/{_seg(plant_id)}/income", optional=True)
         body = data.get("data") if isinstance(data, dict) else None
         products = body.get("fluxProducts") if isinstance(body, dict) else None
         return products if isinstance(products, list) else None

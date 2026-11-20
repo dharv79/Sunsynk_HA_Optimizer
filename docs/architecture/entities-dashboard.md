@@ -14,7 +14,7 @@ All entities extend `CoordinatorEntity` and read state from `coordinator.state` 
 - **Buttons** (`button.py`): call `optimizer` methods directly on press. `test_plan` calls `async_run_import_plan(source="test_button", dry_run=True)` — recomputes the full plan and notifies the JSON, but does not push to the inverter, log, or mutate state. Also `choose_best_day`, `reset_baseline`, `install_dashboard` (labelled "Update dashboard", entity id pinned to `button.install_dashboard`) and `cancel_free_event`. The old `run_import`/`run_flux2` push buttons were removed; the dry-run test replaces them. The `async_run_import_plan` / `async_run_flux2_check` methods still exist for the scheduled listeners.
 - **Binary sensors** (`binary_sensor.py`): `evening_export_disabled`, `grid_outage`, `inverter_fault` and `monitor_only` (derived from `operation_mode == "monitor"`).
 - **Switch** (`switch.py`): `away_mode`.
-- **Number** (`number.py`): `number.billed_last_month` (see below).
+- **Number** (`number.py`): `number.billed_last_month` (see below), `number.saved_before_tracking` (phase 119), `number.peak_minimum_soc` (phase 122: lowest SOC the 14:00 peak top-up/hold aims for at 16:00, 0 = off; Quick actions tile).
 - **Datetime** (`datetime.py`): `free_event_start` / `free_event_end`, the manual free electricity event window (see free-electricity.md).
 
 ### Dashboard

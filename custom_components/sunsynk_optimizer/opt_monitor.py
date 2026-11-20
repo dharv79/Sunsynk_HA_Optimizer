@@ -326,7 +326,7 @@ class MonitorMixin:
             # Phase 121: an undocumented route that keeps failing stops until restart, not every 2 h.
             self._flux_read_failures += 1
             _LOGGER.debug("Flux read-back failed: %s", exc)
-            if read_back_should_stop(self._flux_read_failures):
+            if read_back_should_stop(self._flux_read_failures, exc):
                 _LOGGER.warning(
                     "Plant income read failed %d times in a row (%s); Flux drift check off until restart",
                     self._flux_read_failures, failure_detail(exc),

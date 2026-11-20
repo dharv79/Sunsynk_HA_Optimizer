@@ -6,7 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Number entities for Sunsynk Optimizer (billed amount for bill reconciliation, phase 36)."""
+"""Number entities for Sunsynk Optimizer (billed amount phase 36, payback opening phase 119, peak minimum SOC phase 122)."""
 
 from __future__ import annotations
 
@@ -28,7 +28,9 @@ async def async_setup_entry(
 ) -> None:
     """Register the billed-amount entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([BilledAmountEntity(coordinator, entry), PaybackOpeningEntity(coordinator, entry)])
+    async_add_entities(
+        [BilledAmountEntity(coordinator, entry), PaybackOpeningEntity(coordinator, entry), PeakMinSocEntity(coordinator, entry)]
+    )
 
 
 class BilledAmountEntity(CoordinatorEntity, NumberEntity):
@@ -90,3 +92,29 @@ class PaybackOpeningEntity(CoordinatorEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         self.coordinator.update_state(touch=False, payback_opening_gbp=round(float(value), 2))
+
+
+class PeakMinSocEntity(CoordinatorEntity, NumberEntity):
+    """Lowest SOC the 14:00 peak top-up/hold aims for at 16:00 (phase 122); 0 leaves it to the load estimate."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:battery-arrow-up-outline"
+    _attr_name = "Peak minimum SOC"
+    _attr_native_unit_of_measurement = "%"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_peak_min_soc"
+        self._attr_device_info = optimizer_device_info(entry)
+        pin_entity_id(self, "number", "Peak minimum SOC")
+
+    @property
+    def native_value(self) -> int:
+        return int(self.coordinator.state.peak_min_soc or 0)
+
+    async def async_set_native_value(self, value: float) -> None:
+        self.coordinator.update_state(touch=False, peak_min_soc=int(round(float(value))))

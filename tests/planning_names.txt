@@ -637,3 +637,8 @@ READ_BACK_FAIL_LIMIT
 api_route
 failure_detail
 read_back_should_stop
+UNSUPPORTED_STATUSES
+route_unsupported
+peak_required_soc
+hold_floor_needs_reassert
+hold_floor_restore_due

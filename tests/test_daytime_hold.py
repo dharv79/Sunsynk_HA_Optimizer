@@ -34,3 +34,14 @@ def test_readback(planning):
     assert planning.hold_readback_ok({"cap2": "20"}, 2, 66) is False
     assert planning.hold_readback_ok({}, 2, 66) is None
     assert planning.hold_readback_ok(None, 2, 66) is None
+
+
+def test_reassert_only_when_below_hold_and_keep_user_raise(planning):
+    # Phase 122: the user raised cap3 to 65 over a 46% hold; neither the 30-min check nor 16:00 touches it.
+    assert not planning.hold_floor_needs_reassert({"cap3": "65"}, 3, 46)
+    assert not planning.hold_floor_needs_reassert({"cap3": "46"}, 3, 46)
+    assert planning.hold_floor_needs_reassert({"cap3": "20"}, 3, 46)
+    assert not planning.hold_floor_needs_reassert(None, 3, 46)
+    assert not planning.hold_floor_restore_due({"cap3": "65"}, 3, 46)
+    assert planning.hold_floor_restore_due({"cap3": "46"}, 3, 46)
+    assert planning.hold_floor_restore_due(None, 3, 46)

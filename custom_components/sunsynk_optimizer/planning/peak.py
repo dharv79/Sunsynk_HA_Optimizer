@@ -308,8 +308,11 @@ def peak_cover_plan(
     floor_soc: int = PEAK_COVER_FLOOR_SOC,
     margin: float = PEAK_COVER_MARGIN,
     wear_pence: float | None = None,
+    min_soc: float | None = None,
 ) -> dict[str, Any]:
     """Will the battery reach 16:00 with enough to run the peak window? If not, how to top up.
+
+    `min_soc` (phase 122, the user's "Peak minimum SOC"; None or 0 = off) raises the required SOC.
 
     Projects SOC at 16:00 from the current SOC, forecast solar and house load
     (a battery that would run flat sits at the floor, the grid covering the
@@ -324,7 +327,7 @@ def peak_cover_plan(
     hours = max(0.0, minutes_to_peak / 60.0)
     projected = soc + (solar_kwh - load_kw * hours) / capacity_kwh * 100.0
     projected_soc = round(min(100.0, max(float(floor_soc), projected)), 1)
-    required_soc = min(100, math.ceil(floor_soc + peak_need_soc(peak_load_kwh, capacity_kwh, margin)))
+    required_soc = peak_required_soc(floor_soc + peak_need_soc(peak_load_kwh, capacity_kwh, margin), min_soc)
     shortfall_soc = max(0.0, required_soc - projected_soc)
     worth = peak_cover_worth_it(day_pence, peak_pence, wear_pence=wear_pence)
     # Phase 59: still at or above the required SOC but heading below it by 16:00. Holding the
@@ -369,7 +372,16 @@ def peak_cover_plan(
         "gain_gbp": gain_gbp,
         "gain_after_wear_gbp": gain_after_wear_gbp,
         "gain_vs_topup_gbp": gain_vs_topup_gbp,
+        "peak_min_soc": int(min_soc) if _is_number(min_soc) and min_soc > 0 else None,
     }
+
+
+def peak_required_soc(estimated_soc: float, min_soc: float | None = None) -> int:
+    """SOC needed at 16:00 (phase 122): the load estimate, never below the user's minimum (None or 0 = off)."""
+    required = math.ceil(estimated_soc)
+    if _is_number(min_soc) and min_soc > 0:
+        required = max(required, math.ceil(float(min_soc)))
+    return min(100, required)
 
 
 # ---- Phase 86: hourly profile and reserve-hold review (shadow) ------------------------------------------

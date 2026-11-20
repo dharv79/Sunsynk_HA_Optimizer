@@ -123,3 +123,16 @@ def test_read_back_stops_after_limit(planning):
     assert not planning.read_back_should_stop(0)
     assert not planning.read_back_should_stop(planning.READ_BACK_FAIL_LIMIT - 1)
     assert planning.read_back_should_stop(planning.READ_BACK_FAIL_LIMIT)
+
+
+
+def test_unsupported_route_stops_read_back_at_once_and_is_not_a_failure(planning):
+    assert planning.route_unsupported(_Status(405)) and planning.route_unsupported(_Status(404))
+    assert not planning.route_unsupported(_Status(500))
+    assert planning.read_back_should_stop(1, _Status(405))
+    assert not planning.read_back_should_stop(1, _Status(500))
+    stats = planning.ApiStats()
+    stats.note_unsupported("GET /api/v1/plant/{id}/income", 0.1)
+    out = stats.take("2026-11-20")
+    assert out["calls"] == 1 and out["failures_total"] == 0 and out["success_rate_pct"] == 100.0
+    assert out["unsupported"] == {"GET /api/v1/plant/{id}/income": 1}
