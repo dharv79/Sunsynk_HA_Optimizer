@@ -387,3 +387,33 @@ FORECAST_QUANTILE_HISTORY_DAYS = 395  # the 13-month log
 DYNAMIC_SHADOW_MINUTE = 22 * 60 + 5  # after tomorrow's Agile prices (~16:00) and the 22:00 snapshot
 
 ELECTRIFY_HISTORY_DAYS = 395  # the 13-month log
+
+
+# ---- Review fixes (21/11/2026, phase 125) ----------------------------------------------------------
+
+
+def reset_refusal(operation_mode: str, slots_held: bool) -> str | None:
+    """Why the Reset baseline button must not push (rules 7 and 16), or None when it may."""
+    if operation_mode == "monitor":
+        return "Monitor mode: the optimizer makes no changes to the inverter."
+    if slots_held:
+        return "A free event is holding the inverter slots; cancel it first."
+    return None
+
+
+def setting_text(value: Any) -> str:
+    """A settings value as the inverter stores it: whole numbers without '.0' ('60', not '60.0')."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+FULL_TRIM_HOLD_S = 3600  # hold 100% for an hour before the full-charge-day trim
+
+
+def full_trim_delay_s(minutes_now: int) -> int:
+    """Seconds until the full-charge-day trim: an hour's hold, and never before the 16:00 peak.
+
+    Trims before 16:00 are refused (never sell cheap-bought charge at the day export rate), so a
+    battery full in the morning stays at 100% until the peak, then trims."""
+    return max(FULL_TRIM_HOLD_S, (PEAK_START_MINUTES - minutes_now) * 60)

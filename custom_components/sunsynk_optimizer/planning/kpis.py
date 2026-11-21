@@ -637,6 +637,11 @@ AUDIT_DAYS = 14
 
 AUDIT_DAILY_TYPES = ("import_plan", "morning_state", "day_actuals", "day_kpis")
 
+
+def audit_daily_types(monitor: bool = False) -> tuple[str, ...]:
+    """Daily record types expected each day; monitor mode logs no import_plan (it plans nothing)."""
+    return tuple(t for t in AUDIT_DAILY_TYPES if not (monitor and t == "import_plan"))
+
 AUDIT_COST_SETTLE_DAYS = 2  # daily_cost can lag Octopus by a day or two; younger dates are not flagged
 
 AUDIT_DEDUP_TYPES = AUDIT_DAILY_TYPES + ("charge_outcome", "peak_export", "peak_cover", "meter_snapshot")
@@ -649,6 +654,7 @@ def audit_days(
     today: date,
     days: int = AUDIT_DAYS,
     expect_cost: bool = False,
+    daily_types: tuple[str, ...] = AUDIT_DAILY_TYPES,
 ) -> list[dict[str, str]]:
     """Self-audit of the last `days` complete days of JSONL records. Pure; never rewrites anything.
 
@@ -677,7 +683,7 @@ def audit_days(
     for d in sorted(window):
         if d < first_seen:
             continue
-        for rtype in AUDIT_DAILY_TYPES:
+        for rtype in daily_types:
             if (rtype, d) not in by_key:
                 issues.append({"kind": "missing", "type": rtype, "date": d, "detail": f"no {rtype} record"})
         if expect_cost and d <= (today - timedelta(days=AUDIT_COST_SETTLE_DAYS)).isoformat():

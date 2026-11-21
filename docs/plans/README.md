@@ -131,7 +131,14 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 121. Find and stop the daily API "other" failures (user request 19/11/2026) | Done, merged (46a6a5b, PR #239) | XS-S, ~15-25k |
 | 122. Peak minimum SOC, respect a user-raised hold, unsupported Flux read-back (user request 20/11/2026) | Done, merged (fcfb87a, PR #241) | XS-S, ~20-35k |
 | 123. Peak-load recent high with cold margin (user request 20/11/2026) | Done, merged (54e603d, PR #242) | XS, ~15-25k |
-| 124. Flux 2 only pushes keep tonight's Flux 1 slot (user request 20/11/2026) | Done, merged (8cff51e, PR #243) | XS, ~15-25k |
+| 124. Flux 2 only pushes keep tonight's Flux 1 slot (user request 20/11/2026) | Done, merged (8cff51e, PR #243), released in 2.3.7 | XS, ~15-25k |
+| 125. Review fixes: monitor mode and push results (code review 21/11/2026) | In progress | S, ~30-50k |
+| 126. Review fixes: overnight plan | Planned, not built | M, ~50-80k |
+| 127. Review fixes: daytime, export pause and peak | Planned, not built | M, ~60-90k |
+| 128. Review fixes: config, entities, diagnostics and cards | Planned, not built | S-M, ~40-60k |
+| 129. Review fixes: logging, reports, monitor and planning maths | Planned, not built | M, ~60-90k |
+| 130. Review fixes: free electricity event (after the 22/11 live run) | Planned, not built | S-M, ~40-60k |
+| 131. Refactor: Flux 2 decision and free-event timer helpers, split the import plan, shared helpers | Planned, not built | M, ~60-90k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
@@ -152,6 +159,8 @@ Phases 87–109 come from the code review and idea sweep of 11/11/2026 (user req
 Phase 81 (security sweep, user request 06/11/2026) is independent and recommended before 72 and 74, because 74 adds a new local write path to the inverter.
 
 Phases 112–115 come from the efficiency review of 15/11/2026 (inverter datasheet and manuals, plus the user's settings screenshots). The settings review led to one manual change: battery Shut Down 15 / Low Batt 20 (was 20/25). Everything else stayed as it was then; on 18/11/2026 the user raised Max Solar Power 3,800 → 5,500 W and turned MPPT scanning, Low Power Mode and PV1/PV2 Check on (manual v.29 advice). Trickle feed 0, Priority Load on. **Suggested build order: 112 → 113 → 114 → 115**, then 10 → 74. 112 is read-only and confirms the floor change took effect. 113 is shadow-first and has no writes. 114 adds the first native timer-slot write, which 115 reuses. 114 and 115 start by confirming the setting key names from the phase 73 shadow log, and go On hold if they cannot be confirmed.
+
+Phases 125–131 come from the code review of 21/11/2026 (user request: review for bugs and improvements, refactor if required, interview where needed). 11 reviewers covered the package by subsystem plus two cross-cutting audits (do-not-break rules; time, DST and async); each finding was then checked by an adversarial verifier (101 confirmed, 30 plausible, 2 refuted; about 95 distinct after de-duplication). User decisions (21/11/2026): free-event fixes ship after the 22/11 live event; Reset baseline is refused in monitor mode and while a free event holds the slots; an export pause that clears before 19:00 restores the normal slot once it has held 30 minutes; the full-charge day with 7–14 kWh forecast bridges like a normal day (never below the bare bridge); the full-charge day stays at 100% until 16:00 (trim guard kept); peak export is floored at the higher of Peak minimum SOC and today's peak-cover required SOC; the settings audit ignores the Flux slot keys; bug fixes first, then targeted refactors (131). **Build order: 125 → 126 → 127 → 128 → 129 → 130 (after 22/11) → 131**, then 10 → 74. Nothing is released until after the 22/11 free event.
 
 Phase 116 comes from the user's question on the battery's upper limit (15/11/2026). Decision: no upper SOC cap in winter and keep the weekly 100% charge, because the `soc_cap_shadow` log shows an 85% cap costs about £0.13 on each low-solar night and the battery is full for only a few hours. Review after summer 2027 with phase 116's data. 116 is independent and can be built at any point; building it before spring gives a full summer of data.
 

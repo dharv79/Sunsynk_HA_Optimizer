@@ -42,6 +42,7 @@ from .const import (
 )
 from .flux_helpers import price_source
 from .planning import (
+    full_trim_delay_s,
     round_trip_shadow,
     daytime_hold_floor,
     daytime_hold_slot,
@@ -342,7 +343,10 @@ class DaytimeMixin:
                 "reason": reason,
                 "api_ok": api_ok,
             },
-            evening_export_disabled=evening_export_disabled,
+            # Rule 5: the pause flag follows the push, so a failed pause is retried on the next check.
+            evening_export_disabled=(
+                evening_export_disabled if api_ok else bool(self.coordinator.state.evening_export_disabled)
+            ),
             operation_mode=self.operation_mode,
         )
         return api_ok
@@ -820,9 +824,10 @@ class DaytimeMixin:
         except (ValueError, TypeError):
             return
 
-        is_full_day = dt_util.now().strftime("%A") == self.selected_full_charge_day
+        now_local = dt_util.now()
+        is_full_day = now_local.strftime("%A") == self.selected_full_charge_day
         if soc >= 99.5 and is_full_day:
-            if self.pending_full_trim_cancel:
+            if self.pending_full_trim_cancel or self.operation_mode == "monitor":  # rule 16
                 return
 
             async def _delayed_full_trim(_later) -> None:
@@ -830,6 +835,8 @@ class DaytimeMixin:
 
             async def _do_full_trim() -> None:
                 self.pending_full_trim_cancel = None
+                if self.operation_mode == "monitor" or self._outage_active():
+                    return
                 current_soc = self._state_float(self.battery_soc_entity, 0)
                 if current_soc < 99.5:
                     return
@@ -863,14 +870,16 @@ class DaytimeMixin:
                 title = "🔋 Sunsynk: full-charge hold complete" if api_ok else "⚠️ Sunsynk: full-charge trim NOT applied"
                 await self.async_notify(
                     title,
-                    f"Held at 100% for 1 hour. Trimming to {trim_target}%"
+                    f"Held at 100% for at least an hour. Trimming to {trim_target}%"
                     f"{_reserve_note(trim_target, reserve)}.{_api_note(api_ok)}",
                 )
 
-            # Hold at 100% for 1 hour to fully condition the cells, then trim to 82%.
+            # Hold at 100% for at least an hour to condition the cells, then trim to 82% — never
+            # before the 16:00 peak (the trim guard refuses earlier sells), so a battery full in
+            # the morning stays at 100% until then.
             self.pending_full_trim_cancel = async_call_later(
                 self.hass,
-                3600,
+                full_trim_delay_s(now_local.hour * 60 + now_local.minute),
                 _delayed_full_trim,
             )
             self.coordinator.update_state(
@@ -1128,7 +1137,7 @@ class DaytimeMixin:
             return False
         settings = await self._async_api_read("Daytime hold read-back", self.coordinator.api.async_read_settings, self.inverter_serial)
         if hold_readback_ok(settings, slot, floor) is not True:
-            await self._async_write_setting(f"cap{slot}", int(previous))
+            await self._async_write_setting(f"cap{slot}", int(previous), allow_in_monitor=True)
             return False
         state["hold_floor"] = {"slot": slot, "floor": floor, "previous": int(previous)}
         hold_floor["applied"] = True
@@ -1156,6 +1165,6 @@ class DaytimeMixin:
         if held:
             settings = await self._async_api_read("Daytime hold end", self.coordinator.api.async_read_settings, self.inverter_serial)
             if hold_floor_restore_due(settings, held["slot"], held["floor"]):  # phase 122: a user-raised slot is left alone
-                await self._async_write_setting(f"cap{held['slot']}", held["previous"])
+                await self._async_write_setting(f"cap{held['slot']}", held["previous"], allow_in_monitor=True)
         else:
             await self._async_restore_normal_plan()

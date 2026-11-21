@@ -378,8 +378,7 @@ class OvernightMixin:
                     self.hass, SOC_RETRY_INTERVAL_MINUTES * 60, partial(self._async_soc_plan_retry, source)
                 )
                 return
-            await self._async_skip_plan(f"{msg} — import plan skipped")
-            return
+            return await self._async_skip_plan(f"{msg} — import plan skipped", dry_run, notify)
 
         cfg = self.cfg
         now = dt_util.now()
@@ -392,11 +391,11 @@ class OvernightMixin:
         # target + full window unnecessarily.
         raw_forecast_kwh, forecast_fallback = self._resolve_raw_forecast(cfg[CONF_SOLAR_FORECAST_SENSOR], now)
         if raw_forecast_kwh is None:
-            await self._async_skip_plan(
+            return await self._async_skip_plan(
                 f"Forecast sensor {cfg[CONF_SOLAR_FORECAST_SENSOR]} unavailable and no usable prior plan — "
-                "import plan skipped"
+                "import plan skipped",
+                dry_run, notify,
             )
-            return
 
         battery_capacity_kwh = self._capacity_kwh(cfg)
         charge_rate_kw = float(cfg.get(CONF_CHARGE_RATE, DEFAULT_CHARGE_RATE))
@@ -599,6 +598,10 @@ class OvernightMixin:
         held_by = None if dry_run else self._slots_held_by()
         api_ok = None if (dry_run or held_by) else await self.async_push_flux_override(payload)
         retrying = api_ok is False and self._arm_plan_retry(payload, source, now, attempts=0)
+        if api_ok is False and gentle_charge_applied and not retrying:
+            # The old window was sized for the full current: don't leave it throttled until 05:00.
+            if await self._async_undo_gentle_charge():
+                gentle_charge_applied = False
 
         plan_state = {
             "date": now.date().isoformat(),
@@ -776,15 +779,39 @@ class OvernightMixin:
             )
             return
         if not self._arm_plan_retry(payload, source, now, attempt):
+            undone = await self._async_undo_gentle_charge()
+            current_note = (
+                "" if undone is None
+                else " Grid charge current restored." if undone
+                else " Grid charge current NOT restored yet; retrying every 30 minutes."
+            )
             await self.async_notify(
                 "⚠️ Sunsynk: import plan NOT applied",
-                f"Inverter NOT updated after {attempt} retries; tonight's charge runs on the existing settings.",
+                f"Inverter NOT updated after {attempt} retries; tonight's charge runs on the existing settings."
+                f"{current_note}",
             )
 
-    async def _async_skip_plan(self, msg: str) -> None:
+    async def _async_undo_gentle_charge(self) -> bool | None:
+        """A plan push failed for good: restore the grid-charge current now, not at 05:00.
+
+        None when no gentle current is applied; else whether the restore landed."""
+        gentle = self.coordinator.state.gentle_charge
+        if gentle.get("phase") != "applied":
+            return None
+        self.coordinator.update_state(gentle_charge={**gentle, "restore_at": dt_util.now().isoformat()})
+        await self.async_restore_charge_current()
+        return self.coordinator.state.gentle_charge.get("phase") == "restored"
+
+    async def _async_skip_plan(self, msg: str, dry_run: bool = False, notify: bool = True) -> dict[str, Any] | None:
+        """A plan that cannot run. A dry run (rule 17) only reports why, with no state change."""
+        if dry_run:
+            if notify:
+                await self.async_notify("🧪 Sunsynk: test plan (dry run) — skipped", msg)
+            return {"skipped": msg}
         _LOGGER.warning(msg)
         self.coordinator.update_state(last_error=msg)
         await self.async_notify("⚠️ Sunsynk: plan skipped", msg)
+        return None
 
     def _resolve_raw_forecast(self, forecast_entity: str, now) -> tuple[float | None, bool]:
         """Return (raw_forecast_kwh, used_fallback).
@@ -1200,7 +1227,9 @@ class OvernightMixin:
         restore_at = dt_util.parse_datetime(gentle.get("restore_at") or "")
         if restore_at is not None and dt_util.now() < dt_util.as_local(restore_at):
             return
-        ok, _ = await self._async_write_setting(GENTLE_CHARGE_SETTING, gentle["restore_current_a"])
+        ok, _ = await self._async_write_setting(
+            GENTLE_CHARGE_SETTING, gentle["restore_current_a"], allow_in_monitor=True
+        )
         if ok:
             gentle["phase"] = "restored"
             self.coordinator.update_state(gentle_charge=gentle)

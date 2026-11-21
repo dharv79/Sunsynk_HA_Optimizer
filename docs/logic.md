@@ -104,7 +104,7 @@ Temperature: ≥ 18 °C +3, ≤ 5 °C −3. Day penalty: Thursday −5, Friday �
 
 **Daily 18:00 re-check.** Moves the full-charge day to tomorrow when tomorrow's solar forecast (`tomorrow_forecast_sensor`, the lower of raw and corrected) can fill the battery from PV (capacity + 8 h of house load) **and** tomorrow's weather scores better. At most once a week, and never to a day after the chosen one.
 
-**On the day.** If solar is good, the overnight plan only bridges to solar start and PV fills the battery for free. If solar is poor (< 7 kWh), it imports to 100%. When SOC reaches 99.5% it holds for 1 hour, then trims (§5).
+**On the day.** If solar is good, the overnight plan only bridges to solar start and PV fills the battery for free. If solar is poor (< 7 kWh), it imports to 100%. When SOC reaches 99.5% it holds for at least 1 hour and never trims before the 16:00 peak (§5).
 
 **Skip (shadow).** If any meter snapshot reached 99% in the last 7 days, the forced 100% is not needed. Logged nightly; applied only with `full_charge_skip_live`. Never skipped beyond 14 days.
 
@@ -219,7 +219,7 @@ When SOC is above 85%, sell down with a 45-minute Flux 2 window.
 
 ### Full-charge-day trim
 
-At ≥ 99.5% on the full-charge day, hold 1 hour, then (if still ≥ 99.5%) trim with a 60-minute window to the same target. Not if a live peak export, an export pause or a free event is active.
+At ≥ 99.5% on the full-charge day, hold at least 1 hour and until 16:00 (a trim never sells cheap-bought charge at the day export rate), then (if still ≥ 99.5%) trim with a 60-minute window to the same target. Not in monitor mode or during a grid outage. Not if a live peak export, an export pause or a free event is active.
 
 ### Peak cover (shadow)
 
@@ -343,7 +343,7 @@ Drain nights exclude: full-charge days, overrides, nights with early PV (≥ 200
 
 ## 11. Entities, services and dashboard
 
-**Buttons:** Run choose best day, Test plan (dry run), Reset to baseline (pushes your configured Flux settings back), Update dashboard, Cancel free event.
+**Buttons:** Run choose best day, Test plan (dry run), Reset to baseline (pushes your configured Flux settings back; refused in monitor mode and while a free event holds the slots, with a notification saying why), Update dashboard, Cancel free event.
 
 **Switch:** Away mode. Also set automatically at 22:00 from `auto_away_persons` (away for `auto_away_min_hours`, default 24 h) or an `auto_away_calendar` event containing `auto_away_keyword` ("holiday"); the switch overrides until the next change.
 
