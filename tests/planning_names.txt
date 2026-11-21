@@ -648,3 +648,8 @@ PEAK_COVER_COLD_C
 PEAK_COVER_COLD_MARGIN
 peak_load_recent_high
 carry_plan_flux1
+reset_refusal
+setting_text
+FULL_TRIM_HOLD_S
+full_trim_delay_s
+audit_daily_types

@@ -48,7 +48,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 13. Other per-day record types dedup at write — `data_logger._write_record` / `_DEDUP_TYPES`.
 14. `cost_trigger` stays `None` when no price applies, never 0p — `flux_helpers.tariff_prices_pence`.
 15. Shadow mode defaults on (watt trigger drives export-disable) — `CONF_COST_AWARE_EXPORT_SHADOW_MODE`.
-16. Monitor mode makes no API writes (except undoing its own gentle-charge current); service writes are refused — `optimizer.py` early returns, `_service_guard`.
+16. Monitor mode makes no API writes (except undoing its own writes via `allow_in_monitor`); service writes and Reset baseline are refused — `optimizer.py` early returns, `_monitor_refuses` backstop, `_service_guard`.
 17. Test plan button is a pure dry run (no push, log or state) — `async_run_import_plan(dry_run=True)`.
 18. Away days filtered by regime for drain/nudge; excluded from charge rate — `data_logger.py`.
 19. New decision logic goes in a `planning/` module with a test (`core` imports no sibling module).

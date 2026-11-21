@@ -60,6 +60,8 @@ from .flux_helpers import (
 )
 from .planning import (
     carry_plan_flux1,
+    reset_refusal,
+    setting_text,
     delivery,
     hhmm_to_minutes,
     hold_item,
@@ -481,13 +483,26 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         self.coordinator.update_state(last_notification={**record, "ok": True})
         return True
 
-    async def _async_post_with_status(self, payload: dict[str, Any]) -> bool:
+    def _monitor_refuses(self, allow_in_monitor: bool, what: str) -> bool:
+        """Do-not-break 16 backstop: True (and the refusal recorded) for a write in monitor mode.
+
+        Callers still check the mode first; this catches any path that forgets. Only a write
+        that undoes this integration's own earlier write passes ``allow_in_monitor``."""
+        if allow_in_monitor or self.operation_mode != "monitor":
+            return False
+        _LOGGER.warning("Monitor mode: %s refused", what)
+        self.coordinator.update_state(last_api_result={"ok": False, "error": f"monitor mode: {what} refused"})
+        return True
+
+    async def _async_post_with_status(self, payload: dict[str, Any], allow_in_monitor: bool = False) -> bool:
         """POST to the API and surface success/failure via coordinator state.
 
         Returns True on success, False on failure. On failure the exception is
         logged, last_error is populated, and last_api_result records the error
         so callers and the dashboard see that the push did NOT apply.
         """
+        if self._monitor_refuses(allow_in_monitor, "Flux push"):
+            return False
         try:
             result = await self.coordinator.api.async_post_income(self.plant_id, payload)
         except Exception as exc:  # pragma: no cover
@@ -504,7 +519,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         self._schedule_drift_check()
         return True
 
-    async def async_push_flux_override(self, payload: dict[str, Any]) -> bool:
+    async def async_push_flux_override(self, payload: dict[str, Any], allow_in_monitor: bool = False) -> bool:
         """Merge a Flux 1/2 override dict onto the config baseline and push to the API.
 
         Returns True on success, False on API failure — callers should reflect this
@@ -518,9 +533,14 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
             payload.get("flux_1"),
             payload.get("flux_2"),
         )
-        return await self._async_post_with_status(build_payload(config, flux_products))
+        return await self._async_post_with_status(build_payload(config, flux_products), allow_in_monitor)
 
     async def async_reset_flux_baseline(self) -> None:
+        """Dashboard button: push the configured Flux baseline (refused like the services, rules 7 and 16)."""
+        refusal = reset_refusal(self.operation_mode, self._slots_held())
+        if refusal:
+            await self.async_notify("⚠️ Sunsynk: baseline NOT restored", refusal)
+            return
         config = self.cfg
         payload = build_payload(config, config.get(CONF_FLUX_PRODUCTS, []))
         ok = await self._async_post_with_status(payload)
@@ -533,7 +553,8 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
                 "reason": "manual_reset",
                 "api_ok": ok,
             },
-            evening_export_disabled=False,
+            # Rule 5: the pause is only lifted when the baseline really landed.
+            **({"evening_export_disabled": False} if ok else {}),
         )
         title = "🔋 Sunsynk: baseline restored" if ok else "⚠️ Sunsynk: baseline NOT restored"
         body = (
@@ -603,7 +624,8 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         return soc
 
     async def _async_write_setting(
-        self, key: str, value: Any, write_if: Callable[[float], bool] | None = None
+        self, key: str, value: Any, write_if: Callable[[float], bool] | None = None,
+        allow_in_monitor: bool = False,
     ) -> tuple[bool | None, float | None]:
         """Read the inverter settings, change one key, write them all back.
 
@@ -613,13 +635,15 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         read as a number, so there is always something to restore. When
         `write_if(previous)` is False nothing is written: (None, previous).
         """
+        if self._monitor_refuses(allow_in_monitor, f"settings write ({key})"):
+            return False, None
         serial = self.inverter_serial
         try:
             settings = await self.coordinator.api.async_read_settings(serial)
             previous = float(settings[key])
             if write_if is not None and not write_if(previous):
                 return None, previous
-            await self.coordinator.api.async_write_settings(serial, {**settings, key: str(value)})
+            await self.coordinator.api.async_write_settings(serial, {**settings, key: setting_text(value)})
         except Exception as exc:  # pragma: no cover
             _LOGGER.exception("Sunsynk settings write failed (%s)", key)
             self.coordinator.update_state(

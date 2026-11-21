@@ -347,7 +347,8 @@ class EventsMixin:
         }
         if isinstance(plan, dict) and isinstance(plan.get("payload"), dict) and plan["payload"].get("flux_1"):
             payload["flux_1"] = plan["payload"]["flux_1"]
-        await self.async_push_flux_override(payload)
+        # Undoes the event's own slots, so it runs in monitor mode too (like the gentle-current restore).
+        await self.async_push_flux_override(payload, allow_in_monitor=True)
 
     async def async_cancel_free_event(self) -> None:
         """Cancel a scheduled or in-progress free event (the dashboard 'Cancel free event' button)."""

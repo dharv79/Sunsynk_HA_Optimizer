@@ -20,6 +20,7 @@ from .const import (
     INTEGRATION_VERSION,
     CONF_CHARGES,
     CONF_COST_AWARE_EXPORT_SHADOW_MODE,
+    DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE,
     CONF_DATA_REPORT_TARGET,
     CONF_BATTERY_COST_GBP,
     CONF_BATTERY_LIFETIME_KWH,
@@ -29,6 +30,7 @@ from .const import (
 from .data_logger import RECORD_TYPES
 from .flux_helpers import kpi_prices_pence
 from .planning import (
+    audit_daily_types,
     settings_change_text,
     settings_changes,
     settings_efficiency_check,
@@ -154,14 +156,15 @@ class MonitorMixin:
         """22:00: one-line health verdict (phase 100) into state and the bundle; read-only, resets the day's counters."""
         state = self.coordinator.state
         records = await self.data_logger.async_load_records(2)
-        written, expected = records_today(records, date)
+        monitor = self.operation_mode == "monitor"
+        written, expected = records_today(records, date, audit_daily_types(monitor))
         outcome = next((r for r in reversed(records) if r.get("type") == "charge_outcome" and r.get("date") == date), {})
         soc_state = self.hass.states.get(self.battery_soc_entity)
         seen = getattr(soc_state, "last_reported", None) or getattr(soc_state, "last_updated", None)
         soc_age = None if seen is None else max(0.0, (dt_util.utcnow() - seen).total_seconds() / 3600)
         api = state.last_api_result or {}
         shadows = [n for n in ("mpc_plan", "dynamic_tariff", "tou_shadow", "flex_event") if getattr(state, n)]
-        if self.cfg.get(CONF_COST_AWARE_EXPORT_SHADOW_MODE):
+        if self.cfg.get(CONF_COST_AWARE_EXPORT_SHADOW_MODE, DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE):  # rule 15
             shadows.append("export_cost_trigger")
         rec = {
             "date": date,
@@ -176,6 +179,7 @@ class MonitorMixin:
                 soc_age_hours=soc_age,
                 shadow_features=shadows,
                 settings_flag_count=(state.settings_flags or {}).get("count"),
+                monitor=monitor,
             ),
         }
         self._guarded_errors.clear()
@@ -257,11 +261,11 @@ class MonitorMixin:
         today = dt_util.now().date()
         expect_cost = bool(self._cfg_str(CONF_OCTOPUS_IMPORT_COST_SENSOR))
         records = await self.data_logger.async_load_records(AUDIT_DAYS + 3)
-        issues = audit_days(records, today, AUDIT_DAYS, expect_cost)
+        issues = audit_days(records, today, AUDIT_DAYS, expect_cost, audit_daily_types(self.operation_mode == "monitor"))
         if expect_cost and any(i["type"] == "daily_cost" for i in issues):
             await self._async_capture_daily_cost()
             records = await self.data_logger.async_load_records(AUDIT_DAYS + 3)
-            issues = audit_days(records, today, AUDIT_DAYS, expect_cost)
+            issues = audit_days(records, today, AUDIT_DAYS, expect_cost, audit_daily_types(self.operation_mode == "monitor"))
         summary = audit_summary(issues)
         self.coordinator.update_state(touch=False, data_health=summary)
         await self._guarded(self.async_run_settings_efficiency, "Settings efficiency check")  # phase 112
