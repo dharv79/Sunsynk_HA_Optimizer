@@ -1,6 +1,6 @@
 # Phase 127: Review fixes: daytime, export pause and peak
 
-Status: Planned, not built
+Status: Done, merged (d563712, PR #247)
 
 ## Why
 
