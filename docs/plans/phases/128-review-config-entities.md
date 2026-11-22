@@ -1,6 +1,6 @@
 # Phase 128: Review fixes: config, entities, diagnostics and cards
 
-Status: Planned, not built
+Status: Done, merged (b645f43, PR #248)
 
 ## Why
 
