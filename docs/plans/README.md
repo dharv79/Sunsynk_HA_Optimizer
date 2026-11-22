@@ -136,7 +136,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 126. Review fixes: overnight plan | Done, merged (34153b9, PR #246) | M, ~55k |
 | 127. Review fixes: daytime, export pause and peak | Done, merged (d563712, PR #247) | M, ~60-90k |
 | 128. Review fixes: config, entities, diagnostics and cards | Done, merged (b645f43, PR #248) | S-M, ~40-60k |
-| 129. Review fixes: logging, reports, monitor and planning maths | Planned, not built | M, ~60-90k |
+| 129. Review fixes: logging, reports, monitor and planning maths | Done, merged (5f44c5f, PR #249) | M, ~60-90k |
 | 130. Review fixes: free electricity event (after the 22/11 live run) | Planned, not built | S-M, ~40-60k |
 | 131. Refactor: Flux 2 decision and free-event timer helpers, split the import plan, shared helpers | Planned, not built | M, ~60-90k |
 
