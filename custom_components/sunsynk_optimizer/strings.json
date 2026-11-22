@@ -85,7 +85,11 @@
       "grid_pac_not_found": "Grid power (grid_pac) sensor was not found for this inverter serial.",
       "entity_not_found": "Entity was not found.",
       "invalid_service": "Service must be in domain.service format.",
-      "service_not_found": "Service was not found."
+      "service_not_found": "Service was not found.",
+      "required": "This field is required.",
+      "quiet_pair": "Set both the quiet hours start and end, or neither.",
+      "invalid_time": "Enter a 24-hour time as HH:MM, for example 16:00.",
+      "same_time": "Start and end cannot be the same time."
     }
   },
   "options": {

@@ -671,3 +671,6 @@ PEAK_COVER_PUSH_RETRIES
 peak_cover_retry_due
 peak_export_floor_soc
 exclude_away_days
+_AUDIT_REDACT_KEYS
+_is_redacted_key
+redact_settings_changes

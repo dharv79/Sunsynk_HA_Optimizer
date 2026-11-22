@@ -31,6 +31,7 @@ from .data_logger import RECORD_TYPES
 from .flux_helpers import kpi_prices_pence
 from .planning import (
     audit_daily_types,
+    redact_settings_changes,
     settings_change_text,
     settings_changes,
     settings_efficiency_check,
@@ -490,6 +491,9 @@ class MonitorMixin:
         )
         if not changes:
             return
+        # Mask any value that equals our own serial or plant id (phase 128), as settings_dump already
+        # does: a settings-audit notification or debug line must never echo an identifier.
+        changes = redact_settings_changes(changes, (self.inverter_serial, self.plant_id))
         await self.data_logger.async_log_settings_audit(date=now.date().isoformat(), changes=changes)
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if data_report_target:

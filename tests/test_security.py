@@ -138,3 +138,22 @@ def test_diagnostics_redacts_identifiers_by_value(planning):
     assert out["state"]["last_flux2_action"]["payload"]["fluxProducts"] == [{"targetSoc": 85}]
     assert "octopus_energy_electricity" in out["config"]["octopus_import_rates_entity"]   # only the ids go
     assert planning.sensitive_values({"plant_id": "12", "charge_rate": 2.5}) == []          # too short to mask safely
+
+
+# ---- Phase 128: diagnostics must also mask the notify/report destinations and phone/address ----
+
+def test_redact_config_masks_notify_and_report_targets_by_exact_key(planning):
+    out = planning.redact_config({
+        "notify_service": "notify.mobile_app_daves_phone",
+        "notify_target": "mobile_app_daves_phone",
+        "data_report_target": "https://hooks.slack.com/services/T0/B0/xyz",
+        "current_soc_target": 80,  # a legitimate numeric field must not be caught by a broad "target" match
+    })
+    assert out["notify_service"] == out["notify_target"] == out["data_report_target"] == "**REDACTED**"
+    assert out["current_soc_target"] == 80
+
+
+def test_redact_config_masks_phone_and_address_keys(planning):
+    out = planning.redact_config({"installer_phone": "x", "billing_address": "y", "keep": 1})
+    assert out["installer_phone"] == out["billing_address"] == "**REDACTED**"
+    assert out["keep"] == 1

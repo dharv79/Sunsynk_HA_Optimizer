@@ -35,6 +35,24 @@ def test_text_lines_and_limit(planning):
 
 # ---- Phase 119: one-off settings dump ----
 
+# ---- Phase 128: a settings-audit notification must mask identifiers too, like settings_dump ----
+
+def test_redact_settings_changes_masks_a_value_equal_to_an_identifier(planning):
+    changes = [
+        {"key": "serverIp", "old": "2305123456", "new": "2305999999"},
+        {"key": "mode", "old": "1", "new": "2"},
+    ]
+    out = planning.redact_settings_changes(changes, ("2305123456", "2305999999"))
+    assert out[0] == {"key": "serverIp", "old": "**REDACTED**", "new": "**REDACTED**"}
+    assert out[1] == {"key": "mode", "old": "1", "new": "2"}  # untouched: not an identifier value
+
+
+def test_redact_settings_changes_is_a_no_op_without_identifiers_or_changes(planning):
+    changes = [{"key": "a", "old": "1", "new": "2"}]
+    assert planning.redact_settings_changes(changes, ()) == changes
+    assert planning.redact_settings_changes([], ("123456",)) == []
+
+
 def test_settings_dump_keeps_every_scalar_and_redacts_identifiers(planning):
     raw = {
         "sellTime1Pac": 3600, "cap1": "20", "sn": "2305123456", "id": 77, "apiKeyName": "abc",

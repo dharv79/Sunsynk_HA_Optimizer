@@ -307,6 +307,7 @@ from .settings_audit import (
     snapshot_settings,
     settings_changes,
     settings_change_text,
+    redact_settings_changes,
 )
 from .export import (
     EXPORT_DEFAULT_DAYS,
@@ -602,10 +603,12 @@ from .peak import (
 )
 from .redact import (
     STATE_TEXT_LIMIT,
+    _AUDIT_REDACT_KEYS,
     _AUDIT_REDACT_PARTS,
     _HHMM_RE,
     _REDACTED,
     _REDACT_MIN_LEN,
+    _is_redacted_key,
     _redact_value,
     clip_text,
     config_time_problems,
@@ -1007,6 +1010,7 @@ __all__ = [
     "VOLTAGE_DERATE_V",
     "WEEKLY_KPI_SENSORS",
     "WEEK_HISTORY_DAYS",
+    "_AUDIT_REDACT_KEYS",
     "_AUDIT_REDACT_PARTS",
     "_BASELINE_SEGMENTS",
     "_BRIDGE_WALK_HOURS",
@@ -1050,6 +1054,7 @@ __all__ = [
     "_pence",
     "_percentile",
     "_quantile",
+    "_is_redacted_key",
     "_redact_value",
     "_score",
     "_season",
@@ -1311,6 +1316,7 @@ __all__ = [
     "records_today",
     "redact_config",
     "redact_diagnostics",
+    "redact_settings_changes",
     "redact_values",
     "remap_entity_ids",
     "reserve_hold_cost",

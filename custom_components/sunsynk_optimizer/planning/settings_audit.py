@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .redact import _AUDIT_REDACT_PARTS, _REDACTED
+
 # Keys that change on every read or that the integration writes itself, so are never a finding.
 AUDIT_IGNORE_KEYS = frozenset({"sdBatteryCurrent", "sn", "id"})
 AUDIT_IGNORE_SUFFIXES = ("updatetime", "update_time", "createtime", "create_time", "updatedat", "createdat", "timestamp")
@@ -33,7 +35,6 @@ def snapshot_settings(settings: Any, ignore: frozenset[str] = AUDIT_IGNORE_KEYS)
     return out
 
 
-_DUMP_REDACT_PARTS = ("password", "username", "token", "secret", "key", "email", "plant", "serial", "account", "phone", "address")
 _DUMP_VALUE_CHARS = 80
 
 
@@ -52,8 +53,8 @@ def settings_dump(settings: Any, identifiers: tuple[str, ...] = ()) -> dict[str,
         if not (isinstance(value, (str, int, float, bool)) or value is None):
             continue
         name, text = str(key), "" if value is None else str(value)
-        if name in ("sn", "id") or any(p in name.lower() for p in _DUMP_REDACT_PARTS) or text in ids:
-            text = "**REDACTED**"
+        if name in ("sn", "id") or any(p in name.lower() for p in _AUDIT_REDACT_PARTS) or text in ids:
+            text = _REDACTED
         out[name] = text[:_DUMP_VALUE_CHARS]
     return out
 
@@ -82,6 +83,27 @@ def settings_changes(previous: dict[str, str] | None, current: dict[str, str]) -
         elif not _same(old, new):
             out.append({"key": key, "old": old, "new": new})
     return out
+
+
+def redact_settings_changes(
+    changes: list[dict[str, str | None]], identifiers: tuple[str, ...] = ()
+) -> list[dict[str, str | None]]:
+    """Mask inverter-identifier values in audit changes before they reach a log or notification.
+
+    Mirrors `settings_dump`'s identifier masking: an old/new value equal to a serial or plant id
+    reads "**REDACTED**" so a settings-audit notification or debug line never echoes one.
+    """
+    ids = {i for i in identifiers if i and len(str(i)) >= 4}
+    if not ids or not changes:
+        return changes
+    return [
+        {
+            "key": c["key"],
+            "old": _REDACTED if c["old"] is not None and str(c["old"]) in ids else c["old"],
+            "new": _REDACTED if c["new"] is not None and str(c["new"]) in ids else c["new"],
+        }
+        for c in changes
+    ]
 
 
 def settings_change_text(changes: list[dict[str, str | None]], limit: int = AUDIT_MAX_LISTED) -> str | None:
