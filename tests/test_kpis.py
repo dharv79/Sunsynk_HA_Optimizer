@@ -99,6 +99,14 @@ def test_week_kpis_sums_and_averages():
     assert w["week_export_peak_kwh"] is None
 
 
+def test_week_kpis_sums_over_limit_import():
+    # phase 129: kpi_week_over_limit_import was always unknown — over_limit_import_kwh
+    # was missing from DAY_KPI_FIELDS, so week_kpis never summed it.
+    assert "over_limit_import_kwh" in planning.DAY_KPI_FIELDS
+    days = [{"over_limit_import_kwh": 0.4}, {"over_limit_import_kwh": 0.6}, {}]
+    assert planning.week_kpis(days)["week_over_limit_import_kwh"] == 1.0
+
+
 def test_kpi_prices_from_default_charges():
     prices = _flux_helpers.kpi_prices_pence(_flux_helpers.default_charges())
     assert prices == {"offpeak": 16.66, "day": 27.77, "peak": 38.88, "export_peak": 27.81}
@@ -186,9 +194,10 @@ def test_backtest_lower_target_trades_offpeak_for_shortfall(data_dir):
 def test_backtest_load_kw_resizes_solar_bridge_nights(data_dir):
     bt = _backtest()
     report = bt.replay(bt.load_records(str(data_dir)), load_kw=1.0, capacity_kwh=10.0)
-    # 3 h × +0.5 kW = 1.5 kWh = +15% on night 1 only.
+    # Night 1 only: bridge_soc(3h x 0.5kW x 1.25 margin, 10kWh) = 38% logged vs
+    # bridge_soc(3h x 1.0kW x 1.25 margin, 10kWh) = 57% at the resized load -> +19 points = +1.9 kWh.
     assert report["load_resized_nights"] == 1
-    assert report["alternative"]["offpeak_kwh"] == round(report["baseline"]["offpeak_kwh"] + 1.5, 2)
+    assert report["alternative"]["offpeak_kwh"] == round(report["baseline"]["offpeak_kwh"] + 1.9, 2)
 
 
 def test_backtest_forecast_error_and_cli(data_dir, capsys):

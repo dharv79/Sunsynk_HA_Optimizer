@@ -1,4 +1,6 @@
 """Phase 97: characterisation of the shared maths helpers and tests for formerly untested functions."""
+import math
+
 import pytest
 
 
@@ -25,6 +27,27 @@ def test_median(planning):
     assert planning.median([3.0, 1.0, 2.0]) == 2.0
     assert planning.median([4.0, 1.0, 2.0, 3.0]) == 2.5
     assert planning._median([7.0]) == 7.0
+
+
+def test_percentile_and_median_drop_nan(planning):
+    """Phase 129: a NaN reading is `isinstance(x, float)` True, so it passes a plain numeric
+    isinstance check; NaN also compares False to everything, which makes sorted() order
+    position-dependent rather than ascending. percentile/median must drop it before sorting.
+    """
+    nan = math.nan
+    assert planning.percentile([1.0, 2.0, 3.0, nan], 50) == pytest.approx(2.0)
+    assert planning.percentile([nan, 1.0, 2.0, 3.0], 50) == pytest.approx(2.0)
+    assert planning.median([1.0, 2.0, 3.0, nan]) == 2.0
+    assert planning.median([nan, nan, 5.0]) == 5.0
+    with pytest.raises(ValueError):
+        planning.median([nan, nan])
+
+
+def test_num_and_is_number_reject_nan(planning):
+    assert planning._num(math.nan) is None
+    assert planning._num(1.5) == 1.5
+    assert planning._is_number(math.nan) is False
+    assert planning._is_number(1.5) is True
 
 
 def test_peak_load_estimate_pinned(planning):

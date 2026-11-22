@@ -31,7 +31,8 @@ def percentile(values: list[float], pct: float, default: Any = _NO_DEFAULT) -> f
 
     An empty list returns ``default`` when given, else raises ValueError.
     """
-    if not values:
+    values = [v for v in values if v == v]  # drop NaN (NaN != NaN); NaN compares False to everything, so sorted() order
+    if not values:                          # with one present is position-dependent, not actually ascending
         if default is _NO_DEFAULT:
             raise ValueError("percentile of an empty list")
         return default
@@ -44,6 +45,7 @@ def percentile(values: list[float], pct: float, default: Any = _NO_DEFAULT) -> f
 
 def median(values: list[float]) -> float:
     """Median (mean of the middle two for an even count); raises ValueError when empty."""
+    values = [v for v in values if v == v]  # drop NaN (NaN != NaN); see percentile() for why
     if not values:
         raise ValueError("median of an empty list")
     ordered = sorted(values)
@@ -128,7 +130,10 @@ IMPORT_CAUSES = ("free_event", "grid_charge", "load_over_limit", "battery_floor"
 
 
 def _num(value: Any) -> float | None:
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    value = float(value)
+    return value if value == value else None  # NaN != NaN: reject it here so it never reaches a sort/percentile
 
 
 _median = median
@@ -263,7 +268,7 @@ HALF_HOURS_PER_DAY = 48
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value == value  # value == value: not NaN
 
 
 # --------------------------------------------------------------------------- #

@@ -92,6 +92,7 @@ _IMPORT_PLAN_FIELDS = (
     "date",
     "soc",
     "raw_forecast_kwh",
+    "forecast_fallback",
     "forecast_correction_factor",
     "forecast_correction_weighted",
     "forecast_correction_weighted_basis",
@@ -214,7 +215,7 @@ class DataLogger:
         self,
         date: str,
         morning_soc: float | None,
-        morning_pv_power: float,
+        morning_pv_power: float | None,
         overnight_load_kwh: float | None = None,
     ) -> None:
         """Log SOC and PV power at 06:00 — just before solar typically starts.
@@ -230,7 +231,7 @@ class DataLogger:
                 "morning_state",
                 date=date,
                 morning_soc=round_or_none(morning_soc, 1),
-                morning_pv_power=round(morning_pv_power, 1),
+                morning_pv_power=round_or_none(morning_pv_power, 1),
                 overnight_load_kwh=round_or_none(overnight_load_kwh),
             )
         )
@@ -640,7 +641,12 @@ class DataLogger:
                 "away": bool(plan.get("away", False)),
                 "actual_solar_kwh": actual.get("actual_solar_kwh"),
                 "forecast_band": plan.get("forecast_band"),
+                "forecast_fallback": bool(plan.get("forecast_fallback", False)),
                 "full_window": bool(plan.get("full_window_live", False)),
+                # Phase 129: both also force flux1_end to 05:00 regardless of energy
+                # needed, so the charge-rate calibration window must exclude them too.
+                "gentle_charge_applied": bool(plan.get("gentle_charge_applied", False)),
+                "logic_branch": plan.get("logic_branch"),
                 "battery_temp_c": plan.get("battery_temp_c"),
                 "measured_charge_kw": measured_charge_kw(
                     _meter_delta(snap_02, snap_05, "grid_import_kwh"),
@@ -784,20 +790,34 @@ class DataLogger:
     def _is_drain_night(d: dict[str, Any], away: bool = False) -> bool:
         """True if a paired day is a valid post-charge overnight-drain sample.
 
-        Requires: a computed drain, negligible PV at 06:00 (so early solar isn't
-        masking the drain), a non-full-charge day, that a real overnight charge
-        happened (initial SOC below target), and that the day matches the given
-        occupancy regime (home vs away) — so holiday nights are learned into the
-        away profile only. A no-charge night (initial >= target) discharges from
-        a high start and is not a post-charge drain measurement.
+        Requires: a computed drain, negligible solar contamination, a
+        non-full-charge day with no held-open window, that a real overnight
+        charge happened (initial SOC below target), and that the day matches
+        the given occupancy regime (home vs away) — so holiday nights are
+        learned into the away profile only. A no-charge night (initial >=
+        target) discharges from a high start and is not a post-charge drain
+        measurement. A full-window night (phase 62) holds Flux 1 open to
+        05:00 with no post-charge gap, so there is no drain to measure.
+
+        When the night's drain is actually the 05:00-snapshot figure (phase
+        63's `overnight_drain_pct_0500`, via `drain_source == "soc_0500"`),
+        that reading predates the 06:00 morning_pv_power sample, so solar
+        contamination is gated on the value actually used, not the 06:00 one.
         """
         initial = d.get("initial_soc")
         target = d.get("target_soc")
+        using_0500 = DataLogger._DRAIN_USE_0500 and d.get("drain_source") == "soc_0500"
+        drain = d.get("overnight_drain_pct_0500") if using_0500 else d.get("overnight_drain_pct")
         return (
-            d.get("overnight_drain_pct") is not None
-            and d["overnight_drain_pct"] >= 0
-            and d.get("morning_pv_power", 0) < 200  # <200 W means net battery drain still dominates at 06:00
+            drain is not None
+            and drain >= 0
+            # <200 W at 06:00 means net battery drain still dominates there; irrelevant
+            # when the drain reading itself is the earlier, pre-solar 05:00 snapshot.
+            # A None reading (MPPT sensor unavailable) can't confirm negligible solar,
+            # so it's excluded rather than defaulted to 0 (which would wrongly pass).
+            and (using_0500 or (d.get("morning_pv_power") is not None and d.get("morning_pv_power") < 200))
             and not d["is_full_day"]
+            and not d.get("full_window")  # phase 62: no gap after the charge, so no drain to measure
             and not d.get("user_override")  # phase 46: a manual target is not a model-chosen one
             and initial is not None
             and target is not None
@@ -816,8 +836,17 @@ class DataLogger:
 
     @staticmethod
     def _is_forecast_sample(d: dict[str, Any]) -> bool:
-        """A day usable for the forecast correction: a real forecast and a logged actual."""
-        return d["solar_forecast_kwh"] > 0.5 and d.get("actual_solar_kwh") is not None
+        """A day usable for the forecast correction: a real, non-fallback forecast and a logged actual.
+
+        A forecast_fallback night reuses yesterday's uncorrected forecast
+        verbatim (the sensor was unavailable), so its actual/forecast ratio
+        is not a measurement of today's forecast accuracy.
+        """
+        return (
+            d["solar_forecast_kwh"] > 0.5
+            and d.get("actual_solar_kwh") is not None
+            and not d.get("forecast_fallback")
+        )
 
     def count_drain_adjustment_days(self, paired_days: list[dict[str, Any]], away: bool = False) -> int:
         """Return how many valid drain-night samples exist toward the drain threshold.
@@ -875,7 +904,8 @@ class DataLogger:
             and d.get("target_soc") is not None
             and d["initial_soc"] >= d["target_soc"] - 5
             and d.get("morning_soc") is not None
-            and d.get("morning_pv_power", 0) < 200
+            and d.get("morning_pv_power") is not None
+            and d.get("morning_pv_power") < 200
             and not d["is_full_day"]
             and not d.get("away", False)
         ]
@@ -952,9 +982,15 @@ class DataLogger:
             initial is None or target is None or morning is None
             or initial <= 0 or not flux1
             or target - initial < 10
-            or d.get("morning_pv_power", 0) >= 200
+            or d.get("morning_pv_power") is None or d.get("morning_pv_power") >= 200
             or d.get("is_full_day")
             or d.get("away", False)
+            # Phase 129: full-window, low-solar and gentle-charge nights all force
+            # flux1_end to 05:00 regardless of actual energy needed, so (end_h - 2.0)
+            # does not represent the real charging duration on these nights.
+            or d.get("full_window")
+            or d.get("gentle_charge_applied")
+            or d.get("logic_branch") == "low_solar_full_window"
         ):
             return None
         end_h = self._flux1_end_hours(flux1)
@@ -1055,7 +1091,13 @@ class DataLogger:
             in_step = hit is not None and hit[0] == _file_signature(path)
             try:
                 os.makedirs(self._data_dir, exist_ok=True)
+                # Phase 129: a truncated last line (power loss mid-write) has no
+                # trailing newline; appending straight onto it would glue this
+                # record onto the broken one, losing both to the JSON parse error.
+                needs_separator = _file_missing_trailing_newline(path)
                 with open(path, "a", encoding="utf-8") as fh:
+                    if needs_separator:
+                        fh.write("\n")
                     fh.write(json.dumps(record) + "\n")
             except OSError:
                 _LOGGER.exception("Failed to write data log to %s", path)
@@ -1081,6 +1123,19 @@ def _file_signature(path: str) -> tuple[int, int] | None:
     except OSError:
         return None
     return stat.st_mtime_ns, stat.st_size
+
+
+def _file_missing_trailing_newline(path: str) -> bool:
+    """True if `path` exists, is non-empty, and its last byte isn't a newline."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() == 0:
+                return False
+            fh.seek(-1, os.SEEK_END)
+            return fh.read(1) != b"\n"
+    except OSError:
+        return False
 
 
 def _recorded_at(record: dict[str, Any]) -> datetime | None:

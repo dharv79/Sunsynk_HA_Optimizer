@@ -157,7 +157,10 @@ class ShadowMixin:
             return
         cfg, now = self.cfg, dt_util.now()
         start, hours = flex_event_window(dict(state.attributes), now, dt_util.DEFAULT_TIME_ZONE)
-        key = f"{now.date().isoformat()} {start}"
+        # Phase 129: dedup on the entity's own on/off transition, not the computed display time. A plain
+        # on/off entity (no start_time attribute) reports `start` as "now", which changes every 30-min
+        # poll and never matched the old key — so this logged on every poll for the whole event, not once.
+        key = f"{entity}:{state.last_changed.isoformat()}"
         if self._flex_event_logged == key:
             return
         self._flex_event_logged = key
@@ -254,10 +257,14 @@ class ShadowMixin:
         profile = (self._load_profile or {}).get("slots")  # terminal: same end value on both sides
         agile_export = merge_tariff_rates(overrides)["agile"]["export"]
         start = now.hour * 60 + now.minute
+        # Phase 129: without tomorrow's Agile prices, mpc_slots stops the Agile horizon at midnight
+        # tonight (no day-1 vector); the Flux side must stop there too, or saving_gbp compares a
+        # ~24h Flux total against a shorter Agile one.
+        tomorrow_for_slots = hourly_tomorrow if vectors.get(1) is not None else None
 
         def _solve(agile: bool) -> dict[str, Any] | None:
             slots = mpc_slots(
-                start, prices, export_bands, hourly_today, hourly_tomorrow, loads, profile,
+                start, prices, export_bands, hourly_today, tomorrow_for_slots, loads, profile,
                 import_vectors=vectors if agile else None, export_flat_p=agile_export if agile else None,
             )
             return None if slots is None else mpc_solve(slots, soc, capacity, charge_kw, wear_pence=wear, terminal_pence=terminal)

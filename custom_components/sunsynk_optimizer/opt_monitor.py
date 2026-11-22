@@ -290,6 +290,8 @@ class MonitorMixin:
         octopus = self._octopus_band_prices(dt_util.now().date())
         if not octopus:
             return  # No Octopus rate entities configured.
+        if all(v is None for v in octopus.values()):
+            return  # Phase 129: entities configured but unavailable right now; don't know yet, leave any alert alone.
         changes = tariff_price_changes(kpi_prices_pence(self.cfg.get(CONF_CHARGES, [])), octopus)
         previous = self.coordinator.state.tariff_price_alert.get("signature")
         if not changes:
@@ -318,10 +320,18 @@ class MonitorMixin:
         )
 
     async def _async_drift_check(self, _now=None) -> None:
+        """One-shot post-push check (phase 31); clears its own handle before running."""
         self._drift_check_unsub = None
         await self._guarded(self.async_run_drift_check, "Inverter drift check")
 
-    async def _async_read_flux_drift(self) -> list[dict[str, Any]]:
+    async def _async_periodic_drift_check(self, _now=None) -> None:
+        """Recurring DRIFT_CHECK_INTERVAL_HOURS check (phase 129): must not touch the
+        one-shot post-push handle, which `_async_drift_check` owns exclusively."""
+        await self._guarded(self.async_run_drift_check, "Inverter drift check")
+
+    async def _async_read_flux_drift(self) -> list[dict[str, Any]] | None:
+        """[] means genuinely checked (nothing expected, or gave up for good); None means this read
+        failed and the caller must not treat that as a confirmed 'no drift' (phase 129)."""
         expected = self.coordinator.state.last_pushed_flux
         if not expected or self._flux_read_supported is False:
             return []
@@ -337,7 +347,8 @@ class MonitorMixin:
                     self._flux_read_failures, failure_detail(exc),
                 )
                 self._flux_read_supported = False
-            return []
+                return []
+            return None
         self._flux_read_failures = 0
         if actual is None:
             _LOGGER.warning("Plant income read returned no fluxProducts; Flux drift check off until restart")
@@ -346,7 +357,8 @@ class MonitorMixin:
         self._flux_read_supported = True
         return flux_drift(expected, actual)
 
-    async def _async_read_current_drift(self, now) -> list[dict[str, Any]]:
+    async def _async_read_current_drift(self, now) -> list[dict[str, Any]] | None:
+        """See `_async_read_flux_drift`: None means this read failed, not 'no drift'."""
         expected = expected_grid_current_a(self.coordinator.state.gentle_charge, now.date().isoformat())
         if expected is None:
             return []
@@ -354,7 +366,7 @@ class MonitorMixin:
             settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
         except Exception as exc:  # pragma: no cover - network
             _LOGGER.debug("Settings read-back failed: %s", exc)
-            return []
+            return None
         return grid_current_drift(expected, settings.get(GENTLE_CHARGE_SETTING))
 
     async def _async_api_read(self, label: str, reader, *args):
@@ -378,6 +390,9 @@ class MonitorMixin:
         )
         counts = normalise_inverter_counts(await self._async_api_read("Inverter counts", api.async_read_inverter_counts))
         health = await self.async_refresh_battery_health()
+        # Phase 129: a failed workdata read must not drop a BMS fault word that the last known
+        # snapshot set; fall back to it rather than feeding this check's (missing) health into the flag.
+        last_health = health if health is not None else (self.coordinator.state.battery_health or {}).get("latest")
         fresh = new_inverter_events(events, previous.get("seen") or []) if events is not None else []
         active = (
             [{k: e[k] for k in ("text", "code", "time", "category")} for e in events]
@@ -390,7 +405,7 @@ class MonitorMixin:
                 inverter_events={
                     "active": active,
                     "counts": counts,
-                    "fault": inverter_fault_flag(active, counts, health_fault_flag(health)),
+                    "fault": inverter_fault_flag(active, counts, health_fault_flag(last_health)),
                     "seen": ((previous.get("seen") or []) + [e["key"] for e in fresh])[-100:],
                     "checked": dt_util.now().isoformat(),
                 },
@@ -553,7 +568,13 @@ class MonitorMixin:
         if self.operation_mode == "monitor":
             return
         now = dt_util.now()
-        diffs = await self._async_read_flux_drift() + await self._async_read_current_drift(now)
+        flux_diffs = await self._async_read_flux_drift()
+        current_diffs = await self._async_read_current_drift(now)
+        if flux_diffs is None or current_diffs is None:
+            # Phase 129: a failed read-back is not a confirmed "no drift" — leave any existing
+            # episode alone rather than clearing it and alerting again once the read succeeds.
+            return
+        diffs = flux_diffs + current_diffs
         previous = self.coordinator.state.inverter_drift.get("signature")
         if not diffs:
             if previous:

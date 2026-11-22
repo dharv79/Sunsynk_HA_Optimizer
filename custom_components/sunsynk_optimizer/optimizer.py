@@ -277,7 +277,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         )
         self.unsubs.append(
             async_track_time_interval(
-                self.hass, self._async_drift_check, timedelta(hours=DRIFT_CHECK_INTERVAL_HOURS)
+                self.hass, self._async_periodic_drift_check, timedelta(hours=DRIFT_CHECK_INTERVAL_HOURS)
             )
         )
         self.unsubs.append(
@@ -441,7 +441,10 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
             dt_util.now().date().isoformat(),
         )
         if await self._async_deliver(title, message):
-            self.coordinator.update_state(touch=False, held_notifications=[])
+            # Phase 129: a notification held while the brief was in flight (the await above) must
+            # not be wiped — only drop the items the brief actually included.
+            remaining = list(self.coordinator.state.held_notifications or [])[len(held):]
+            self.coordinator.update_state(touch=False, held_notifications=remaining)
 
     async def _async_deliver(self, title: str, message: str, target: str | None = None) -> bool:
         """Send via the configured HA notify service; True when it went out."""
@@ -559,20 +562,25 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         )
         await self.async_notify(title, body)
 
-    async def _guarded(self, coro_factory, label: str) -> None:
+    async def _guarded(self, coro_factory, label: str) -> Any:
         """Run a scheduled coroutine, surfacing any exception via last_error.
 
         Scheduled time-change/interval callbacks otherwise let an exception
         (e.g. a misconfigured charge rate causing ZeroDivisionError, or a
         missing config key) escape into the HA event loop with no plan pushed,
         no notification, and nothing on the dashboard — a silent failure.
+
+        Returns the coroutine's result, or None if it raised (phase 129):
+        lets a multi-step capture sequence treat each step as independently
+        resilient while still being able to use a step's return value.
         """
         try:
-            await coro_factory()
+            return await coro_factory()
         except Exception as exc:  # pragma: no cover
             _LOGGER.exception("%s failed", label)
             self._guarded_errors[label] = self._guarded_errors.get(label, 0) + 1
             self.coordinator.update_state(last_error=f"{label} failed: {exc}")
+            return None
 
     async def _async_initial_refresh(self, _now) -> None:
         """Populate initial state soon after startup.

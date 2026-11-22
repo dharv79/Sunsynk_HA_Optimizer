@@ -10,6 +10,24 @@ def test_snapshot_drops_ignored_and_non_scalar(planning):
     assert planning.snapshot_settings(None) == {}
 
 
+# ---- Phase 129: the integration's own Flux timer-slot writes are not a settings-audit finding ----
+
+def test_snapshot_drops_flux_timer_slots_but_keeps_power_limit(planning):
+    snap = planning.snapshot_settings({
+        "sellTime1": "01:00", "cap1": "80", "time1on": "1", "sellTime6": "05:00", "cap6": "100", "time6on": "0",
+        "sellTime1Pac": 3600, "mode": "Zero export",
+    })
+    assert snap == {"sellTime1Pac": "3600", "mode": "Zero export"}
+
+
+def test_changes_never_flag_a_flux_timer_slot(planning):
+    prev = {"sellTime3": "02:00", "cap3": "90", "time3on": "1", "mode": "1"}
+    cur = {"sellTime3": "02:30", "cap3": "85", "time3on": "0", "mode": "2"}
+    prev_snap = planning.snapshot_settings(prev)
+    cur_snap = planning.snapshot_settings(cur)
+    assert planning.settings_changes(prev_snap, cur_snap) == [{"key": "mode", "old": "1", "new": "2"}]
+
+
 def test_first_snapshot_has_no_changes(planning):
     assert planning.settings_changes(None, {"a": "1"}) == []
     assert planning.settings_changes({}, {"a": "1"}) == []

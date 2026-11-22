@@ -80,6 +80,19 @@ def test_is_drain_night_excludes_solar_contaminated_and_full_day(dl):
     assert dl._is_drain_night(make_day(overnight_drain_pct=-3)) is False
 
 
+def test_is_drain_night_excludes_an_unknown_morning_pv_power_rather_than_crash(dl):
+    # Phase 129: an unavailable MPPT sensor logs morning_pv_power as None, not 0 —
+    # an unknown reading can't confirm "no solar yet", so it must exclude the
+    # night (same as a confirmed-solar reading) rather than crash or pass the gate.
+    assert dl._is_drain_night(make_day(morning_pv_power=None)) is False
+
+
+def test_charge_calibration_excludes_an_unknown_morning_pv_power_rather_than_crash(dl):
+    assert dl._charge_calibration_end_hours(make_day(morning_pv_power=None)) is None
+    days = [make_day(morning_pv_power=None) for _ in range(5)]
+    assert dl.compute_effective_charge_rate_kw(days, battery_kwh=10.0, overnight_drain_adj=0) is None
+
+
 def test_drain_adjustment_fallback_below_threshold(dl):
     days = [make_day() for _ in range(dl._MIN_DAYS_SOC_ADJUSTMENT - 1)]
     assert dl.compute_overnight_drain_adjustment(days) == dl._DEFAULT_DRAIN_ADJUSTMENT
@@ -207,10 +220,32 @@ def test_evening_nudge_ignores_days_without_evening_soc(dl):
     assert dl.count_soc_adjustment_days(days, "summer_like") == 0
 
 
+# Phase 129: a forecast-fallback night reuses yesterday's uncorrected forecast
+# verbatim, so it is not a measurement of today's forecast accuracy.
+def test_forecast_correction_skips_fallback_nights(dl):
+    n = dl._MIN_DAYS_FORECAST_CORRECTION
+    good = [make_day(solar_forecast_kwh=10.0, actual_solar_kwh=15.0) for _ in range(n)]
+    fallback = [make_day(solar_forecast_kwh=10.0, actual_solar_kwh=100.0, forecast_fallback=True) for _ in range(5)]
+    assert dl.compute_forecast_correction(good + fallback) == 1.5
+    assert dl.count_forecast_correction_days(good + fallback) == n
+
+
 def test_charge_rate_counter_matches_the_calibration_filter(dl):
     # 02:00 -> 04:30 used to count only from >2.5h; 02:15 (0.25h) charges count in both.
     days = [make_day(target_soc=80, initial_soc=40, flux1_end=end) for end in ("02:15", "04:30", "06:30")]
     assert dl.count_charge_rate_calibration_days(days) == 2
+
+
+# Phase 129: full-window, gentle-charge and low-solar nights all force flux1_end
+# to 05:00 regardless of the energy actually needed, so they must not be treated
+# as a normal 02:00->flux1_end charge for rate calibration.
+def test_charge_calibration_excludes_05_00_capped_windows(dl):
+    base = dict(target_soc=80, initial_soc=40, flux1_end="05:00")
+    assert dl._charge_calibration_end_hours(make_day(**base)) is not None
+    assert dl._charge_calibration_end_hours(make_day(**base, full_window=True)) is None
+    assert dl._charge_calibration_end_hours(make_day(**base, gentle_charge_applied=True)) is None
+    assert dl._charge_calibration_end_hours(make_day(**base, logic_branch="low_solar_full_window")) is None
+    assert dl._charge_calibration_end_hours(make_day(**base, logic_branch="adaptive")) is not None
 
 
 def test_records_carry_the_manifest_version():
@@ -277,11 +312,32 @@ def test_drain_adjustment_ignores_short_charge_nights(dl):
 
 # Phase 62: full-window nights carry no drain
 def test_full_window_nights_excluded_from_drain(dl):
+    # full-window drain is 50 (not 0): if these were wrongly included, the p75
+    # of six 10s + six 50s would be pulled up to 50 (capped at 20), not stay at 10.
     normal = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct_0500=10.0,
                        overnight_drain_pct=10.0) for _ in range(6)]
-    full = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct_0500=0.0,
-                     overnight_drain_pct=0.0, full_window=True) for _ in range(6)]
+    full = [make_day(initial_soc=40, target_soc=55, overnight_drain_pct_0500=50.0,
+                     overnight_drain_pct=50.0, full_window=True) for _ in range(6)]
     assert dl.compute_overnight_drain_adjustment(normal + full) == 10
+    assert dl._is_drain_night(full[0]) is False
+
+
+# Phase 129: the 05:00-snapshot drain predates the 06:00 PV/drain readings
+def test_drain_night_gates_on_the_0500_reading_when_that_is_the_one_used(dl):
+    day = make_day(
+        initial_soc=40, target_soc=55,
+        overnight_drain_pct=-3.0,       # solar had already topped SOC up by 06:00
+        overnight_drain_pct_0500=8.0,   # but the 05:00 reading (predates solar) is a clean positive drain
+        drain_source="soc_0500",
+        morning_pv_power=400.0,         # sun well up by 06:00 -- irrelevant to the 05:00 reading
+    )
+    assert dl._is_drain_night(day) is True
+
+    not_0500 = make_day(
+        initial_soc=40, target_soc=55, overnight_drain_pct=10.0,
+        overnight_drain_pct_0500=8.0, drain_source="scaled_0600", morning_pv_power=400.0,
+    )
+    assert dl._is_drain_night(not_0500) is False  # no real 0500 reading: still gated on 06:00 PV
 
 
 # --------------------------------------------------------------------------- #
@@ -334,6 +390,20 @@ def test_paired_day_carries_cloud_cover_and_user_override(DataLogger):
 def test_paired_day_missing_fields_are_none(DataLogger):
     day = _pair_one(DataLogger)
     assert day["cloud_cover_pct"] is None and day["user_override"] is None
+
+
+# Phase 129: these must survive the join or the calibration/correction fixes
+# above have nothing real to filter on.
+def test_paired_day_carries_forecast_fallback_and_calibration_flags(DataLogger):
+    day = _pair_one(DataLogger, forecast_fallback=True, gentle_charge_applied=True, logic_branch="adaptive")
+    assert day["forecast_fallback"] is True
+    assert day["gentle_charge_applied"] is True
+    assert day["logic_branch"] == "adaptive"
+
+    defaults = _pair_one(DataLogger)
+    assert defaults["forecast_fallback"] is False
+    assert defaults["gentle_charge_applied"] is False
+    assert defaults["logic_branch"] is None
 
 
 def test_override_night_is_not_a_drain_or_nudge_sample(DataLogger):
@@ -446,3 +516,28 @@ def test_pruner_removes_old_side_files(DataLogger, tmp_path):
     (tmp_path / f"mpc-{month}.jsonl").write_text("{}\n")
     dl._prune_old_files(13)
     assert sorted(p.name for p in tmp_path.iterdir()) == [f"mpc-{month}.jsonl", "notes.jsonl"]
+
+
+# Phase 129: a power loss mid-write can leave a truncated, newline-less last
+# line; appending straight onto it would glue the new record onto the broken
+# one and lose both to the JSON parse error.
+def test_append_after_a_truncated_line_does_not_corrupt_the_new_record(DataLogger, tmp_path):
+    dl = _disk_logger(DataLogger, tmp_path)
+    path = dl._current_month_file()
+    os.makedirs(tmp_path, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write('{"type": "day_kpis", "date": "2026-11-01", "recorded_at": "2026-11-01T06:00:0')  # no trailing \n
+    dl._write_record({"type": "day_kpis", "date": "2026-11-02", "recorded_at": _stamp()})
+    lines = [line for line in open(path, encoding="utf-8").read().splitlines() if line]
+    assert len(lines) == 2
+    assert json.loads(lines[1])["date"] == "2026-11-02"
+    assert [r["date"] for r in dl._read_recent(30)] == ["2026-11-02"]
+
+
+def test_append_to_a_clean_file_adds_no_extra_blank_line(DataLogger, tmp_path):
+    dl = _disk_logger(DataLogger, tmp_path)
+    dl._write_record({"type": "day_kpis", "date": "2026-11-01", "recorded_at": _stamp()})
+    dl._write_record({"type": "day_kpis", "date": "2026-11-02", "recorded_at": _stamp()})
+    with open(dl._current_month_file(), encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    assert lines == [l for l in lines if l] + [""]  # no blank line anywhere but the trailing one

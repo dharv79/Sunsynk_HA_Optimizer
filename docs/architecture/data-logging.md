@@ -147,3 +147,17 @@ The solar bridge counts load from 05:00, so the drain buffer must stop at 05:00 
 `planning/high_soc.py`, read-only, runs in monitor mode. At 22:00 the `day_kpis` record gains `high_soc_hours` (SOC at or above 95%), `full_soc_hours` (100%) and `high_soc_sample_hours` (hours the samples cover). Hours come from the phase 86 day buffer (30-minute SOC samples), each step credited to the earlier sample. A step longer than 60 minutes (restart, outage) adds nothing, so a day after a restart reads as partial through `high_soc_sample_hours`, not as 0. Fewer than two usable samples gives `None`. The record also carries `high_soc_30d_hours` / `_days` and `high_soc_ytd_hours` / `_days`, summed from the logged `day_kpis` records plus today; only days with the field count, so a short history reads as few days.
 
 Not built: the battery health trend and monthly report rows. The totals are on `day_kpis` for now. Use them to decide a summer upper-SOC cap; whether the inverter can cap solar charging at all is unchecked.
+
+## Review fixes: logging (22/11/2026, phase 129)
+
+**Drain learning.** `_is_drain_night` now also excludes full-window nights (phase 62: Flux 1 held open to 05:00, so there is no post-charge gap to measure) — previously only the evening-nudge filter excluded them, so the phase 62 regression test passed vacuously. When `drain_source == "soc_0500"` (phase 63's 05:00-snapshot drain is the value actually used, predating the 06:00 PV/drain reading), the gate now checks `overnight_drain_pct_0500` itself rather than the later 06:00 reading's sign and solar-contamination check.
+
+**Unknown `morning_pv_power` (phase 129 capture fix below) excludes rather than crashes.** An unavailable MPPT sensor now logs `morning_pv_power` as `None`, not a fake 0 W — `_is_drain_night`, `compute_effective_charge_rate_kw`'s no-charge fallback and `_charge_calibration_end_hours` all treat `None` as "can't confirm negligible solar" and exclude the night, the same as a confirmed-solar reading, instead of crashing on `None < 200` or wrongly passing the gate on a defaulted 0.
+
+**Charge-rate calibration.** `_pair_records` now also surfaces `full_window`, `gentle_charge_applied` and `logic_branch` (low-solar full-window plans), and `_charge_calibration_end_hours` excludes all of them — each forces `flux1_end` to 05:00 regardless of energy actually needed, so `(end_h - 2.0)` no longer represents the real charging duration on those nights. `opt_overnight.async_run_import_plan` now computes `overnight_drain_adjustment` unconditionally (previously only inside `if target_soc < 100`), since `compute_effective_charge_rate_kw` uses it to calibrate every historical night, not just a night with headroom; it's still only applied to tonight's `target_soc` inside that same `if`.
+
+**Forecast correction.** `forecast_fallback` is now actually persisted in `_IMPORT_PLAN_FIELDS` (it was computed but never logged) and surfaced in `_pair_records`; `_is_forecast_sample` excludes fallback nights, since they fed the correction with yesterday's uncorrected forecast rather than today's own.
+
+**Truncated last line.** `_append_line` now checks (`_file_missing_trailing_newline`) whether the file's last byte isn't `\n` before appending, writing a separating newline first — a power-loss-truncated partial line can no longer run into, and corrupt, the next appended record.
+
+See `docs/plans/phases/129-review-logging-reports.md`.

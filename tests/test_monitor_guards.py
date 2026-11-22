@@ -111,3 +111,49 @@ def test_dry_run_skip_changes_no_state():
     plan = _source("async_run_import_plan")
     assert plan.count("self._async_skip_plan(") == 2
     assert plan.count("dry_run, notify") == 2
+
+
+def test_drift_check_reads_return_none_on_failure_not_empty():
+    """Phase 129: a failed read-back is None, distinct from [] ('genuinely checked, no drift')."""
+    flux_src = _source("_async_read_flux_drift")
+    assert "return None" in flux_src
+    current_src = _source("_async_read_current_drift")
+    assert "return None" in current_src
+
+
+def test_drift_check_does_not_clear_episode_on_a_failed_read():
+    """A None from either read must short-circuit before the 'no diffs -> clear' branch."""
+    src = _source("async_run_drift_check")
+    assert "flux_diffs is None or current_diffs is None" in src
+    assert src.index("is None or current_diffs is None") < src.index("if not diffs:")
+
+
+def test_inverter_fault_uses_last_known_health_on_a_failed_read():
+    """A failed workdata read must fall back to the last stored snapshot, not drop the fault flag."""
+    src = _source("async_check_inverter_events")
+    assert "last_health = health if health is not None else" in src
+    assert "health_fault_flag(last_health)" in src
+
+
+def test_tariff_alert_ignores_a_wholly_unavailable_octopus_read():
+    """All bands None (entity unavailable, not unconfigured) must leave any existing alert alone."""
+    src = _source("async_run_tariff_price_check")
+    assert "all((v is None for v in octopus.values()))" in src
+    assert src.index("all((v is None for v in octopus.values()))") < src.index("tariff_price_changes(")
+
+
+def test_periodic_drift_interval_has_its_own_callback():
+    """The 2-hourly interval must not share the post-push one-shot handle (opt_monitor.py:316)."""
+    periodic_src = _source("_async_periodic_drift_check")
+    assert "_drift_check_unsub" not in periodic_src
+    one_shot_src = _source("_async_drift_check")
+    assert "self._drift_check_unsub = None" in one_shot_src
+    setup_src = _source("async_setup")
+    assert "self._async_periodic_drift_check, timedelta(hours=DRIFT_CHECK_INTERVAL_HOURS)" in setup_src
+
+
+def test_morning_brief_release_keeps_notifications_held_mid_send():
+    """Phase 129: only the items the brief actually included are dropped, not everything held since."""
+    src = _source("_async_do_release_held")
+    assert "held_notifications=[]" not in src
+    assert "[len(held):]" in src

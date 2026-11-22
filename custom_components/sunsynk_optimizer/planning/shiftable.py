@@ -113,7 +113,10 @@ def shiftable_loads(
     found.sort(key=lambda fb: fb[1]["start"])
     clusters: list[list[tuple[str, dict[str, Any]]]] = []
     for item in found:
-        if clusters and item[1]["start"] - clusters[-1][-1][1]["start"] <= SHIFT_START_TOLERANCE:
+        # Compare against the cluster's own anchor (its first block), not the last one added: comparing
+        # against the last block lets a chain of blocks each within tolerance of its neighbour merge two
+        # genuinely separate runs that are many slots apart end-to-end.
+        if clusters and item[1]["start"] - clusters[-1][0][1]["start"] <= SHIFT_START_TOLERANCE:
             clusters[-1].append(item)
         else:
             clusters.append([item])

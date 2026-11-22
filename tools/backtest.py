@@ -128,7 +128,12 @@ def replay(
                 load_kw is not None and plan.get("target_soc_reason") == "solar_bridge"
                 and hours is not None and logged_load is not None
             ):
-                alt += hours * (load_kw - logged_load) / capacity_kwh * 100
+                # Re-run the live bridge_soc() for both loads (margin, rounding and 30-100 clamp
+                # included) and apply only the difference, rather than a raw linear delta that
+                # omits BRIDGE_LOAD_MARGIN and bridge_soc's own int()/clamp behaviour.
+                old_bridge = planning.bridge_soc(hours * logged_load * planning.BRIDGE_LOAD_MARGIN, capacity_kwh)
+                new_bridge = planning.bridge_soc(hours * load_kw * planning.BRIDGE_LOAD_MARGIN, capacity_kwh)
+                alt += new_bridge - old_bridge
                 load_resized += 1
         alt = max(0.0, min(100.0, alt))
         efficiency = plan.get("charge_efficiency") or 1.0

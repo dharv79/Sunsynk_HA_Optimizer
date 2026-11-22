@@ -48,4 +48,4 @@ User decision (21/11/2026): the weekly settings audit ignores the Flux timer-slo
 
 ## Verification
 
-New or updated HA-free tests for each fixed item; `pytest`, `py_compile` and `pyflakes` green in CI.
+New or updated HA-free tests for each fixed item: `tests/test_data_logger.py`, `tests/test_capture_review_fixes.py` (new), `tests/test_reports_review_fixes.py` (new), `tests/test_kpis.py`, `tests/test_weekly_digest.py`, `tests/test_monitor_guards.py`, `tests/test_settings_audit.py`, `tests/test_shadow_review_fixes.py` (new), `tests/test_twin.py`, `tests/test_weather_load.py`, `tests/test_overnight_review_fixes.py`, `tests/test_shiftable.py`, `tests/test_shared_helpers.py`, `tests/test_backtest.py` (new). `pytest`, `py_compile` and `pyflakes` green in CI.
