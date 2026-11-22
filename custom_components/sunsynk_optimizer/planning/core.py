@@ -104,6 +104,26 @@ def _snap_delta(snapshots: dict[str, dict[str, Any]], start: str, end: str, key:
     return b - a
 
 
+def peak_window_usage_from_snapshots(snapshots: dict[str, dict[str, Any]]) -> dict[str, float] | None:
+    """16:00-19:00 load/grid-import/grid-export kWh from the exact meter_snapshot records (phase 127).
+
+    Replaces the old 30-minute-tick tracker, which captured a partial window after any restart in
+    16:00-19:00 and otherwise a window shifted by up to 29 minutes (the tick is anchored to setup
+    time, not the clock) — the 16:00 and 19:00 snapshots already exist and are exact. None when
+    any of the three meters is missing at either edge (never a wrong or negative delta).
+    """
+    load = _snap_delta(snapshots, "16:00", "19:00", "load_kwh")
+    grid_import = _snap_delta(snapshots, "16:00", "19:00", "grid_import_kwh")
+    grid_export = _snap_delta(snapshots, "16:00", "19:00", "grid_export_kwh")
+    if load is None or grid_import is None or grid_export is None:
+        return None
+    return {
+        "peak_load_kwh": round(load, 2),
+        "peak_grid_import_kwh": round(grid_import, 2),
+        "peak_grid_export_kwh": round(grid_export, 2),
+    }
+
+
 IMPORT_CAUSES = ("free_event", "grid_charge", "load_over_limit", "battery_floor", "slot_hold", "unknown")
 
 
@@ -417,3 +437,18 @@ def full_trim_delay_s(minutes_now: int) -> int:
     Trims before 16:00 are refused (never sell cheap-bought charge at the day export rate), so a
     battery full in the morning stays at 100% until the peak, then trims."""
     return max(FULL_TRIM_HOLD_S, (PEAK_START_MINUTES - minutes_now) * 60)
+
+
+# ---- Review fixes (21/11/2026, phase 127) ----------------------------------------------------------
+
+
+def reserve_hours_to_offpeak(minutes: int) -> float:
+    """Hours the battery must still cover the house before the next 02:00 off-peak window (phase 127).
+
+    From now (clamped up to 16:00 before then — the reserve is sized for the evening peak, not
+    the whole day) to the following 02:00. 00:00-01:59 wraps forward to "tomorrow's" minute
+    (``minutes + 24*60``, not ``- 24*60``: the prior sign gave ~49h instead of ~1h, capping
+    ``evening_reserve_soc`` at 100 and hiding the battery-replacement cost for two hours a night).
+    """
+    start = minutes + 24 * 60 if minutes < 2 * 60 else max(minutes, 16 * 60)
+    return max(0.0, (26 * 60 - start) / 60.0)

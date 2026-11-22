@@ -1122,3 +1122,69 @@ def test_trim_target_never_sells_below_a_hold(planning):
     assert planning.trim_target_soc(95, 30, minutes=13 * 60) == 82
     assert planning.trim_target_soc(95, 30, minutes=13 * 60, hold_soc=90) == 90
     assert planning.trim_target_soc(88, 30, minutes=13 * 60, hold_soc=90) is None
+
+
+# --------------------------------------------------------------------------- #
+# Phase 127: daytime/export-pause/peak review fixes                           #
+# --------------------------------------------------------------------------- #
+
+
+def test_reserve_hours_to_offpeak(planning):
+    assert planning.reserve_hours_to_offpeak(0) == 2.0
+    assert planning.reserve_hours_to_offpeak(90) == 0.5
+    assert planning.reserve_hours_to_offpeak(2 * 60) == 10.0
+    assert planning.reserve_hours_to_offpeak(10 * 60) == 10.0
+    assert planning.reserve_hours_to_offpeak(18 * 60) == 8.0
+
+
+def test_export_pause_restore_due(planning):
+    assert planning.export_pause_restore_due(10.0, True) is False          # held under 30 min
+    assert planning.export_pause_restore_due(30.0, True) is True           # held exactly 30 min
+    assert planning.export_pause_restore_due(45.0, True) is True
+    assert planning.export_pause_restore_due(45.0, False) is False         # outside 16:00-19:00
+    assert planning.export_pause_restore_due(None, True) is True           # no recorded start: restore now
+    assert planning.export_pause_restore_due(None, False) is False
+
+
+def test_export_pause_clear_slot(planning):
+    assert planning.export_pause_clear_slot(None, 17 * 60) == dict(planning.DEFAULT_FLUX2_SLOT)
+    assert planning.export_pause_clear_slot(72, 17 * 60 + 10) == {
+        "startTime": "17:10", "endTime": "19:00", "targetSoc": 72,
+    }
+
+
+def test_flux2_push_still_active(planning):
+    action = {"payload": {"flux_2": {"startTime": "16:00", "endTime": "16:45", "targetSoc": 82}}}
+    assert planning.flux2_push_still_active(action, 16 * 60 + 30) is True
+    assert planning.flux2_push_still_active(action, 16 * 60 + 45) is False
+    assert planning.flux2_push_still_active({}, 16 * 60 + 30) is False
+    assert planning.flux2_push_still_active(None, 16 * 60 + 30) is False
+    assert planning.flux2_push_still_active({"payload": {"flux_2": {}}}, 16 * 60) is False
+
+
+def test_trim_full_day_active_prefers_todays_plan(planning):
+    # The plan already applied the phase 68 skip: it wins over the weekday comparison.
+    assert planning.trim_full_day_active("2026-11-22", False, "2026-11-22", True) is False
+    assert planning.trim_full_day_active("2026-11-22", True, "2026-11-22", False) is True
+    # Stale or missing plan: fall back to the weekday comparison.
+    assert planning.trim_full_day_active("2026-11-21", False, "2026-11-22", True) is True
+    assert planning.trim_full_day_active(None, None, "2026-11-22", False) is False
+
+
+def test_trim_slot_end_minutes_clamps_to_19_00(planning):
+    assert planning.trim_slot_end_minutes(18 * 60 + 30, 45) == 19 * 60   # 18:30 + 45 min overruns
+    assert planning.trim_slot_end_minutes(18 * 60, 60) == 19 * 60        # 18:00 + 60 min overruns
+    assert planning.trim_slot_end_minutes(16 * 60, 45) == 16 * 60 + 45
+
+
+def test_peak_window_usage_from_snapshots(planning):
+    snapshots = {
+        "16:00": {"load_kwh": 10.0, "grid_import_kwh": 2.0, "grid_export_kwh": 0.0},
+        "19:00": {"load_kwh": 13.5, "grid_import_kwh": 3.2, "grid_export_kwh": 0.5},
+    }
+    assert planning.peak_window_usage_from_snapshots(snapshots) == {
+        "peak_load_kwh": 3.5, "peak_grid_import_kwh": 1.2, "peak_grid_export_kwh": 0.5,
+    }
+    assert planning.peak_window_usage_from_snapshots({"16:00": snapshots["16:00"]}) is None
+    backwards = {**snapshots, "19:00": {**snapshots["19:00"], "load_kwh": 1.0}}
+    assert planning.peak_window_usage_from_snapshots(backwards) is None

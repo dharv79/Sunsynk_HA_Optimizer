@@ -362,7 +362,10 @@ class EventsMixin:
             free_event=event, free_event_manual_start=None, free_event_manual_end=None
         )
         if was_holding_slots:
-            await self._async_restore_normal_plan()
+            # Phase 127: clearing "cancelled" above already drops _slots_held(), so a concurrent
+            # Flux 2 check can race this restore — the same lock every other decide-and-push uses.
+            async with self._flux2_lock:
+                await self._async_restore_normal_plan()
         await self.data_logger.async_log_free_event({"phase": "cancelled", **event})
         await self._async_report_event("cancelled", event)
         await self.async_notify("🔋 Sunsynk: free event cancelled", "The free electricity event was cancelled.")

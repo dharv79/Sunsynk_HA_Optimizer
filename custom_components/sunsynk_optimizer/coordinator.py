@@ -72,9 +72,9 @@ class OptimizerState:
     # < 10% never qualify), instead of snapping back to the optimistic nameplate
     # config, which would under-size the window and under-charge.
     last_effective_charge_rate_kw: float | None = None
-    # Most recent 16:00-19:00 peak-window load/grid usage, captured by
-    # optimizer._async_track_peak_window_usage. Diagnostic only — surfaced in
-    # the 22:00 data-report notification alongside the plan/morning/actuals.
+    # Most recent 16:00-19:00 peak-window load/grid usage, captured at 19:00 from the exact
+    # meter_snapshot records (optimizer._async_log_peak_window_usage). Diagnostic only —
+    # surfaced in the 22:00 data-report notification alongside the plan/morning/actuals.
     last_peak_window_usage: dict[str, Any] = field(default_factory=dict)
     # Most recent settled daily cost (electricity import/export + gas), read
     # from the optional Octopus Energy sensors and captured at 06:00 tagged
@@ -182,6 +182,14 @@ class OptimizerState:
     known_record_types: list[str] = field(default_factory=list)
     # Bill reconciliation (phase 36): month, billed_gbp (user-entered) and the last result.
     bill_reconciliation: dict[str, Any] = field(default_factory=dict)
+    # Phase 127: the date an export pause actually took hold on the inverter (set only on a
+    # successful push), kept even after the live flag clears so the 22:00 day_actuals capture —
+    # which otherwise always reads the flag after it has been cleared — can still say a pause
+    # happened today.
+    export_paused_date: str | None = None
+    # Phase 127: local-time timestamp the current export pause took hold; cleared once the
+    # restore succeeds. Drives the 30-minute hold before the no-trigger branch pushes a restore.
+    export_pause_started: str | None = None
 
 
 class SunsynkOptimizerCoordinator(DataUpdateCoordinator[OptimizerState]):

@@ -120,11 +120,6 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         self._initial_refresh_attempts = 0
         self.last_trim_ts: float | None = None
         self.pending_full_trim_cancel = None
-        # Snapshot of load/grid meters at the start of the 16:00-19:00 peak
-        # window, used by _async_track_peak_window_usage. Not persisted: a
-        # restart mid-window loses that day's snapshot (same tradeoff as
-        # pending_full_trim_cancel above) — informational data only.
-        self._peak_window_start: dict[str, Any] | None = None
         # Phase 29: today's clipped-solar tally; unpersisted by design (a restart loses a partial day).
         self._clipped: dict[str, Any] = {}
         self._hourly: dict[str, Any] = {}  # phase 86: unpersisted timed samples of the day's meters
@@ -146,7 +141,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         # Cost-aware export-disable shadow-mode tally (v1.0.11 Part 3). Counts
         # how many 30-minute checks the cost trigger disagreed with the live
         # Watt trigger, and a rough £ estimate of the exposure. Not persisted —
-        # same tradeoff as _peak_window_start — read and reset weekly by
+        # same tradeoff as pending_full_trim_cancel above — read and reset weekly by
         # _async_send_weekly_cost_summary, so a restart just loses a partial
         # week's tally rather than corrupting it.
         self._shadow_export_stats: dict[str, float] = {"divergent_checks": 0, "estimated_gbp_delta": 0.0}

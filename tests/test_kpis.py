@@ -335,6 +335,48 @@ def test_peak_export_dedups_and_pairs_export_days_only(tmp_path):
     assert days["2026-10-10"]["peak_export_kwh"] is None
 
 
+# ---------------------------------------------------------------- phase 127 review fixes
+
+def test_peak_export_floor_soc_picks_the_higher_floor():
+    assert planning.peak_export_floor_soc(None, None) == (0, None)
+    assert planning.peak_export_floor_soc(0, None) == (0, None)
+    assert planning.peak_export_floor_soc(60, None) == (60, "peak_min_soc")
+    assert planning.peak_export_floor_soc(None, 45.2) == (46, "peak_cover_required_soc")
+    assert planning.peak_export_floor_soc(60, 45.2) == (60, "peak_min_soc")
+    assert planning.peak_export_floor_soc(40, 65.1) == (66, "peak_cover_required_soc")
+
+
+def test_peak_export_plan_applies_the_floor_only_when_it_raises_the_target():
+    # Unfloored target is 78 (73 reserve + 5 margin); a floor below that changes nothing.
+    plan = planning.peak_export_plan(95, 73, 10.0, 27.81, 16.66, min_target_soc=70, min_target_label="peak_min_soc")
+    assert plan["target_soc"] == 78 and plan["floor_applied"] is None
+    # A floor above it wins, and the surplus/decision are recomputed from the floored target.
+    plan = planning.peak_export_plan(95, 73, 10.0, 27.81, 16.66, min_target_soc=90, min_target_label="peak_min_soc")
+    assert plan["target_soc"] == 90 and plan["floor_applied"] == "peak_min_soc"
+    assert plan["export_kwh"] == 0.5 and plan["decision"] == "export"
+
+
+def test_peak_export_recheck_carries_the_floor_through():
+    # Unfloored target from a light observed load is 81 (73 reserve + ~2.4 need + 5 margin, ceil).
+    result = planning.peak_export_recheck(
+        95, 73, 10.0, 60, 120, 0.1, 85, True, 27.81, 16.66,
+        min_target_soc=90, min_target_label="peak_cover_required_soc",
+    )
+    assert result["target_soc"] == 90 and result["floor_applied"] == "peak_cover_required_soc"
+    # A skipped recheck (no soc) still carries the floor_applied key, defaulted to None.
+    assert planning.peak_export_recheck(
+        None, 73, 10.0, 60, 120, 1.0, 85, True, 27.81, 16.66,
+    )["floor_applied"] is None
+
+
+def test_peak_export_skip_reason_checks_outage_first():
+    assert planning.peak_export_skip_reason(True, 50.0, outage_active=True) == "skipped_outage"
+    assert planning.peak_export_skip_reason(False, None, outage_active=True) == "skipped_outage"
+    assert planning.peak_export_skip_reason(True, 50.0) == "skipped_slots_held"
+    assert planning.peak_export_skip_reason(False, None) == "skipped_no_soc"
+    assert planning.peak_export_skip_reason(False, 50.0, outage_active=False) is None
+
+
 # ---------------------------------------------------------------- phase 24
 
 def test_wear_cost_pence_per_kwh():

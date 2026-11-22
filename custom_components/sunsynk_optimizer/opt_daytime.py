@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from datetime import (
     datetime,
-    timedelta,
 )
 from typing import Any
 from homeassistant.core import Event
@@ -68,6 +67,7 @@ from .planning import (
     daytime_import_anomaly,
     cheapest_hour_today,
     marginal_cost_pence,
+    minutes_to_hhmm,
     solar_is_spare,
     VOLTAGE_DERATE_PERIOD_MIN,
     voltage_derate_suspect,
@@ -80,8 +80,14 @@ from .planning import (
     PEAK_COVER_PEAK_START_MINUTES,
     daytime_load_kw,
     evening_reserve_soc,
+    exclude_away_days,
+    export_pause_clear_slot,
+    export_pause_restore_due,
+    flux2_push_still_active,
     peak_cover_plan,
+    peak_cover_retry_due,
     peak_cover_startup_retry_due,
+    peak_export_floor_soc,
     peak_export_plan,
     peak_export_recheck,
     peak_export_skip_reason,
@@ -91,10 +97,13 @@ from .planning import (
     peak_need_soc,
     over_limit_import_step,
     intraday_forecast_scale,
+    reserve_hours_to_offpeak,
     scaled_solar_kwh,
     solar_until_kwh,
     import_cause_step,
     trim_defer_kwh,
+    trim_full_day_active,
+    trim_slot_end_minutes,
     EXPORT_PAUSE_FLUX2_SLOT,
     carry_held_flux1,
 )
@@ -108,14 +117,19 @@ _LOGGER = logging.getLogger(__name__)
 class DaytimeMixin:
     """SOC listener, Flux 2 check, trim, peak cover, peak export and re-checks (methods of SunsynkOptimizer)."""
 
-    async def async_run_flux2_check(self, source: str = "automatic") -> None:
-        """Run Flux 2 evening export / trim logic."""
+    async def async_run_flux2_check(self, source: str = "automatic", tally: bool = False) -> None:
+        """Run Flux 2 evening export / trim logic.
+
+        ``tally`` (phase 127) adds this check's cost/watt-trigger divergence to the weekly shadow
+        stat; only the 30-minute periodic check passes it, so the SOC-change listener (which can
+        fire every ~30s in the window) doesn't inflate the figure many times over.
+        """
         async with self._flux2_lock:
-            notice = await self._async_flux2_decide(source)
+            notice = await self._async_flux2_decide(source, tally)
         if notice:
             await self.async_notify(*notice)
 
-    async def _async_flux2_decide(self, source: str) -> tuple[str, str] | None:
+    async def _async_flux2_decide(self, source: str, tally: bool = False) -> tuple[str, str] | None:
         """Decide and push under the Flux 2 lock; returns the notification to send after it."""
         if self._outage_active():
             return  # Phase 48: a push cannot reach the inverter during an outage.
@@ -160,10 +174,14 @@ class DaytimeMixin:
 
         cfg = self.cfg
         now_local = dt_util.now()
-        is_full_day = now_local.strftime("%A") == self.selected_full_charge_day
+        today_iso = now_local.date().isoformat()
+        weekday_is_full_day = now_local.strftime("%A") == self.selected_full_charge_day
+        plan = self.coordinator.state.nightly_import_plan or {}
+        trim_full_day = trim_full_day_active(plan.get("date"), plan.get("is_full_day"), today_iso, weekday_is_full_day)
         base_action = {"soc": soc, "grid_pac": grid_pac, "source": source}
 
         export_threshold = float(cfg[CONF_EXPORT_DISABLE_THRESHOLD])
+        now_minutes = now_local.hour * 60 + now_local.minute
         in_peak_window = 16 <= now_local.hour < 19
         watt_trigger = in_peak_window and grid_pac > export_threshold
 
@@ -186,7 +204,7 @@ class DaytimeMixin:
             if peak_price is not None:
                 cost_pence_per_hour = (grid_pac / 1000) * peak_price
                 cost_trigger = cost_pence_per_hour > cost_threshold
-                if cost_trigger != watt_trigger:
+                if tally and cost_trigger != watt_trigger:
                     self._tally_shadow_export_divergence(cost_pence_per_hour, cost_threshold, cost_trigger)
 
         shadow_mode = bool(cfg.get(CONF_COST_AWARE_EXPORT_SHADOW_MODE, DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE))
@@ -237,7 +255,7 @@ class DaytimeMixin:
         # Never below the evening reserve, never at night, never below tonight's charge.
         trim_target, reserve = self._trim_target(soc, now_local)
         if (
-            not is_full_day and soc > 85 and trim_target is not None
+            not trim_full_day and soc > 85 and trim_target is not None
             and not self._peak_export_holds_flux2(now_local) and self._cooldown_ok()
         ):
             self._mark_trim()
@@ -248,7 +266,7 @@ class DaytimeMixin:
                 "trim_to_82",
                 {
                     "startTime": now_local.strftime("%H:%M"),
-                    "endTime": (now_local + timedelta(minutes=45)).strftime("%H:%M"),
+                    "endTime": minutes_to_hhmm(trim_slot_end_minutes(now_minutes, 45)),
                     "targetSoc": trim_target,
                 },
                 {**base_action, "evening_reserve_soc": reserve,
@@ -263,20 +281,53 @@ class DaytimeMixin:
             )
 
         was_paused = bool(self.coordinator.state.evening_export_disabled)
-        self.coordinator.update_state(
-            last_flux2_action={
-                "action": "none",
-                **base_action,
-                "notified": False,
-                "reason": "no_trigger",
-            },
-            evening_export_disabled=False,
-            operation_mode=self.operation_mode,
+        if was_paused and in_peak_window:
+            started = dt_util.parse_datetime(self.coordinator.state.export_pause_started or "")
+            elapsed_min = None if started is None else (now_local - dt_util.as_local(started)).total_seconds() / 60.0
+            if not export_pause_restore_due(elapsed_min, in_peak_window):
+                # Held < 30 min: the inverter is still holding 100%, so state must keep saying so
+                # — restoring is deferred, not abandoned, to avoid flip-flopping a kettle spike.
+                self.coordinator.update_state(
+                    last_flux2_action={
+                        "action": "none", **base_action, "notified": False, "reason": "no_trigger_pause_holding",
+                    },
+                    evening_export_disabled=True,
+                    operation_mode=self.operation_mode,
+                    touch=False,
+                )
+                return None
+            export_rec = record_for_date(self.coordinator.state.peak_export, today_iso)
+            restore_target = export_rec.get("target_soc") if self._peak_export_holds_flux2(now_local) else None
+            api_ok = await self._async_push_flux2_action(
+                "restore_after_pause",
+                export_pause_clear_slot(restore_target, now_minutes),
+                base_action,
+                "export_pause_held_30min_cleared",
+            )
+            if api_ok:
+                self.coordinator.update_state(touch=False, export_pause_started=None)
+            title = "🔋 Sunsynk: export pause ended" if api_ok else "⚠️ Sunsynk: export pause restore NOT applied"
+            back_to = f"selling at {restore_target}% until 19:00" if restore_target is not None else "the normal Flux 2 slot"
+            return (title, f"The export pause's 30-minute hold is up; back to {back_to}.{_api_note(api_ok)}")
+
+        push_active = self._peak_export_holds_flux2(now_local) or flux2_push_still_active(
+            self.coordinator.state.last_flux2_action, now_minutes
+        )
+        fields: dict[str, Any] = {
+            "evening_export_disabled": False,
+            "operation_mode": self.operation_mode,
             # Runs on every SOC change above 85%: only a real change (the pause clearing) is
             # stamped and saved; the live soc/grid_pac in the action still reach the entities.
-            touch=was_paused,
-            persist=was_paused,
-        )
+            "touch": was_paused,
+            "persist": was_paused,
+        }
+        if not push_active:
+            # A live peak export or trim slot still owns Flux 2 — don't blot out its
+            # last_flux2_action with "No action" until that slot itself ends (phase 127).
+            fields["last_flux2_action"] = {
+                "action": "none", **base_action, "notified": False, "reason": "no_trigger",
+            }
+        self.coordinator.update_state(**fields)
         return None
 
     async def _async_trim_defer(self, soc, trim_target, now_local, cfg, base_action) -> int | None:
@@ -333,8 +384,22 @@ class DaytimeMixin:
     ) -> bool:
         """Push a Flux 2 override and record it as last_flux2_action. Returns api_ok."""
         now = dt_util.now()
-        payload = carry_held_flux1({"flux_2": flux_2}, self._cover_hold_slot(now), now.hour * 60 + now.minute)
+        hold_slot = self._cover_hold_slot(now)
+        payload = carry_held_flux1({"flux_2": flux_2}, hold_slot, now.hour * 60 + now.minute)
         api_ok = await self.async_push_flux_override(payload)
+        if hold_slot is not None and payload.get("flux_1") == hold_slot:
+            # Phase 127: this push carried the peak-cover hold's own Flux 1 slot (instead of
+            # carry_plan_flux1's overnight slot) — 16:00 must put the real plan back, not just
+            # the cap, or the cloud's Flux 1 stays at the daytime hold slot until 01:55.
+            cover = self._peak_cover
+            if cover and cover.get("date") == now.date().isoformat():
+                cover["carried"] = True
+        # Phase 127: stamp when a fresh pause actually took hold on the inverter — export_pause_started
+        # drives the 30-minute restore hysteresis, export_paused_date survives the flag being cleared
+        # later today so the 22:00 capture still knows a pause happened (both set once per pause).
+        pause_fields: dict[str, Any] = {}
+        if evening_export_disabled and api_ok and not self.coordinator.state.evening_export_disabled:
+            pause_fields = {"export_pause_started": now.isoformat(), "export_paused_date": now.date().isoformat()}
         self.coordinator.update_state(
             last_flux2_action={
                 "action": action,
@@ -349,6 +414,7 @@ class DaytimeMixin:
                 evening_export_disabled if api_ok else bool(self.coordinator.state.evening_export_disabled)
             ),
             operation_mode=self.operation_mode,
+            **pause_fields,
         )
         return api_ok
 
@@ -388,8 +454,7 @@ class DaytimeMixin:
 
     async def _async_periodic_flux2_check(self, _now) -> None:
         """30-minute interval callback."""
-        await self._guarded(self.async_run_flux2_check, "Periodic Flux 2 check")
-        await self._guarded(self._async_track_peak_window_usage, "Peak-window usage tracking")
+        await self._guarded(lambda: self.async_run_flux2_check(tally=True), "Periodic Flux 2 check")
         await self._guarded(self.async_restore_charge_current, "Grid charge current restore")
         await self._guarded(self.async_run_peak_cover, "Peak cover")
         await self._guarded(self._async_track_clipped_solar, "Clipped solar tracking")
@@ -519,52 +584,6 @@ class DaytimeMixin:
             f"with the battery at {anomaly['soc']}% — inverter limit, wrong priority or a heater left on?",
         )
 
-    async def _async_track_peak_window_usage(self) -> None:
-        """Snapshot load/grid meters at the 16:00-19:00 window edges and log the delta.
-
-        Piggybacks on the 30-minute periodic callback rather than adding a new
-        scheduled listener — there's no existing capture point at exactly 16:00.
-        Captures a start snapshot the first time this fires with the hour in
-        [16, 19), then logs the delta the first time it fires with hour >= 19
-        (guarded so it only logs once per day). If HA restarts mid-window,
-        _peak_window_start is lost (not persisted) and that day is silently
-        skipped rather than logging a wrong/partial delta.
-        """
-        now_local = dt_util.now()
-        today = now_local.date().isoformat()
-        hour = now_local.hour
-
-        if 16 <= hour < 19:
-            if self._peak_window_start is None or self._peak_window_start.get("date") != today:
-                self._peak_window_start = {"date": today, **self._read_daily_meters()}
-            return
-
-        if hour >= 19 and self._peak_window_start is not None and self._peak_window_start.get("date") == today:
-            start = self._peak_window_start
-            self._peak_window_start = None
-            end = self._read_daily_meters()
-            if any(v is None for v in (*start.values(), *end.values())):
-                return  # an unavailable meter would log a whole-day or negative delta
-            peak_load_kwh = max(0.0, end["load"] - start["load"])
-            peak_grid_import_kwh = max(0.0, end["grid_import"] - start["grid_import"])
-            peak_grid_export_kwh = max(0.0, end["grid_export"] - start["grid_export"])
-            await self.data_logger.async_log_peak_window_usage(
-                date=today,
-                peak_load_kwh=peak_load_kwh,
-                peak_grid_import_kwh=peak_grid_import_kwh,
-                peak_grid_export_kwh=peak_grid_export_kwh,
-            )
-            self.coordinator.update_state(
-                touch=False,
-                last_peak_window_usage={
-                    "type": "peak_window_usage",
-                    "date": today,
-                    "peak_load_kwh": round(peak_load_kwh, 2),
-                    "peak_grid_import_kwh": round(peak_grid_import_kwh, 2),
-                    "peak_grid_export_kwh": round(peak_grid_export_kwh, 2),
-                },
-            )
-
     async def _async_peak_export(self, _now) -> None:
         await self._guarded(self.async_run_peak_export, "Peak surplus export")
 
@@ -577,14 +596,14 @@ class DaytimeMixin:
         holds the slots; never pushes in monitor mode; the export-disable (watt
         trigger) wins — if it already fired, or fires later, it holds 100%.
         """
-        if self._outage_active():
-            return  # Phase 48
         now = dt_util.now()
         slots_held = self._slots_held()
-        if not slots_held:
-            await self._async_peak_cover_end()
+        outage = self._outage_active()
+        if not slots_held and not outage:
+            async with self._flux2_lock:  # phase 127: the same lock as every other Flux 2 decide-and-push
+                await self._async_peak_cover_end()
         soc = self._essential_state(self.battery_soc_entity)
-        skip = peak_export_skip_reason(slots_held, soc)
+        skip = peak_export_skip_reason(slots_held, soc, outage)
         if skip:
             # Logged so the 22:00 debug bundle always says why there was no export.
             record = {"type": "peak_export", "date": now.date().isoformat(), "soc": soc, "decision": skip}
@@ -595,11 +614,19 @@ class DaytimeMixin:
         reserve = self._evening_reserve_soc()
         capacity = self._capacity_kwh(cfg)
         # Keep the 16:00-19:00 house load too, sized like peak cover, so the peak isn't bought back.
+        away_dates = {d["date"] for d in await self.data_logger.async_load_paired_days(30) if d.get("away")}
         peak_load_kwh, peak_load_source = peak_load_estimate_kwh(
-            await self.data_logger.async_recent_peak_loads(), 3.0 * self._plan_load_kw(cfg)
+            [kwh for _, kwh in exclude_away_days(await self.data_logger.async_recent_peak_load_days(), away_dates)],
+            3.0 * self._plan_load_kw(cfg),
         )
         need = peak_need_soc(peak_load_kwh, capacity)
         prices, sources = self._tariff_prices(now.date())
+        # Phase 127 user decision: never sell below the user's Peak minimum SOC or today's
+        # peak-cover requirement — the export target is floored at the higher of the two.
+        cover_rec = (self._peak_cover or {}).get("record") if (self._peak_cover or {}).get("date") == now.date().isoformat() else {}
+        floor_soc, floor_label = peak_export_floor_soc(
+            self.coordinator.state.peak_min_soc, (cover_rec or {}).get("required_soc")
+        )
         plan = peak_export_plan(
             soc,
             reserve,
@@ -608,6 +635,8 @@ class DaytimeMixin:
             prices["offpeak"],
             wear_pence=self._wear_pence(),
             peak_need_soc=need,
+            min_target_soc=floor_soc,
+            min_target_label=floor_label,
         )
         live = bool(cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)) and self.operation_mode != "monitor"
         api_ok = None
@@ -663,7 +692,10 @@ class DaytimeMixin:
         now = dt_util.now()
         today = now.date().isoformat()
         prior = record_for_date(self.coordinator.state.peak_export, today)
-        if self._slots_held() or self.coordinator.state.evening_export_disabled or prior.get("target_soc") is None:
+        if (
+            self._slots_held() or self._outage_active()  # phase 127
+            or self.coordinator.state.evening_export_disabled or prior.get("target_soc") is None
+        ):
             return
         soc = self._essential_state(self.battery_soc_entity)
         snapshots = await self.data_logger.async_load_meter_snapshots(today)
@@ -674,10 +706,15 @@ class DaytimeMixin:
         cfg = self.cfg
         reserve = self._evening_reserve_soc()
         prices, sources = self._tariff_prices(now.date())
+        cover_rec = (self._peak_cover or {}).get("record") if (self._peak_cover or {}).get("date") == today else {}
+        floor_soc, floor_label = peak_export_floor_soc(
+            self.coordinator.state.peak_min_soc, (cover_rec or {}).get("required_soc")
+        )
         result = peak_export_recheck(
             soc, reserve, self._capacity_kwh(cfg), elapsed, 19 * 60 - (16 * 60 + elapsed), observed,
             prior.get("target_soc"), prior.get("api_ok") is True,
             prices["export_peak"], prices["offpeak"], wear_pence=self._wear_pence(),
+            min_target_soc=floor_soc, min_target_label=floor_label,
         )
         live = bool(cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)) and self.operation_mode != "monitor"
         api_ok = None
@@ -857,7 +894,9 @@ class DaytimeMixin:
                         "full_day_trim_to_82",
                         {
                             "startTime": now_local.strftime("%H:%M"),
-                            "endTime": (now_local + timedelta(minutes=60)).strftime("%H:%M"),
+                            "endTime": minutes_to_hhmm(
+                                trim_slot_end_minutes(now_local.hour * 60 + now_local.minute, 60)
+                            ),
                             "targetSoc": trim_target,
                         },
                         {
@@ -906,8 +945,7 @@ class DaytimeMixin:
         export_bands = flux_bands_from_charges(cfg.get(CONF_CHARGES, []), "export")
         soc = self._essential_state(self.battery_soc_entity)
         # Battery must still cover the house from now (or 16:00) to 02:00.
-        start = minutes - 24 * 60 if minutes < 2 * 60 else max(minutes, 16 * 60)
-        hours = max(0.0, (26 * 60 - start) / 60.0)
+        hours = reserve_hours_to_offpeak(minutes)
         reserve = evening_reserve_soc(self._plan_load_kw(cfg), self._capacity_kwh(cfg), hours=hours)
         pv_parts = [self._essential_state(e) for e in (self.pv_mppt0_entity, self.pv_mppt1_entity)]
         pv_w = sum(p for p in pv_parts if p is not None) if any(p is not None for p in pv_parts) else None
@@ -924,7 +962,13 @@ class DaytimeMixin:
         """Recompute the spare-solar estimate into state (no inverter writes); None without a forecast."""
         cfg = self.cfg
         now = dt_util.now()
+        today = now.date().isoformat()
         soc = self._essential_state(self.battery_soc_entity)
+        if soc is None:
+            # Rule 11: an unavailable SOC is unknown headroom, never a full (or empty) battery.
+            result = {"total_kwh": None, "hours": [], "window": None, "date": today}
+            self.coordinator.update_state(spare_solar=result)
+            return result
         capacity = self._capacity_kwh(cfg)
         hourly = self._hourly_or_synthetic_forecast(cfg, now)
         plan = self.coordinator.state.last_import_plan or {}
@@ -937,11 +981,11 @@ class DaytimeMixin:
         if scale is not None:
             correction *= scale
         load_kw = self._plan_load_kw(cfg)
-        headroom = capacity * (100.0 - soc) / 100.0 if soc is not None else 0.0
+        headroom = capacity * (100.0 - soc) / 100.0
         result = expected_spare_solar(
             hourly, correction, load_kw, headroom, from_hour=max(SPARE_SOLAR_FIRST_HOUR, now.hour + now.minute / 60.0)
         )
-        result["date"] = now.date().isoformat()
+        result["date"] = today
         self.coordinator.update_state(spare_solar=result)
         return result
 
@@ -988,7 +1032,7 @@ class DaytimeMixin:
             return
         today = now.date().isoformat()
         if (self._peak_cover or {}).get("date") != today:
-            self._peak_cover = {"date": today, "logged": False, "pushed": False}
+            self._peak_cover = {"date": today, "logged": False, "pushed": False, "attempts": 0}
         state = self._peak_cover
         await self._async_reassert_hold_floor(state)
         if state["logged"]:
@@ -1004,7 +1048,8 @@ class DaytimeMixin:
         load_at_05 = (snapshots.get("05:00") or {}).get("load_kwh")
         load_now = self._essential_state(self.day_load_entity)
         load_kw, load_source = daytime_load_kw(load_now, load_at_05, now.hour + now.minute / 60.0 - 5.0, fallback_kw)
-        peak_days = await self.data_logger.async_recent_peak_load_days()
+        away_dates = {d["date"] for d in await self.data_logger.async_load_paired_days(30) if d.get("away")}
+        peak_days = exclude_away_days(await self.data_logger.async_recent_peak_load_days(), away_dates)
         peak_load_kwh, peak_load_source, peak_margin = peak_load_estimate_split(
             peak_days, 3.0 * load_kw, now.weekday() >= 5
         )
@@ -1061,6 +1106,12 @@ class DaytimeMixin:
                 f"needs {plan['required_soc']}%. Holding {plan['target_soc']}% at the day rate until 16:00 "
                 f"(about {plan['topup_kwh']} kWh{' kept in the battery' if hold else ''}).{_api_note(api_ok)}",
             )
+            if api_ok is False:
+                state["attempts"] = state.get("attempts", 0) + 1
+                if peak_cover_retry_due(api_ok, minutes, state["attempts"]):
+                    # Phase 127: a transient failure retries on the next 30-minute check instead
+                    # of leaving the day uncovered — nothing is logged yet.
+                    return
         state["logged"] = True
         record = {
             "date": today,
@@ -1147,11 +1198,16 @@ class DaytimeMixin:
     async def _async_reassert_hold_floor(self, state: dict[str, Any]) -> None:
         """Each 30-minute check: a later Flux push can reset the slot floor, so put the hold back."""
         held = state.get("hold_floor")
-        if not held or state.get("date") != dt_util.now().date().isoformat() or self._slots_held():
+        now_local = dt_util.now()
+        if not held or state.get("date") != now_local.date().isoformat() or self._slots_held():
             return
         if self.operation_mode == "monitor":
             return
         settings = await self._async_api_read("Daytime hold check", self.coordinator.api.async_read_settings, self.inverter_serial)
+        # Phase 127: a push since the hold was applied may have moved the slot layout itself
+        # (e.g. the overnight plan); writing the floor to the wrong slot would misconfigure it.
+        if daytime_hold_slot(tou_slots_from_settings(settings), now_local.hour * 60 + now_local.minute) != held["slot"]:
+            return
         # Phase 122: only a floor that dropped below the hold is put back; a value the user raised is kept.
         if hold_floor_needs_reassert(settings, held["slot"], held["floor"]):
             await self._async_write_setting(f"cap{held['slot']}", held["floor"])
@@ -1163,9 +1219,14 @@ class DaytimeMixin:
             return
         state["pushed"] = False
         held = state.pop("hold_floor", None)
+        carried = state.pop("carried", False)
         if held:
             settings = await self._async_api_read("Daytime hold end", self.coordinator.api.async_read_settings, self.inverter_serial)
             if hold_floor_restore_due(settings, held["slot"], held["floor"]):  # phase 122: a user-raised slot is left alone
                 await self._async_write_setting(f"cap{held['slot']}", held["previous"], allow_in_monitor=True)
+            if carried:
+                # Phase 127: a trim carried the native hold's own Flux 1 slot onto the cloud —
+                # restoring just the cap leaves that slot there until 01:55.
+                await self._async_restore_normal_plan()
         else:
             await self._async_restore_normal_plan()

@@ -236,6 +236,18 @@ def peak_load_recent_high(
     return high, "recent_high_cold" if cold else "recent_high", high_margin
 
 
+def exclude_away_days(
+    samples: list[tuple[str, float]], away_dates: set[str] | frozenset[str]
+) -> list[tuple[str, float]]:
+    """Drop away (holiday) days from recent peak-load history (phase 127).
+
+    async_recent_peak_load_days carries no away flag of its own; a low-load holiday week must not
+    skew the home peak-load estimate that sizes peak cover and peak export, the same reasoning
+    that already keeps away days out of the evening-load learner (do-not-break 18).
+    """
+    return [(d, k) for d, k in samples if d not in away_dates]
+
+
 BASELOAD_MIN_NIGHTS = 7
 
 BASELOAD_FACTOR = 1.5
