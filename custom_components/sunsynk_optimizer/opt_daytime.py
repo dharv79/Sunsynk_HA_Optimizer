@@ -43,6 +43,7 @@ from .const import (
 from .flux_helpers import price_source
 from .planning import (
     full_trim_delay_s,
+    GRID_RESTORED_PLAN_SOURCE,
     round_trip_shadow,
     daytime_hold_floor,
     daytime_hold_slot,
@@ -777,7 +778,7 @@ class DaytimeMixin:
                 + " Normal planning resumes.",
             )
             if skipped:
-                await self._guarded(lambda: self.async_run_import_plan(source="grid_restored"), "Post-outage plan")
+                await self._guarded(lambda: self.async_run_import_plan(source=GRID_RESTORED_PLAN_SOURCE), "Post-outage plan")
 
     def _peak_export_holds_flux2(self, now_local) -> bool:
         """True while today's live peak export window owns Flux 2 (16:00-19:00)."""

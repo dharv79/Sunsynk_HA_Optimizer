@@ -134,7 +134,7 @@ Checked in order:
 
 | Case | Target |
 |---|---|
-| Full-charge day, good solar | Solar bridge (PV fills to 100% in the day) |
+| Full-charge day, good solar | Solar bridge, same as a normal day — 100% may not be reached (phase 126) |
 | Full-charge day, low solar (< 7 kWh) | 100% |
 | Low solar (< 7 kWh), winter-like | 100% |
 | Low solar (< 7 kWh), other bands | 95% |

@@ -57,6 +57,7 @@ from .const import (
 )
 from .planning import (
     apply_user_override,
+    parse_naive_hourly_forecast,
     achievable_max_soc,
     charge_outcome,
     baseload_anomaly,
@@ -73,7 +74,6 @@ from .planning import (
     capacity_low,
     capacity_samples,
     CHEAP_WINDOW_END,
-    CHEAP_WINDOW_HOURS,
     DEFAULT_BATTERY_VOLTAGE,
     LOW_SOLAR_THRESHOLD_KWH,
     STARTUP_PLAN_SOURCE,
@@ -90,6 +90,7 @@ from .planning import (
     bms_limited_rate_kw,
     charge_rate_source,
     flux1_end_minutes,
+    flux1_replan_start_minutes,
     forecast_band,
     full_charge_day_move,
     gentle_charge_current_a,
@@ -109,6 +110,7 @@ from .planning import (
     round_or_none,
     score_full_charge_day,
     select_target_soc,
+    nightly_plan_catch_up_due,
     should_log_import_plan,
     solar_kwh_to_fill,
     synthetic_hourly_profile,
@@ -141,6 +143,14 @@ class OvernightMixin:
         self.coordinator.update_state(touch=False, full_charge_day_moved_to=None)
         weather_scores = await self._async_weekday_weather_scores()
         if weather_scores is None:
+            return
+        if all(score is None for score in weather_scores.values()):
+            # No weekday matched the forecast: keep this week's current pick rather than
+            # defaulting to Monday from an all -999 tie (phase 126).
+            await self.async_notify(
+                "⚠️ Sunsynk: full-charge day unchanged",
+                f"No weather data matched a weekday; keeping {self.selected_full_charge_day}.",
+            )
             return
         scores: dict[str, float] = {
             day: (-999.0 if score is None else score) for day, score in weather_scores.items()
@@ -189,6 +199,7 @@ class OvernightMixin:
             return None
 
         scores: dict[str, float | None] = {day: None for day in FULL_CHARGE_DAY_OPTIONS}
+        today = dt_util.now().date()
         for item in forecast_items:
             try:
                 dt_value = dt_util.parse_datetime(item.get("datetime"))
@@ -196,8 +207,13 @@ class OvernightMixin:
                 dt_value = None
             if dt_value is None:
                 continue
-            day_name = dt_value.strftime("%A")
-            if day_name in scores:
+            # Local time (phase 126), matching _async_today_cloud_cover: a provider that stamps
+            # local midnight in UTC would otherwise file a day under the wrong weekday.
+            local_dt = dt_util.as_local(dt_value)
+            day_name = local_dt.strftime("%A")
+            # Only the first (soonest) occurrence within the coming week: a forecast longer than
+            # 7 days must not let next week's same-named day overwrite this week's score.
+            if day_name in scores and scores[day_name] is None and today < local_dt.date() <= today + timedelta(days=7):
                 scores[day_name] = score_full_charge_day(item, day_name)
         return scores
 
@@ -299,12 +315,15 @@ class OvernightMixin:
         )
 
     def _get_hourly_forecast_kwh(self) -> dict[int, float] | None:
-        """Return hourly solar forecast as {hour: kWh}, or None if unavailable/unconfigured.
+        """Return today's hourly solar forecast as {hour: kWh}, or None if unavailable/unconfigured.
 
         Supports two attribute formats:
-        - Forecast.Solar: dict keyed by "YYYY-MM-DD HH:MM:SS" with float kWh per hour
+        - Forecast.Solar: dict keyed by "YYYY-MM-DD HH:MM:SS" (naive, local) with float kWh per hour
         - Solcast: list of {"period_start": iso_str, "pv_estimate": kWh per 30-min period}
           (consecutive 30-min periods are summed to hourly buckets)
+
+        Kept to today only (phase 126): an attribute covering more than one date (today and
+        tomorrow) would otherwise add the same hour across dates and understate the morning gap.
         """
         cfg = self.cfg
         sensor_id = self._cfg_str(CONF_HOURLY_FORECAST_SENSOR, cfg)
@@ -315,28 +334,26 @@ class OvernightMixin:
         raw = state.attributes.get(attr_name)
         if not raw:
             return None
-
-        hourly: dict[int, float] = {}
+        today = dt_util.now().date().isoformat()
 
         if isinstance(raw, dict):
-            # Forecast.Solar format: {"YYYY-MM-DD HH:MM:SS": kwh, ...}
-            for key, val in raw.items():
-                try:
-                    hour = int(str(key).split(" ")[1].split(":")[0]) if " " in str(key) else int(str(key).split("T")[1].split(":")[0])
-                    hourly[hour] = hourly.get(hour, 0.0) + float(val)
-                except (ValueError, IndexError):
-                    continue
-        elif isinstance(raw, list):
-            # Solcast format: [{"period_start": iso_str, "pv_estimate": kwh_per_30min}, ...]
+            # Forecast.Solar format: {"YYYY-MM-DD HH:MM:SS": kwh, ...} — naive local string.
+            return parse_naive_hourly_forecast(raw, today)
+
+        hourly: dict[int, float] = {}
+        if isinstance(raw, list):
+            # Solcast format: [{"period_start": iso_str, "pv_estimate": kwh_per_30min}, ...] — aware ISO.
             for item in raw:
                 try:
-                    period_start = str(item.get("period_start", ""))
+                    period_start = dt_util.parse_datetime(str(item.get("period_start", "")))
+                    if period_start is None:
+                        continue
+                    local = dt_util.as_local(period_start)
+                    if local.date().isoformat() != today:
+                        continue
                     val = float(item.get("pv_estimate", 0))
-                    # Parse hour from ISO string (handles both "T" and " " separators)
-                    time_part = period_start.split("T")[1] if "T" in period_start else period_start.split(" ")[1]
-                    hour = int(time_part.split(":")[0])
-                    hourly[hour] = hourly.get(hour, 0.0) + val
-                except (ValueError, IndexError, AttributeError):
+                    hourly[local.hour] = hourly.get(local.hour, 0.0) + val
+                except (ValueError, TypeError, AttributeError):
                     continue
 
         return hourly if hourly else None
@@ -550,13 +567,18 @@ class OvernightMixin:
         # adds grid kWh (logged) but not window time.
         efficiency = charge_efficiency(charge_rate_kw, effective_charge_rate)
         energy_needed_kwh = max(0.0, (target_soc - soc) / 100.0 * battery_capacity_kwh)
+        # Phase 126: a re-plan already inside 02:00-05:00 (startup/reload, a SOC retry, a
+        # post-outage grid_restored plan) sizes the remaining charge from now, not from 02:00 —
+        # the SOC it is sizing from is already now's, so a 02:00 baseline understates the time
+        # already spent and the pushed window could end before "now".
+        start_minutes = flux1_replan_start_minutes(now.hour * 60 + now.minute)
         if low_solar:
             # Solar is scarce — take all the cheap import we can get.
             end_minutes = 5 * 60
             logic_branch = "low_solar_full_window"
         else:
             # Physics-based window: charge exactly as long as needed to reach target.
-            end_minutes = flux1_end_minutes(energy_needed_kwh / efficiency, used_charge_rate)
+            end_minutes = flux1_end_minutes(energy_needed_kwh / efficiency, used_charge_rate, start_minutes)
             logic_branch = "adaptive_hourly" if decision.hourly_forecast_used else "adaptive"
         # Phase 62: hold the target to 05:00 so the grid, not the battery, runs the house.
         full_window_live = bool(cfg.get(CONF_FULL_WINDOW_LIVE, DEFAULT_FULL_WINDOW_LIVE))
@@ -569,14 +591,17 @@ class OvernightMixin:
         bms_shadow_end = None
         if bms_rate_kw is not None and not bms_applied and not low_solar and derate:
             bms_shadow_end = minutes_to_hhmm(
-                flux1_end_minutes(energy_needed_kwh / efficiency, round(min(used_charge_rate, bms_rate_kw), 2))
+                flux1_end_minutes(
+                    energy_needed_kwh / efficiency, round(min(used_charge_rate, bms_rate_kw), 2), start_minutes
+                )
             )
         # Phase 23: the lowest grid-charge current that still reaches the target
         # by 05:00. Logged only unless the live option is on; then the current
         # is written first and the window stays open to 05:00.
         battery_voltage = float(cfg.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE)
         gentle_max_a = max_charge_current_a(charge_rate_kw, battery_voltage)
-        gentle_current_a = gentle_charge_current_a(energy_needed_kwh, CHEAP_WINDOW_HOURS, battery_voltage, gentle_max_a)
+        gentle_window_hours = max(0.25, (5 * 60 - start_minutes) / 60)
+        gentle_current_a = gentle_charge_current_a(energy_needed_kwh, gentle_window_hours, battery_voltage, gentle_max_a)
         gentle_charge_applied, inverter_grid_current_a = False, None
         if not dry_run and self._gentle_charge_due(cfg, now, gentle_current_a, gentle_max_a):
             gentle_charge_applied, inverter_grid_current_a = await self._async_apply_gentle_charge(gentle_current_a, now)
@@ -584,7 +609,7 @@ class OvernightMixin:
                 end_minutes = hhmm_to_minutes(CHEAP_WINDOW_END)
                 flux1_end = CHEAP_WINDOW_END
         window_load_kwh, grid_kwh_needed = window_grid_kwh(
-            energy_needed_kwh, efficiency, avg_consumption_kw, end_minutes
+            energy_needed_kwh, efficiency, avg_consumption_kw, end_minutes, start_minutes
         )
         next_import_window = f"02:00→{flux1_end}"
 
@@ -629,7 +654,9 @@ class OvernightMixin:
             "full_window_end": full_window_end,
             "full_window_live": full_window_live and logic_branch == "full_window",
             "solar_start_time": solar_start_time,
-            "hours_to_solar": round(hours_to_solar or 0.0, 2),
+            # None when sun.sun was unavailable — not 0.0, a real mid-summer value too (rule 11's
+            # missing-is-None convention; the twin replays "unknown" as the band fallback).
+            "hours_to_solar": round_or_none(hours_to_solar),
             "target_soc": target_soc,
             "target_soc_reason": decision.reason,
             "overnight_drain_adjustment": overnight_drain_adjustment,
@@ -695,9 +722,12 @@ class OvernightMixin:
                 )
             return plan_state
 
-        if should_log_import_plan(source, now):
+        is_tonights_plan = should_log_import_plan(source, now)
+        if is_tonights_plan:
             await self.data_logger.async_log_import_plan(plan_state)
-        if source != STARTUP_PLAN_SOURCE:
+            # A startup/grid_restored re-plan only becomes "tonight's plan" inside the same
+            # 01:55-05:00 window as the log (phase 126): outside it, that night's charge already
+            # ran on whatever was pushed before, so this is tomorrow's setup, not tonight's.
             self.coordinator.update_state(touch=False, nightly_import_plan=plan_state)
 
         self.coordinator.update_state(
@@ -759,7 +789,15 @@ class OvernightMixin:
 
     async def async_run_plan_retry(self, payload: dict[str, Any], source: str, attempt: int) -> None:
         """Re-push a failed overnight plan; stop on success, held slots or monitor mode."""
-        if self.operation_mode == "monitor" or self._slots_held() or self._outage_active():
+        if self.operation_mode == "monitor" or self._slots_held():
+            return
+        if self._outage_active():
+            # No push can land during an outage (phase 48). Mark the plan skipped so
+            # grid_restored re-plans fresh instead of this retry being dropped silently
+            # (phase 126): without this, the plan stays "retrying" forever once the grid is back.
+            self.coordinator.update_state(
+                touch=False, grid_outage={**self.coordinator.state.grid_outage, "plan_skipped": True}
+            )
             return
         now = dt_util.now()
         self.coordinator.api.stats.note_push_retry()  # phase 101
@@ -816,15 +854,16 @@ class OvernightMixin:
     def _resolve_raw_forecast(self, forecast_entity: str, now) -> tuple[float | None, bool]:
         """Return (raw_forecast_kwh, used_fallback).
 
-        Falls back to the last plan's raw forecast when the sensor is down, but
-        only if that plan is from today or yesterday. (None, False) means no
-        usable forecast at all.
+        Falls back to the last plan's raw forecast when the sensor is down, but only for one
+        night: a plan already flagged `forecast_fallback` must not be reused again (phase 126),
+        or a down sensor would be papered over indefinitely. (None, False) means no usable
+        forecast at all.
         """
         value = self._essential_state(forecast_entity)
         if value is not None:
             return value, False
         last_plan = self.coordinator.state.last_import_plan
-        if not isinstance(last_plan, dict):
+        if not isinstance(last_plan, dict) or last_plan.get("forecast_fallback"):
             return None, False
         prior_raw = last_plan.get("raw_forecast_kwh")
         recent_dates = (now.strftime("%Y-%m-%d"), (now - timedelta(days=1)).strftime("%Y-%m-%d"))
@@ -834,14 +873,22 @@ class OvernightMixin:
 
     async def _async_notify_import_plan(self, plan: dict[str, Any]) -> None:
         correction = plan["forecast_correction_factor"]
+        fallback = bool(plan["forecast_fallback"])
+        # On a fallback night the correction is computed but never applied (phase 126): showing
+        # it would claim a correction that isn't on tonight's target.
         forecast_note = (
-            f" (raw {round(plan['raw_forecast_kwh'], 1)} kWh ×{correction})" if correction != 1.0 else ""
+            f" (raw {round(plan['raw_forecast_kwh'], 1)} kWh ×{correction})"
+            if correction != 1.0 and not fallback else ""
         )
-        fallback_note = " (using yesterday's forecast — sensor unavailable)" if plan["forecast_fallback"] else ""
+        fallback_note = " (using yesterday's forecast — sensor unavailable)" if fallback else ""
         adjustment_parts = []
         if plan["overnight_drain_adjustment"]:
             adjustment_parts.append(f"drain +{plan['overnight_drain_adjustment']}%")
-        if plan["soc_adjustment"]:
+        if plan.get("import_feedback_live") and plan["import_feedback_adjustment"]:
+            # The applied feedback replaces the evening nudge display (phase 126): showing both
+            # would overstate what was added to tonight's target.
+            adjustment_parts.append(f"feedback {plan['import_feedback_adjustment']:+d}%")
+        elif plan["soc_adjustment"]:
             adjustment_parts.append(f"eve {plan['soc_adjustment']:+d}%")
         adjustment_note = f" ({', '.join(adjustment_parts)})" if adjustment_parts else ""
         if plan.get("gentle_charge_applied"):
@@ -888,9 +935,35 @@ class OvernightMixin:
         await self._guarded(self.async_recheck_full_charge_day, "Full-charge-day re-check")
 
     async def _async_run_import_plan(self, _now) -> None:
-        """Time-change callback at 01:55 daily."""
+        """Time-change callback at 01:55 daily.
+
+        On the UK autumn clock change, local 01:55 occurs twice (BST then GMT): skip the second
+        fire rather than re-plan and re-push the same night twice (phase 126).
+        """
+        plan = self.coordinator.state.nightly_import_plan
+        today = dt_util.now().date().isoformat()
+        if isinstance(plan, dict) and plan.get("date") == today and plan.get("source") == "automatic":
+            return
         await self._guarded(self._async_auto_away, "Auto away check")
         await self._guarded(self.async_run_import_plan, "Scheduled import plan")
+
+    async def _async_nightly_plan_catch_up(self) -> None:
+        """02:00 safety net: run tonight's plan if 01:55 never fired.
+
+        On the UK spring clock change, local 01:00-01:59 does not exist, so the 01:55 listener
+        is skipped for the night and the inverter would otherwise keep running on last night's
+        settings until the next 01:55 (phase 126).
+        """
+        if self.operation_mode == "monitor" or self._outage_active() or self._slots_held():
+            return
+        state = self.coordinator.state
+        today = dt_util.now().date().isoformat()
+        if not nightly_plan_catch_up_due(
+            (state.nightly_import_plan or {}).get("date"), (state.last_import_plan or {}).get("date"), today
+        ):
+            return
+        await self._guarded(self._async_auto_away, "Auto away check")
+        await self._guarded(self.async_run_import_plan, "Scheduled import plan (DST catch-up)")
 
     async def _async_charge_watchdog(self, _now) -> None:
         """Time-change callback at 02:20 daily."""
@@ -919,6 +992,15 @@ class OvernightMixin:
         now_minutes = now.hour * 60 + now.minute
         end_minutes = hhmm_to_minutes(plan.get("flux1_end")) if plan else None
         if plan is None or end_minutes is None or end_minutes <= now_minutes:
+            return
+        if self._outage_active():
+            # No push can reach the inverter during an outage (phase 48): a slow or flat SOC here
+            # is the outage, not a stalled charge, so don't push or send the "stalled" alert.
+            await self.data_logger.async_log_charge_watchdog(
+                date=plan["date"], soc_start=plan["soc"], target_soc=plan["target_soc"],
+                expected_rate_kw=_watchdog_rate_kw(plan), result="grid_outage", retried=False,
+                soc_now=None, grid_import_w=None,
+            )
             return
         capacity = self._capacity_kwh()
         soc_now = self._essential_state(self.battery_soc_entity)
@@ -957,6 +1039,12 @@ class OvernightMixin:
         now = dt_util.now()
         plan = self._charge_watchdog_plan(now)
         if plan is None:
+            return
+        if self._outage_active():
+            await self.data_logger.async_log_charge_watchdog(
+                **{k: v for k, v in retry.items() if k not in ("retry_minutes", "retry_soc")},
+                result="grid_outage", retried=True, soc_now=None, grid_import_w=None,
+            )
             return
         capacity = self._capacity_kwh()
         soc_now = self._essential_state(self.battery_soc_entity)

@@ -66,10 +66,20 @@ def test_select_low_solar_override(planning):
 
 
 def test_select_full_day(planning):
+    # Phase 126: the full day bridges like a normal night (margin applied), never below the
+    # bare "charge to solar start" bridge (30) — here the normal-day bridge (32) wins.
     d = _select(planning, is_full_day=True)
-    assert (d.target_soc, d.reason) == (30, "weekly_full_charge_day")  # 20 + 1kWh/10 → 30
+    assert (d.target_soc, d.reason) == (32, "weekly_full_charge_day_bridge")
     assert _select(planning, is_full_day=True, low_solar_forecast_kwh=5).target_soc == 100
     assert _select(planning, is_full_day=True, hours_to_solar=None).target_soc == 100
+
+
+def test_select_full_day_bridge_never_below_bare_bridge(planning):
+    """A forecast of 7-14 kWh used to drop to a bare bridge far below a normal day's (phase 126)."""
+    full = _select(planning, is_full_day=True, low_solar_forecast_kwh=7.5, hours_to_solar=4.5, avg_consumption_kw=0.45)
+    normal = _select(planning, is_full_day=False, low_solar_forecast_kwh=7.5, hours_to_solar=4.5, avg_consumption_kw=0.45)
+    assert full.target_soc >= normal.target_soc
+    assert full.reason == "weekly_full_charge_day_bridge"
 
 
 def test_select_hourly_bridge_wins_over_simple(planning):
@@ -115,11 +125,40 @@ def test_resolve_used_charge_rate(planning):
     assert planning.resolve_used_charge_rate(3.0, 2.0, 8) == (1.4, 0.70)
 
 
+def test_round_or_none_keeps_missing_as_none(planning):
+    """Phase 126: hours_to_solar logs None (sun.sun unavailable), never 0.0 — a real mid-summer
+    value too — via round_or_none, matching the project's missing-is-None convention."""
+    assert planning.round_or_none(None) is None
+    assert planning.round_or_none(0.0) == 0.0
+    assert planning.round_or_none(1.23456, 2) == 1.23
+
+
 def test_flux1_end_minutes(planning):
     assert planning.minutes_to_hhmm(planning.flux1_end_minutes(0.0, 3.0)) == "02:15"
     assert planning.minutes_to_hhmm(planning.flux1_end_minutes(1.6, 3.0)) == "02:45"  # 32 min → 45
     assert planning.minutes_to_hhmm(planning.flux1_end_minutes(3.0, 3.0)) == "03:00"
     assert planning.minutes_to_hhmm(planning.flux1_end_minutes(30.0, 3.0)) == "05:00"
+
+
+def test_flux1_end_minutes_sizes_from_a_mid_window_restart(planning):
+    """Phase 126: a re-plan already inside 02:00-05:00 sizes the remaining charge from `now`,
+    not from 02:00 — the old 02:00 baseline could push an end time already in the past."""
+    # 2.12/0.92 kWh at 3 kW from 02:00 would end at 03:00 (unchanged default).
+    assert planning.flux1_end_minutes(2.12 / 0.92, 3.0) == 3 * 60
+    # The same energy, but starting the count at 03:00 (a 03:00 restart): ends later, not sooner.
+    restarted = planning.flux1_end_minutes(2.12 / 0.92, 3.0, start_minutes=3 * 60)
+    assert restarted > 3 * 60
+    assert restarted == 4 * 60
+    # A start past 04:45 is clamped to the 05:00 window end, never pushed past it.
+    assert planning.flux1_end_minutes(1.0, 3.0, start_minutes=4 * 60 + 50) == 5 * 60
+
+
+def test_flux1_replan_start_minutes(planning):
+    FLUX1_START = planning.FLUX1_START_MINUTES
+    assert planning.flux1_replan_start_minutes(1 * 60 + 55) == FLUX1_START  # before the window: default
+    assert planning.flux1_replan_start_minutes(3 * 60 + 30) == 3 * 60 + 30  # inside: "now"
+    assert planning.flux1_replan_start_minutes(5 * 60) == FLUX1_START  # at/after 05:00: a fresh plan
+    assert planning.flux1_replan_start_minutes(14 * 60) == FLUX1_START  # a daytime startup: default
 
 
 def test_charge_efficiency_only_on_nameplate_rate(planning):
@@ -147,6 +186,14 @@ def test_window_grid_kwh_adds_load_over_window(planning):
     # 75 min window at 0.8 kW = 1.0 kWh load; 4.6 kWh / 0.92 = 5.0 kWh stored need.
     assert planning.window_grid_kwh(4.6, 0.92, 0.8, 3 * 60 + 15) == (1.0, 6.0)
     assert planning.window_grid_kwh(0.0, 0.92, 0.6, 5 * 60) == (1.8, 1.8)
+
+
+def test_window_grid_kwh_mid_window_start(planning):
+    """Phase 126: a mid-window restart measures house load from `now`, not from 02:00."""
+    # Default start (02:00): 3 h window at 0.5 kW = 1.5 kWh load.
+    assert planning.window_grid_kwh(2.0, 1.0, 0.5, 5 * 60) == (1.5, 3.5)
+    # Restarted at 03:30: only 1.5 h of window load left.
+    assert planning.window_grid_kwh(2.0, 1.0, 0.5, 5 * 60, start_minutes=3 * 60 + 30) == (0.75, 2.75)
 
 
 def test_score_full_charge_day(planning):
@@ -400,15 +447,29 @@ def test_manual_free_event_error_only_judges_changed_field(planning):
     "source,hhmm,expected",
     [
         ("automatic", (1, 55), True),
+        ("automatic", (14, 0), True),  # always logged — only ever runs at 01:55
         ("startup", (0, 30), False),
         ("startup", (1, 54), False),
         ("startup", (1, 55), True),
-        ("startup", (14, 0), True),
+        ("startup", (4, 59), True),
+        ("startup", (5, 0), False),  # phase 126: that night's charge already ran; this is tomorrow's setup
+        ("startup", (14, 0), False),  # phase 126: was True — a daytime re-plan is not an overnight sample
+        ("grid_restored", (1, 54), False),
+        ("grid_restored", (3, 30), True),
+        ("grid_restored", (10, 0), False),
     ],
 )
 def test_should_log_import_plan_skips_pre_nightly_startup(planning, source, hhmm, expected):
     now = datetime(2026, 10, 2, *hhmm)
     assert planning.should_log_import_plan(source, now) is expected
+
+
+def test_nightly_plan_catch_up_due(planning):
+    """Phase 126: the 02:00 DST safety net only fires when nothing is logged for today yet."""
+    assert planning.nightly_plan_catch_up_due(None, None, "2027-03-28") is True
+    assert planning.nightly_plan_catch_up_due("2027-03-27", None, "2027-03-28") is True  # spring gap
+    assert planning.nightly_plan_catch_up_due("2027-03-28", None, "2027-03-28") is False  # 01:55 ran fine
+    assert planning.nightly_plan_catch_up_due(None, "2027-03-28", "2027-03-28") is False  # a startup plan already ran
 
 
 def test_daily_report_plans_keeps_nightly_and_appends_later_replan(planning):

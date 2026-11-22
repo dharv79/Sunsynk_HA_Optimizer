@@ -32,6 +32,13 @@ def test_weekly_full_charge_day(planning):
     assert "weekly full-charge day" in _text(planning, _plan(target_soc_reason="weekly_full_charge_day"))
 
 
+def test_weekly_full_charge_day_bridge(planning):
+    """Phase 126: the bridge branch must not read as a full charge (100% may not be reached)."""
+    text = _text(planning, _plan(target_soc=91, target_soc_reason="weekly_full_charge_day_bridge", bridge_hour=9))
+    assert "bridges" in text and "around 09:00" in text and "may not be reached" in text
+    assert "charged for the scoring run" not in text
+
+
 def test_solar_bridge_variants(planning):
     hourly = _text(planning, _plan(target_soc=60, target_soc_reason="solar_bridge_hourly", bridge_hour=9))
     assert "around 09:00" in hourly
@@ -50,6 +57,14 @@ def test_adjustments_cap_and_full_window(planning):
         import_feedback_live=False, free_event_capped=True, logic_branch="full_window"))
     assert "+20% for overnight drain" in text and "-5% evening nudge" in text
     assert "+3% (logged only)" in text and "free-electricity event" in text and "05:00" in text
+
+
+def test_import_feedback_live_replaces_the_evening_nudge(planning):
+    """Phase 126: with the feedback applied, showing the computed evening nudge too overstated
+    what was actually added to the target."""
+    text = _text(planning, _plan(soc_adjustment=-5, import_feedback_adjustment=5, import_feedback_live=True))
+    assert "evening nudge" not in text
+    assert "+5% (applied)" in text
 
 
 def test_shadow_counterfactual(planning):

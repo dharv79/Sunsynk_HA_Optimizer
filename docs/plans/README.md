@@ -133,7 +133,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 123. Peak-load recent high with cold margin (user request 20/11/2026) | Done, merged (54e603d, PR #242) | XS, ~15-25k |
 | 124. Flux 2 only pushes keep tonight's Flux 1 slot (user request 20/11/2026) | Done, merged (8cff51e, PR #243), released in 2.3.7 | XS, ~15-25k |
 | 125. Review fixes: monitor mode and push results (code review 21/11/2026) | Done, merged (cc4d92d, PR #245) | S, ~45k |
-| 126. Review fixes: overnight plan | Planned, not built | M, ~50-80k |
+| 126. Review fixes: overnight plan | In progress | M, ~50-80k |
 | 127. Review fixes: daytime, export pause and peak | Planned, not built | M, ~60-90k |
 | 128. Review fixes: config, entities, diagnostics and cards | Planned, not built | S-M, ~40-60k |
 | 129. Review fixes: logging, reports, monitor and planning maths | Planned, not built | M, ~60-90k |

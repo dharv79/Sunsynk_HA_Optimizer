@@ -173,6 +173,10 @@ class CaptureMixin:
     async def _async_meter_snapshot(self, now) -> None:
         time = dt_util.as_local(now).strftime("%H:%M")
         await self._guarded(lambda: self.async_capture_meter_snapshot(time), "Meter snapshot")
+        if time == "02:00":
+            # Spring DST safety net (phase 126): the 01:55 plan listener is skipped on the
+            # night local 01:00-01:59 doesn't exist, so run it now if it never fired.
+            await self._guarded(self._async_nightly_plan_catch_up, "Nightly plan DST catch-up")
         if time == "05:00":
             await self._guarded(self._async_overnight_load_check, "Overnight baseload check")
             await self._guarded(self.async_run_charge_outcome, "Charge outcome")

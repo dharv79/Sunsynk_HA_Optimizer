@@ -55,6 +55,22 @@ def test_scale_hourly():
     assert planning.scale_hourly(None, 0.5) is None
 
 
+def test_parse_naive_hourly_forecast_keeps_today_only():
+    """Phase 126: an attribute covering more than one date must not double-count an hour."""
+    raw = {
+        "2026-11-21 06:00:00": 0.1, "2026-11-21 07:00:00": 0.4,
+        "2026-11-22 06:00:00": 0.1, "2026-11-22 07:00:00": 0.4,
+    }
+    assert planning.parse_naive_hourly_forecast(raw, "2026-11-21") == {6: 0.1, 7: 0.4}
+    assert planning.parse_naive_hourly_forecast(raw, "2026-11-23") is None
+
+
+def test_parse_naive_hourly_forecast_sums_same_hour_and_skips_bad_keys():
+    raw = {"2026-11-21 06:00:00": 0.1, "2026-11-21 06:30:00": 0.2, "not-a-key": 5.0}
+    out = planning.parse_naive_hourly_forecast(raw, "2026-11-21")
+    assert out is not None and round(out[6], 6) == 0.3 and list(out) == [6]
+
+
 def test_plan_field_is_logged():
     from conftest import _data_logger
 
