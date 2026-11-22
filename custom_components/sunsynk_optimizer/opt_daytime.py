@@ -83,7 +83,9 @@ from .planning import (
     exclude_away_days,
     export_pause_clear_slot,
     export_pause_restore_due,
+    flux2_branch,
     flux2_push_still_active,
+    flux2_trim_due,
     peak_cover_plan,
     peak_cover_retry_due,
     peak_cover_startup_retry_due,
@@ -211,25 +213,45 @@ class DaytimeMixin:
         use_cost = not shadow_mode and cost_trigger is not None
         trigger_disable = cost_trigger if use_cost else watt_trigger
 
-        if trigger_disable:
+        # Trim if SOC exceeds 85% on a non-full-charge day. Target 82% leaves a 3% gap
+        # below the trigger so normal fluctuation doesn't immediately re-trigger a trim.
+        # Never below the evening reserve, never at night, never below tonight's charge.
+        trim_target, reserve = self._trim_target(soc, now_local)
+        trim_due = flux2_trim_due(
+            trim_full_day, soc, trim_target, self._peak_export_holds_flux2(now_local), self._cooldown_ok()
+        )
+        export_disabled = bool(self.coordinator.state.evening_export_disabled)
+        started = dt_util.parse_datetime(self.coordinator.state.export_pause_started or "")
+        elapsed_min = None if started is None else (now_local - dt_util.as_local(started)).total_seconds() / 60.0
+        restore_due = export_pause_restore_due(elapsed_min, in_peak_window)
+        push_active = self._peak_export_holds_flux2(now_local) or flux2_push_still_active(
+            self.coordinator.state.last_flux2_action, now_minutes
+        )
+        # Phase 131: which of the four actions (pause / already paused / trim / restore) fires,
+        # decided by one tested planning helper instead of the nested if/elif this used to be.
+        branch = flux2_branch(
+            trigger_disable, export_disabled, trim_due, export_disabled, in_peak_window, restore_due, push_active
+        )
+
+        if branch == "already_disabled":
             # Idempotency: SOC changes can fire this check every ~30s for the whole
             # 16:00–19:00 window. If export is already paused, don't re-push the
             # identical payload to the API or re-notify on every tick.
-            if self.coordinator.state.evening_export_disabled:
-                self.coordinator.update_state(
-                    last_flux2_action={
-                        "action": "disable_evening_export",
-                        **base_action,
-                        "notified": False,
-                        "reason": "already_disabled",
-                        "api_ok": True,
-                    },
-                    evening_export_disabled=True,
-                    operation_mode=self.operation_mode,
-                    touch=False,
-                )
-                return
+            self.coordinator.update_state(
+                last_flux2_action={
+                    "action": "disable_evening_export",
+                    **base_action,
+                    "notified": False,
+                    "reason": "already_disabled",
+                    "api_ok": True,
+                },
+                evening_export_disabled=True,
+                operation_mode=self.operation_mode,
+                touch=False,
+            )
+            return None
 
+        if branch == "disable":
             if use_cost:
                 reason = f"cost_{round(cost_pence_per_hour, 1)}p/h_exceeds_{round(cost_threshold, 1)}p/h"
                 trigger_desc = f"Cost is {round(cost_pence_per_hour, 1)}p/h during the 16:00–19:00 export window"
@@ -250,18 +272,11 @@ class DaytimeMixin:
                 f"Export paused by holding target SOC at 100%; it re-enables automatically.{_api_note(api_ok)}",
             )
 
-        # Trim if SOC exceeds 85% on a non-full-charge day. Target 82% leaves a 3% gap
-        # below the trigger so normal fluctuation doesn't immediately re-trigger a trim.
-        # Never below the evening reserve, never at night, never below tonight's charge.
-        trim_target, reserve = self._trim_target(soc, now_local)
-        if (
-            not trim_full_day and soc > 85 and trim_target is not None
-            and not self._peak_export_holds_flux2(now_local) and self._cooldown_ok()
-        ):
+        if branch == "trim":
             self._mark_trim()
             trim_target = await self._async_trim_defer(soc, trim_target, now_local, cfg, base_action)
             if trim_target is None:
-                return
+                return None
             api_ok = await self._async_push_flux2_action(
                 "trim_to_82",
                 {
@@ -280,22 +295,20 @@ class DaytimeMixin:
                 f"{_reserve_note(trim_target, reserve)}.{_api_note(api_ok)}",
             )
 
-        was_paused = bool(self.coordinator.state.evening_export_disabled)
-        if was_paused and in_peak_window:
-            started = dt_util.parse_datetime(self.coordinator.state.export_pause_started or "")
-            elapsed_min = None if started is None else (now_local - dt_util.as_local(started)).total_seconds() / 60.0
-            if not export_pause_restore_due(elapsed_min, in_peak_window):
-                # Held < 30 min: the inverter is still holding 100%, so state must keep saying so
-                # — restoring is deferred, not abandoned, to avoid flip-flopping a kettle spike.
-                self.coordinator.update_state(
-                    last_flux2_action={
-                        "action": "none", **base_action, "notified": False, "reason": "no_trigger_pause_holding",
-                    },
-                    evening_export_disabled=True,
-                    operation_mode=self.operation_mode,
-                    touch=False,
-                )
-                return None
+        if branch == "restore_deferred":
+            # Held < 30 min: the inverter is still holding 100%, so state must keep saying so
+            # — restoring is deferred, not abandoned, to avoid flip-flopping a kettle spike.
+            self.coordinator.update_state(
+                last_flux2_action={
+                    "action": "none", **base_action, "notified": False, "reason": "no_trigger_pause_holding",
+                },
+                evening_export_disabled=True,
+                operation_mode=self.operation_mode,
+                touch=False,
+            )
+            return None
+
+        if branch == "restore":
             export_rec = record_for_date(self.coordinator.state.peak_export, today_iso)
             restore_target = export_rec.get("target_soc") if self._peak_export_holds_flux2(now_local) else None
             api_ok = await self._async_push_flux2_action(
@@ -310,18 +323,16 @@ class DaytimeMixin:
             back_to = f"selling at {restore_target}% until 19:00" if restore_target is not None else "the normal Flux 2 slot"
             return (title, f"The export pause's 30-minute hold is up; back to {back_to}.{_api_note(api_ok)}")
 
-        push_active = self._peak_export_holds_flux2(now_local) or flux2_push_still_active(
-            self.coordinator.state.last_flux2_action, now_minutes
-        )
+        # branch in ("none", "none_active"): nothing to push.
         fields: dict[str, Any] = {
             "evening_export_disabled": False,
             "operation_mode": self.operation_mode,
             # Runs on every SOC change above 85%: only a real change (the pause clearing) is
             # stamped and saved; the live soc/grid_pac in the action still reach the entities.
-            "touch": was_paused,
-            "persist": was_paused,
+            "touch": export_disabled,
+            "persist": export_disabled,
         }
-        if not push_active:
+        if branch == "none":
             # A live peak export or trim slot still owns Flux 2 — don't blot out its
             # last_flux2_action with "No action" until that slot itself ends (phase 127).
             fields["last_flux2_action"] = {

@@ -376,3 +376,19 @@ Verification: new/updated HA-free tests — `tests/test_planning.py`, `tests/tes
 **Flex-event shadow dedup.** For a plain on/off flex-event entity (no calendar `start_time`), the old dedup key fell back to `now`, which changes every 30-minute poll — the shadow logged/posted every poll for the whole event instead of once. Now keyed on `f"{entity}:{state.last_changed.isoformat()}"`, which only changes when the entity itself transitions.
 
 See `docs/plans/phases/129-review-logging-reports.md`. The dynamic-tariff shadow horizon-mismatch fix is in `import-plan.md`.
+
+## Refactor: the Flux 2 decision as one planning helper (22/11/2026, phase 131)
+
+Behaviour-preserving. `_async_flux2_decide`'s nested if/elif tree (pause / already paused /
+trim / restore / nothing) is now one tested function, `planning.flux2_branch`, called once with
+the already-computed trigger/trim/restore/push-active booleans; `_async_flux2_decide` dispatches
+on its return string (`"disable"`, `"already_disabled"`, `"trim"`, `"restore"`,
+`"restore_deferred"`, `"none"`, `"none_active"`) to the same push/notify/state-update bodies as
+before. The >85% trim's own gate (not a full-charge day, a target to trim to, no live peak
+export, past the trim cooldown) is `planning.flux2_trim_due`.
+
+Verification: `tests/test_planning.py::test_flux2_trim_due`/`test_flux2_branch`; the two existing
+phase 127 regression tests that pinned the old inline conditions
+(`test_no_trigger_branch_keeps_the_action_while_a_push_still_holds_flux2`,
+`test_normal_trim_gate_uses_the_plans_full_day_flag` in `tests/test_daytime_review_fixes.py`)
+were updated to pin the new call sites instead. See `docs/plans/phases/131-review-refactor.md`.

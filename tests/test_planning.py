@@ -292,6 +292,36 @@ def test_free_event_watch_from(planning):
     assert planning.free_event_watch_from(datetime(2026, 10, 18, 11, 0)) == datetime(2026, 10, 18, 7, 0)
 
 
+# Phase 131: which point-in-time timers _arm_free_event_timers (re-)arms, for a given phase
+def test_free_event_timer_plan(planning):
+    f = planning.free_event_timer_plan
+    watch_from = datetime(2026, 10, 18, 7, 0)
+    free_start = datetime(2026, 10, 18, 11, 0)
+    free_end = datetime(2026, 10, 18, 12, 0)
+    now = datetime(2026, 10, 18, 7, 0)
+
+    scheduled = dict(f("scheduled", watch_from, free_start, free_end, now))
+    assert set(scheduled) == {"watch_start", "free_start", "free_end"}
+    assert scheduled["watch_start"] == 0.0           # now == watch_from
+    assert scheduled["free_start"] == 4 * 3600.0
+    assert scheduled["free_end"] == 5 * 3600.0
+
+    selling = dict(f("selling", watch_from, free_start, free_end, now))
+    assert set(selling) == {"free_start", "free_end"}   # the watch is over once selling has started
+
+    charging = dict(f("charging", watch_from, free_start, free_end, now))
+    assert set(charging) == {"free_end"}
+
+    assert f("done", watch_from, free_start, free_end, now) == []
+    assert f(None, watch_from, free_start, free_end, now) == []
+
+    # A restart after a trigger time has passed fires it at once, not negatively.
+    late = datetime(2026, 10, 18, 11, 30)
+    assert dict(f("scheduled", watch_from, free_start, free_end, late))["free_start"] == 0.0
+
+    assert set(name for name, _ in scheduled.items()) <= set(planning.FREE_EVENT_TIMER_NAMES)
+
+
 def test_free_event_sell_status_and_attributes(planning):
     # The 16/10 event: entered at 40% SOC, so the scheduling estimate said "sell 0 kWh at 11:00".
     event = {
@@ -1017,6 +1047,15 @@ def test_monthly_report_due(planning):
     assert f("2026-09", date(2026, 10, 9)) is False       # Sept report sent
 
 
+# Phase 131: shared "last calendar month" calculation (dedupes 4 copies in opt_reports.py)
+def test_last_calendar_month(planning):
+    from datetime import date
+
+    f = planning.last_calendar_month
+    assert f(date(2026, 11, 20)) == (date(2026, 10, 31), "2026-10")
+    assert f(date(2026, 1, 15)) == (date(2025, 12, 31), "2025-12")  # year rollover
+
+
 # Phase 61: measured charge rate
 def test_measured_charge_kw(planning):
     f = planning.measured_charge_kw
@@ -1185,6 +1224,36 @@ def test_flux2_push_still_active(planning):
     assert planning.flux2_push_still_active({}, 16 * 60 + 30) is False
     assert planning.flux2_push_still_active(None, 16 * 60 + 30) is False
     assert planning.flux2_push_still_active({"payload": {"flux_2": {}}}, 16 * 60) is False
+
+
+# Phase 131: the >85% trim gate, extracted from the Flux 2 decide function
+def test_flux2_trim_due(planning):
+    f = planning.flux2_trim_due
+    assert f(False, 86, 82, False, True) is True
+    assert f(True, 86, 82, False, True) is False      # full-charge day
+    assert f(False, 84, 82, False, True) is False      # not yet above 85%
+    assert f(False, 86, None, False, True) is False    # no target to trim to
+    assert f(False, 86, 82, True, True) is False        # peak export already holds Flux 2
+    assert f(False, 86, 82, False, False) is False      # cooldown since the last trim hasn't elapsed
+
+
+# Phase 131: the Flux 2 decision (pause / already paused / trim / restore / nothing), one
+# tested function in place of opt_daytime.py's nested if/elif tree
+def test_flux2_branch(planning):
+    f = planning.flux2_branch
+    # A trigger always wins, new or already held.
+    assert f(True, False, True, True, True, True, True) == "disable"
+    assert f(True, True, True, True, True, True, True) == "already_disabled"
+    # No trigger: the >85% trim is next.
+    assert f(False, False, True, False, False, False, False) == "trim"
+    # No trigger, no trim: a held pause restores once due, else stays deferred.
+    assert f(False, False, False, True, True, True, False) == "restore"
+    assert f(False, False, False, True, True, False, False) == "restore_deferred"
+    # Outside the pause window, or never paused: nothing, with or without another push holding it.
+    assert f(False, False, False, True, False, False, False) == "none"
+    assert f(False, False, False, True, False, False, True) == "none_active"
+    assert f(False, False, False, False, False, False, False) == "none"
+    assert f(False, False, False, False, False, False, True) == "none_active"
 
 
 def test_trim_full_day_active_prefers_todays_plan(planning):

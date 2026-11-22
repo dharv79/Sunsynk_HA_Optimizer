@@ -358,6 +358,161 @@ class OvernightMixin:
 
         return hourly if hourly else None
 
+    async def _async_shadow_forecast_fields(
+        self, decision, forecast_fallback: bool, paired_days, today, band, avg_consumption_kw: float,
+        battery_capacity_kwh: float, overnight_drain_adjustment: float, nudge: float, raw_forecast_kwh: float,
+        month: int,
+    ) -> dict[str, Any]:
+        """Phase 64/70/82 shadow-only solar-forecast fields for plan_state: logged for later
+        comparison, never pushed and never feed target_soc. Split out of async_run_import_plan
+        (phase 131) as one of its more self-contained pieces."""
+        nv = self._newsvendor_shadow(
+            decision, forecast_fallback, paired_days, today, band, avg_consumption_kw, battery_capacity_kwh,
+            overnight_drain_adjustment, nudge,
+        )
+        # Phase 70 (shadow): learned P10/P50/P90 of today's solar; the decision above keeps min(raw, corrected).
+        quantile_samples = forecast_ratio_samples(
+            await self.data_logger.async_load_paired_days(days=FORECAST_QUANTILE_HISTORY_DAYS)
+        )
+        solar_quantiles = None if forecast_fallback else forecast_quantiles(quantile_samples, month, band, raw_forecast_kwh)
+        # Phase 82 (shadow): the same quantiles binned by today's cloud cover; the target is unchanged.
+        cloud_cover_pct = await self._async_today_cloud_cover()
+        cloud_quantiles = None if forecast_fallback or cloud_bucket(cloud_cover_pct) is None else forecast_quantiles(
+            quantile_samples, month, band, raw_forecast_kwh, cloud=cloud_bucket(cloud_cover_pct)
+        )
+        return {
+            **nv, "forecast_quantiles": solar_quantiles, "forecast_quantiles_cloud": cloud_quantiles,
+            "cloud_cover_pct": cloud_cover_pct,
+        }
+
+    async def _async_rate_and_window(
+        self, cfg: dict[str, Any], paired_days: list[dict[str, Any]], battery_capacity_kwh: float,
+        overnight_drain_adjustment: float, charge_rate_kw: float, dry_run: bool, now: datetime, target_soc: int,
+        soc: float, low_solar: bool, hourly_forecast_used: bool, avg_consumption_kw: float,
+    ) -> dict[str, Any]:
+        """Resolve the effective/used charge rate (learned, measured, BMS-limited) and size the
+        02:00 Flux 1 window from it. Split out of async_run_import_plan (phase 131) as the
+        review's "rate and window glue" — the densest, most defect-prone section (phases 61,
+        113, 126 among others) — into its own piece.
+
+        Returns every plan_state field this computes, plus flux1_end, gentle_charge_applied and
+        next_import_window again at top level for the caller's own payload build and (for
+        gentle_charge_applied) its post-push gentle-charge undo.
+        """
+        computed_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
+            paired_days, battery_capacity_kwh, overnight_drain_adjustment
+        )
+        # When calibration thins below its minimum (common in summer — charge gaps
+        # rarely reach the 10% needed to calibrate), reuse the last learned rate
+        # rather than the optimistic nameplate config, which under-sizes the window.
+        # Fallback chain: fresh computation → persisted last-known → most recent
+        # non-null rate in history (seeds the persisted value on first run).
+        effective_charge_rate = computed_charge_rate
+        if effective_charge_rate is None:
+            effective_charge_rate = self.coordinator.state.last_effective_charge_rate_kw
+        if effective_charge_rate is None:
+            effective_charge_rate = self.data_logger.last_known_charge_rate_kw(paired_days)
+        battery_temp_c = self._state_float(self.battery_temp_entity, 20.0)
+        # Phase 61: rate measured from the 02:00/05:00 meters; logged always, used when live.
+        measured = self.data_logger.compute_measured_charge_rate_kw(paired_days, battery_temp_c)
+        measured_live = bool(cfg.get(CONF_MEASURED_RATE_LIVE, DEFAULT_MEASURED_RATE_LIVE))
+        derate = True
+        if measured_live and measured is not None:
+            effective_charge_rate, at_temp = measured
+            derate = not at_temp
+        # Phase 113: the live BMS charge limit; logged always, used only when its option is on.
+        bms_limit_a = await self._async_bms_charge_limit_a(dry_run)
+        bms_voltage = float(cfg.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE)
+        bms_rate_kw = bms_limited_rate_kw(bms_limit_a, bms_voltage)
+        bms_live = bool(cfg.get(CONF_BMS_RATE_LIVE, DEFAULT_BMS_RATE_LIVE))
+        bms_applied = bms_live and bms_rate_kw is not None and derate
+        used_charge_rate, temp_factor = resolve_used_charge_rate(
+            charge_rate_kw, effective_charge_rate, battery_temp_c, derate,
+            bms_rate_kw if bms_applied else None,
+        )
+        rate_source = charge_rate_source(not derate, bms_applied, bms_rate_kw is not None)
+
+        # Phase 13: nameplate rate loses ~8% to conversion; in-window house load
+        # adds grid kWh (logged) but not window time.
+        efficiency = charge_efficiency(charge_rate_kw, effective_charge_rate)
+        energy_needed_kwh = max(0.0, (target_soc - soc) / 100.0 * battery_capacity_kwh)
+        # Phase 126: a re-plan already inside 02:00-05:00 (startup/reload, a SOC retry, a
+        # post-outage grid_restored plan) sizes the remaining charge from now, not from 02:00 —
+        # the SOC it is sizing from is already now's, so a 02:00 baseline understates the time
+        # already spent and the pushed window could end before "now".
+        start_minutes = flux1_replan_start_minutes(now.hour * 60 + now.minute)
+        if low_solar:
+            # Solar is scarce — take all the cheap import we can get.
+            end_minutes = 5 * 60
+            logic_branch = "low_solar_full_window"
+        else:
+            # Physics-based window: charge exactly as long as needed to reach target.
+            end_minutes = flux1_end_minutes(energy_needed_kwh / efficiency, used_charge_rate, start_minutes)
+            logic_branch = "adaptive_hourly" if hourly_forecast_used else "adaptive"
+        # Phase 62: hold the target to 05:00 so the grid, not the battery, runs the house.
+        full_window_live = bool(cfg.get(CONF_FULL_WINDOW_LIVE, DEFAULT_FULL_WINDOW_LIVE))
+        full_window_end = "05:00"
+        if full_window_live and not low_solar and end_minutes < 5 * 60 and energy_needed_kwh > 0:
+            end_minutes = 5 * 60
+            logic_branch = "full_window"
+        flux1_end = minutes_to_hhmm(end_minutes)
+        # Phase 113 shadow: the window the BMS-limited rate would give (None while the option is on).
+        bms_shadow_end = None
+        if bms_rate_kw is not None and not bms_applied and not low_solar and derate:
+            bms_shadow_end = minutes_to_hhmm(
+                flux1_end_minutes(
+                    energy_needed_kwh / efficiency, round(min(used_charge_rate, bms_rate_kw), 2), start_minutes
+                )
+            )
+        # Phase 23: the lowest grid-charge current that still reaches the target
+        # by 05:00. Logged only unless the live option is on; then the current
+        # is written first and the window stays open to 05:00.
+        battery_voltage = float(cfg.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE)
+        gentle_max_a = max_charge_current_a(charge_rate_kw, battery_voltage)
+        gentle_window_hours = max(0.25, (5 * 60 - start_minutes) / 60)
+        gentle_current_a = gentle_charge_current_a(energy_needed_kwh, gentle_window_hours, battery_voltage, gentle_max_a)
+        gentle_charge_applied, inverter_grid_current_a = False, None
+        if not dry_run and self._gentle_charge_due(cfg, now, gentle_current_a, gentle_max_a):
+            gentle_charge_applied, inverter_grid_current_a = await self._async_apply_gentle_charge(gentle_current_a, now)
+            if gentle_charge_applied:
+                end_minutes = hhmm_to_minutes(CHEAP_WINDOW_END)
+                flux1_end = CHEAP_WINDOW_END
+        window_load_kwh, grid_kwh_needed = window_grid_kwh(
+            energy_needed_kwh, efficiency, avg_consumption_kw, end_minutes, start_minutes
+        )
+        next_import_window = f"02:00→{flux1_end}"
+        return {
+            "effective_charge_rate_kw": effective_charge_rate,
+            "charge_rate_from_cache": computed_charge_rate is None,
+            "used_charge_rate_kw": used_charge_rate,
+            "charge_efficiency": efficiency,
+            "energy_needed_kwh": round(energy_needed_kwh, 2),
+            "window_load_kwh": window_load_kwh,
+            "grid_kwh_needed": grid_kwh_needed,
+            "flux1_end": flux1_end,
+            "next_import_window": next_import_window,
+            "battery_voltage": battery_voltage,
+            "gentle_current_a": gentle_current_a,
+            "gentle_max_current_a": round(gentle_max_a, 1),
+            "gentle_charge_rate_kw": (
+                round(gentle_current_a * battery_voltage / 1000, 2) if gentle_current_a is not None else None
+            ),
+            "gentle_charge_applied": gentle_charge_applied,
+            "inverter_grid_current_a": inverter_grid_current_a,
+            "battery_temp_c": battery_temp_c,
+            "temp_deration_factor": temp_factor,
+            "measured_charge_rate_kw": measured[0] if measured else None,
+            "measured_charge_rate_live": measured_live and measured is not None,
+            "bms_charge_limit_a": bms_limit_a,
+            "bms_rate_kw": bms_rate_kw,
+            "bms_rate_live": bms_applied,
+            "rate_source": rate_source,
+            "bms_shadow_window_end": bms_shadow_end,
+            "logic_branch": logic_branch,
+            "full_window_end": full_window_end,
+            "full_window_live": full_window_live and logic_branch == "full_window",
+        }
+
     async def async_run_import_plan(
         self, source: str = "automatic", dry_run: bool = False, notify: bool = True
     ) -> dict[str, Any] | None:
@@ -499,23 +654,10 @@ class OvernightMixin:
             )
             nudge = feedback_adj if feedback_live else soc_adjustment
             target_soc = apply_soc_adjustments(target_soc, overnight_drain_adjustment, nudge)
-        # Phase 64 (shadow): the hourly bridge re-planned at the newsvendor quantile of
-        # the logged actual/forecast ratios. Logged only; never pushed.
-        nv = self._newsvendor_shadow(
+        # Phase 64/70/82 (shadow): see _async_shadow_forecast_fields.
+        shadow_forecast_fields = await self._async_shadow_forecast_fields(
             decision, forecast_fallback, paired_days, now.date(), band, avg_consumption_kw, battery_capacity_kwh,
-            overnight_drain_adjustment, feedback_adj if feedback_live else soc_adjustment,
-        )
-        # Phase 70 (shadow): learned P10/P50/P90 of today's solar; the decision above keeps min(raw, corrected).
-        quantile_samples = forecast_ratio_samples(
-            await self.data_logger.async_load_paired_days(days=FORECAST_QUANTILE_HISTORY_DAYS)
-        )
-        solar_quantiles = None if forecast_fallback else forecast_quantiles(
-            quantile_samples, now.month, band, raw_forecast_kwh
-        )
-        # Phase 82 (shadow): the same quantiles binned by today's cloud cover; the target is unchanged.
-        cloud_cover_pct = await self._async_today_cloud_cover()
-        cloud_quantiles = None if forecast_fallback or cloud_bucket(cloud_cover_pct) is None else forecast_quantiles(
-            quantile_samples, now.month, band, raw_forecast_kwh, cloud=cloud_bucket(cloud_cover_pct)
+            overnight_drain_adjustment, feedback_adj if feedback_live else soc_adjustment, raw_forecast_kwh, now.month,
         )
         # A free event later today should start at its floor: buy only that plus the load until then.
         uncapped_target_soc = target_soc
@@ -531,88 +673,15 @@ class OvernightMixin:
             target_soc, self.coordinator.state.user_override, now.date().isoformat(), soc
         )
 
-        computed_charge_rate = self.data_logger.compute_effective_charge_rate_kw(
-            paired_days, battery_capacity_kwh, overnight_drain_adjustment
+        # Phase 131: effective/used/BMS-limited charge rate, and the Flux 1 window sized from it
+        # ("rate and window glue" — see _async_rate_and_window).
+        rate_window_fields = await self._async_rate_and_window(
+            cfg, paired_days, battery_capacity_kwh, overnight_drain_adjustment, charge_rate_kw, dry_run, now,
+            target_soc, soc, low_solar, decision.hourly_forecast_used, avg_consumption_kw,
         )
-        # When calibration thins below its minimum (common in summer — charge gaps
-        # rarely reach the 10% needed to calibrate), reuse the last learned rate
-        # rather than the optimistic nameplate config, which under-sizes the window.
-        # Fallback chain: fresh computation → persisted last-known → most recent
-        # non-null rate in history (seeds the persisted value on first run).
-        effective_charge_rate = computed_charge_rate
-        if effective_charge_rate is None:
-            effective_charge_rate = self.coordinator.state.last_effective_charge_rate_kw
-        if effective_charge_rate is None:
-            effective_charge_rate = self.data_logger.last_known_charge_rate_kw(paired_days)
-        battery_temp_c = self._state_float(self.battery_temp_entity, 20.0)
-        # Phase 61: rate measured from the 02:00/05:00 meters; logged always, used when live.
-        measured = self.data_logger.compute_measured_charge_rate_kw(paired_days, battery_temp_c)
-        measured_live = bool(cfg.get(CONF_MEASURED_RATE_LIVE, DEFAULT_MEASURED_RATE_LIVE))
-        derate = True
-        if measured_live and measured is not None:
-            effective_charge_rate, at_temp = measured
-            derate = not at_temp
-        # Phase 113: the live BMS charge limit; logged always, used only when its option is on.
-        bms_limit_a = await self._async_bms_charge_limit_a(dry_run)
-        bms_voltage = float(cfg.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE)
-        bms_rate_kw = bms_limited_rate_kw(bms_limit_a, bms_voltage)
-        bms_live = bool(cfg.get(CONF_BMS_RATE_LIVE, DEFAULT_BMS_RATE_LIVE))
-        bms_applied = bms_live and bms_rate_kw is not None and derate
-        used_charge_rate, temp_factor = resolve_used_charge_rate(
-            charge_rate_kw, effective_charge_rate, battery_temp_c, derate,
-            bms_rate_kw if bms_applied else None,
-        )
-        rate_source = charge_rate_source(not derate, bms_applied, bms_rate_kw is not None)
-
-        # Phase 13: nameplate rate loses ~8% to conversion; in-window house load
-        # adds grid kWh (logged) but not window time.
-        efficiency = charge_efficiency(charge_rate_kw, effective_charge_rate)
-        energy_needed_kwh = max(0.0, (target_soc - soc) / 100.0 * battery_capacity_kwh)
-        # Phase 126: a re-plan already inside 02:00-05:00 (startup/reload, a SOC retry, a
-        # post-outage grid_restored plan) sizes the remaining charge from now, not from 02:00 —
-        # the SOC it is sizing from is already now's, so a 02:00 baseline understates the time
-        # already spent and the pushed window could end before "now".
-        start_minutes = flux1_replan_start_minutes(now.hour * 60 + now.minute)
-        if low_solar:
-            # Solar is scarce — take all the cheap import we can get.
-            end_minutes = 5 * 60
-            logic_branch = "low_solar_full_window"
-        else:
-            # Physics-based window: charge exactly as long as needed to reach target.
-            end_minutes = flux1_end_minutes(energy_needed_kwh / efficiency, used_charge_rate, start_minutes)
-            logic_branch = "adaptive_hourly" if decision.hourly_forecast_used else "adaptive"
-        # Phase 62: hold the target to 05:00 so the grid, not the battery, runs the house.
-        full_window_live = bool(cfg.get(CONF_FULL_WINDOW_LIVE, DEFAULT_FULL_WINDOW_LIVE))
-        full_window_end = "05:00"
-        if full_window_live and not low_solar and end_minutes < 5 * 60 and energy_needed_kwh > 0:
-            end_minutes = 5 * 60
-            logic_branch = "full_window"
-        flux1_end = minutes_to_hhmm(end_minutes)
-        # Phase 113 shadow: the window the BMS-limited rate would give (None while the option is on).
-        bms_shadow_end = None
-        if bms_rate_kw is not None and not bms_applied and not low_solar and derate:
-            bms_shadow_end = minutes_to_hhmm(
-                flux1_end_minutes(
-                    energy_needed_kwh / efficiency, round(min(used_charge_rate, bms_rate_kw), 2), start_minutes
-                )
-            )
-        # Phase 23: the lowest grid-charge current that still reaches the target
-        # by 05:00. Logged only unless the live option is on; then the current
-        # is written first and the window stays open to 05:00.
-        battery_voltage = float(cfg.get(CONF_BATTERY_VOLTAGE) or DEFAULT_BATTERY_VOLTAGE)
-        gentle_max_a = max_charge_current_a(charge_rate_kw, battery_voltage)
-        gentle_window_hours = max(0.25, (5 * 60 - start_minutes) / 60)
-        gentle_current_a = gentle_charge_current_a(energy_needed_kwh, gentle_window_hours, battery_voltage, gentle_max_a)
-        gentle_charge_applied, inverter_grid_current_a = False, None
-        if not dry_run and self._gentle_charge_due(cfg, now, gentle_current_a, gentle_max_a):
-            gentle_charge_applied, inverter_grid_current_a = await self._async_apply_gentle_charge(gentle_current_a, now)
-            if gentle_charge_applied:
-                end_minutes = hhmm_to_minutes(CHEAP_WINDOW_END)
-                flux1_end = CHEAP_WINDOW_END
-        window_load_kwh, grid_kwh_needed = window_grid_kwh(
-            energy_needed_kwh, efficiency, avg_consumption_kw, end_minutes, start_minutes
-        )
-        next_import_window = f"02:00→{flux1_end}"
+        flux1_end = rate_window_fields["flux1_end"]
+        gentle_charge_applied = rate_window_fields["gentle_charge_applied"]
+        next_import_window = rate_window_fields["next_import_window"]
 
         payload = {
             "flux_1": {"startTime": "02:00", "endTime": flux1_end, "targetSoc": target_soc},
@@ -640,10 +709,7 @@ class OvernightMixin:
             "forecast_correction_factor": forecast_correction,
             "forecast_correction_weighted": weighted_correction,
             "forecast_correction_weighted_basis": weighted_basis,
-            **nv,
-            "forecast_quantiles": solar_quantiles,
-            "forecast_quantiles_cloud": cloud_quantiles,
-            "cloud_cover_pct": cloud_cover_pct,
+            **shadow_forecast_fields,
             "outdoor_temp_c": self._outside_temp_now(),
             "days_since_full": since_full,
             "full_charge_due": full_due,
@@ -651,9 +717,6 @@ class OvernightMixin:
             "solar_forecast_kwh": solar_forecast_kwh,
             "low_solar_forecast_kwh": round(low_solar_forecast_kwh, 2),
             "forecast_band": band,
-            "logic_branch": logic_branch,
-            "full_window_end": full_window_end,
-            "full_window_live": full_window_live and logic_branch == "full_window",
             "solar_start_time": solar_start_time,
             # None when sun.sun was unavailable — not 0.0, a real mid-summer value too (rule 11's
             # missing-is-None convention; the twin replays "unknown" as the band fallback).
@@ -669,16 +732,11 @@ class OvernightMixin:
             "import_feedback_reason": feedback_reason,
             "import_feedback_live": feedback_live,
             "forecast_correction_days": self.data_logger.count_forecast_correction_days(paired_days),
-            "effective_charge_rate_kw": effective_charge_rate,
-            "charge_rate_from_cache": computed_charge_rate is None,
-            "used_charge_rate_kw": used_charge_rate,
-            "charge_efficiency": efficiency,
-            "energy_needed_kwh": round(energy_needed_kwh, 2),
-            "window_load_kwh": window_load_kwh,
-            "grid_kwh_needed": grid_kwh_needed,
+            **rate_window_fields,
+            # Overrides rate_window_fields' copy: the push below can undo a gentle charge whose
+            # window is no longer wide enough once the plan failed to land.
+            "gentle_charge_applied": gentle_charge_applied,
             "charge_rate_calibration_days": self.data_logger.count_charge_rate_calibration_days(paired_days),
-            "flux1_end": flux1_end,
-            "next_import_window": next_import_window,
             "payload": payload,
             "source": source,
             "api_ok": api_ok,
@@ -686,14 +744,6 @@ class OvernightMixin:
             "held_by_free_event": held_by == "free_event",
             "free_event_capped": target_soc < uncapped_target_soc and user_override is None,
             "user_override": user_override,
-            "battery_voltage": battery_voltage,
-            "gentle_current_a": gentle_current_a,
-            "gentle_max_current_a": round(gentle_max_a, 1),
-            "gentle_charge_rate_kw": (
-                round(gentle_current_a * battery_voltage / 1000, 2) if gentle_current_a is not None else None
-            ),
-            "gentle_charge_applied": gentle_charge_applied,
-            "inverter_grid_current_a": inverter_grid_current_a,
             "forecast_fallback": forecast_fallback,
             "is_weekend": is_weekend,
             "away": away,
@@ -701,15 +751,6 @@ class OvernightMixin:
             "load_source": load_source,
             "learned_load_kw": learned_kw,
             "learned_load_days": learned_load_days,
-            "battery_temp_c": battery_temp_c,
-            "temp_deration_factor": temp_factor,
-            "measured_charge_rate_kw": measured[0] if measured else None,
-            "measured_charge_rate_live": measured_live and measured is not None,
-            "bms_charge_limit_a": bms_limit_a,
-            "bms_rate_kw": bms_rate_kw,
-            "bms_rate_live": bms_applied,
-            "rate_source": rate_source,
-            "bms_shadow_window_end": bms_shadow_end,
             "hourly_forecast_used": decision.hourly_forecast_used,
             "synthetic_ramp": decision.synthetic_ramp,
             "bridge_hour": decision.bridge_hour,
@@ -743,7 +784,7 @@ class OvernightMixin:
             last_error=None if api_ok else self.coordinator.state.last_error,
             # Remember the freshest known rate so a later plan can reuse it when
             # calibration thins (locks in the history seed on first run).
-            last_effective_charge_rate_kw=effective_charge_rate,
+            last_effective_charge_rate_kw=plan_state["effective_charge_rate_kw"],
         )
         if source != STARTUP_PLAN_SOURCE:
             await self._guarded(lambda: self.async_run_tou_shadow(plan_state), "Native TOU shadow")

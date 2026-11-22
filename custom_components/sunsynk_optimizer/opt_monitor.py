@@ -234,10 +234,10 @@ class MonitorMixin:
         target = self._cfg_str(CONF_DATA_REPORT_TARGET)
         if not target or INTEGRATION_VERSION is None or state.settings_dump_version == INTEGRATION_VERSION:
             return
-        try:
-            settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
-        except Exception as exc:  # pragma: no cover - network
-            _LOGGER.debug("Settings dump read failed: %s", exc)
+        settings = await self._async_api_read(
+            "Settings dump", self.coordinator.api.async_read_settings, self.inverter_serial
+        )
+        if settings is None:
             return
         values = settings_dump(settings, (self.inverter_serial, self.plant_id))
         if not values:
@@ -362,10 +362,10 @@ class MonitorMixin:
         expected = expected_grid_current_a(self.coordinator.state.gentle_charge, now.date().isoformat())
         if expected is None:
             return []
-        try:
-            settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
-        except Exception as exc:  # pragma: no cover - network
-            _LOGGER.debug("Settings read-back failed: %s", exc)
+        settings = await self._async_api_read(
+            "Current drift settings", self.coordinator.api.async_read_settings, self.inverter_serial
+        )
+        if settings is None:
             return None
         return grid_current_drift(expected, settings.get(GENTLE_CHARGE_SETTING))
 
@@ -490,10 +490,10 @@ class MonitorMixin:
         Read-only (no writes, so also in monitor mode). The keys the integration writes itself are not
         compared. The first snapshot only stores a baseline. A failed read keeps the old snapshot.
         """
-        try:
-            settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
-        except Exception as exc:  # pragma: no cover - network
-            _LOGGER.debug("Settings audit read failed: %s", exc)
+        settings = await self._async_api_read(
+            "Settings audit", self.coordinator.api.async_read_settings, self.inverter_serial
+        )
+        if settings is None:
             return
         current = snapshot_settings(settings)
         if not current:
@@ -529,10 +529,10 @@ class MonitorMixin:
         Always logs a `settings_flags` debug line (flags, matched and unmatched rules, so key names can
         be verified); notifies only when the set of flags changes. A failed read keeps the last result.
         """
-        try:
-            settings = await self.coordinator.api.async_read_settings(self.inverter_serial)
-        except Exception as exc:  # pragma: no cover - network
-            _LOGGER.debug("Settings efficiency read failed: %s", exc)
+        settings = await self._async_api_read(
+            "Settings efficiency", self.coordinator.api.async_read_settings, self.inverter_serial
+        )
+        if settings is None:
             return
         if not isinstance(settings, dict) or not settings:
             return

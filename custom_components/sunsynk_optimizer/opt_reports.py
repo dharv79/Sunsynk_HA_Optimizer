@@ -77,6 +77,7 @@ from .planning import (
     ledger_backfill,
     ledger_totals,
     system_value_text,
+    last_calendar_month,
     monthly_report_due,
     TARIFF_IMPORT_BANDS,
     TARIFF_LABELS,
@@ -136,7 +137,7 @@ class ReportsMixin:
         today = dt_util.now().date()
         if not monthly_report_due(self.coordinator.state.last_monthly_report_month, today):
             return
-        report_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        _, report_month = last_calendar_month(today)
         sent = dict(self.coordinator.state.monthly_reports_sent)
 
         async def _send(key: str, factory, label: str) -> None:
@@ -147,14 +148,8 @@ class ReportsMixin:
             if self._guarded_errors.get(label, 0) == before:
                 sent[key] = report_month
 
-        await _send(
-            "tariff_comparison",
-            lambda: self._async_send_monthly_tariff_comparison(force=True),
-            "Monthly tariff comparison",
-        )
-        await _send(
-            "battery_value", lambda: self._async_send_monthly_battery_value(force=True), "Monthly battery value"
-        )
+        await _send("tariff_comparison", self._async_send_monthly_tariff_comparison, "Monthly tariff comparison")
+        await _send("battery_value", self._async_send_monthly_battery_value, "Monthly battery value")
         await _send("shiftable_report", self._async_send_shiftable_report, "Shiftable-load report")
         await _send("load_report", self._async_send_load_report, "Weather-normalised load report")
         await _send("upgrade_advisor", self._async_send_upgrade_advisor, "Upgrade advisor")
@@ -245,7 +240,7 @@ class ReportsMixin:
         base load is unusual (a quiet month says nothing).
         """
         today = dt_util.now().date()
-        month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        _, month = last_calendar_month(today)
         rows = weather_load_rows(await self.data_logger.async_load_records(LOAD_REPORT_HISTORY_DAYS))
         report = monthly_load_report(rows, month)
         if report is None:
@@ -528,15 +523,13 @@ class ReportsMixin:
             await self.hass.async_add_executor_job(_write, results)
         return agile_prices_by_date(results, dt_util.DEFAULT_TIME_ZONE)
 
-    async def _async_send_monthly_battery_value(self, force: bool = False) -> None:
-        """First Sunday of the month: what the battery + optimiser saved last month vs no battery (phase 37)."""
+    async def _async_send_monthly_battery_value(self) -> None:
+        """Called once a month, catching up a missed first Sunday (`_async_monthly_reports`): what the
+        battery + optimiser saved last month vs no battery (phase 37)."""
         today = dt_util.now().date()
-        if today.day > 7 and not force:
-            return
-        last_day_of_month = today.replace(day=1) - timedelta(days=1)
-        month = last_day_of_month.strftime("%Y-%m")
-        # A missed first Sunday is caught up later in the current month (phase 57's force=True),
-        # so the window must always reach back to that month's 1st, however late the catch-up runs.
+        last_day_of_month, month = last_calendar_month(today)
+        # A missed first Sunday is caught up later in the current month (phase 57), so the window
+        # must always reach back to that month's 1st, however late the catch-up runs.
         history_days = (today - last_day_of_month.replace(day=1)).days + 2
         days = [
             d for d in await self.data_logger.async_load_paired_days(days=history_days)
@@ -698,16 +691,15 @@ class ReportsMixin:
         await self.async_notify(title, body)
         return result
 
-    async def _async_send_monthly_tariff_comparison(self, force: bool = False) -> None:
-        """First Sunday of the month: cost last month's logged usage under Flux and the alternatives.
+    async def _async_send_monthly_tariff_comparison(self) -> None:
+        """Called once a month, catching up a missed first Sunday (`_async_monthly_reports`): cost last
+        month's logged usage under Flux and the alternatives.
 
         Usage is held fixed (battery behaviour would differ on another tariff), so this is a
         guide, not a quote. Totals include standing charges and VAT (phase 35).
         """
         today = dt_util.now().date()
-        if today.day > 7 and not force:
-            return
-        month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        _, month = last_calendar_month(today)
         imp, exp = await self.data_logger.async_load_half_hourly()
         overrides = self.cfg.get(CONF_TARIFF_RATE_OVERRIDES)
         rates = merge_tariff_rates(overrides)

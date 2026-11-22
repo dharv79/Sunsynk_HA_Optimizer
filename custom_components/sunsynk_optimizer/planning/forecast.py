@@ -33,6 +33,28 @@ FORECAST_CORRECTION_HALF_LIFE_DAYS = 14.0
 FORECAST_CORRECTION_MIN_DAYS = 7
 
 
+def _ratio_samples(
+    paired_days: list[dict[str, Any]], today: date, half_life_days: float
+) -> list[tuple[float, float, str | None]]:
+    """(actual/forecast ratio, recency weight, forecast_band) for usable days.
+
+    Shared by weighted_forecast_correction and quantile_correction, which differ
+    only in how they summarise this list. A day is usable with > 0.5 kWh
+    forecast and a logged actual; weight is 0.5 ** (age / half_life_days).
+    """
+    valid = []
+    for d in paired_days:
+        forecast = d.get("solar_forecast_kwh") or 0.0
+        if forecast <= 0.5 or d.get("actual_solar_kwh") is None:
+            continue
+        try:
+            age = max(0, (today - date.fromisoformat(d["date"])).days)
+        except (KeyError, TypeError, ValueError):
+            continue
+        valid.append((d["actual_solar_kwh"] / forecast, 0.5 ** (age / half_life_days), d.get("forecast_band")))
+    return valid
+
+
 def weighted_forecast_correction(
     paired_days: list[dict[str, Any]],
     today: date,
@@ -48,16 +70,7 @@ def weighted_forecast_correction(
     ``min_days`` overall returns (1.0, "none"). Same ratio and near-zero skip
     as data_logger.compute_forecast_correction.
     """
-    valid = []
-    for d in paired_days:
-        forecast = d.get("solar_forecast_kwh") or 0.0
-        if forecast <= 0.5 or d.get("actual_solar_kwh") is None:
-            continue
-        try:
-            age = max(0, (today - date.fromisoformat(d["date"])).days)
-        except (KeyError, TypeError, ValueError):
-            continue
-        valid.append((d["actual_solar_kwh"] / forecast, 0.5 ** (age / half_life_days), d.get("forecast_band")))
+    valid = _ratio_samples(paired_days, today, half_life_days)
     if len(valid) < min_days:
         return 1.0, "none"
     basis = "global"
@@ -130,16 +143,7 @@ def quantile_correction(
     missing actuals skipped, capped 0.5-3.0). Uses in-band days when they reach
     ``min_days``, else all days; thin history yields None, not a guess.
     """
-    valid = []
-    for d in paired_days:
-        forecast = d.get("solar_forecast_kwh") or 0.0
-        if forecast <= 0.5 or d.get("actual_solar_kwh") is None:
-            continue
-        try:
-            age = max(0, (today - date.fromisoformat(d["date"])).days)
-        except (KeyError, TypeError, ValueError):
-            continue
-        valid.append((d["actual_solar_kwh"] / forecast, 0.5 ** (age / half_life_days), d.get("forecast_band")))
+    valid = _ratio_samples(paired_days, today, half_life_days)
     in_band = [v for v in valid if band is not None and v[2] == band]
     if len(in_band) >= min_days:
         valid = in_band

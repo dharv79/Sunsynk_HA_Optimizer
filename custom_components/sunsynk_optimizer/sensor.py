@@ -52,12 +52,101 @@ _DIRECT_FIELDS = {
 }
 
 
-# Always a number or unknown, so safe to record as long-term statistics.
-_MEASUREMENT_KEYS = frozenset({
-    "current_soc_target", "forecast_correction", "overnight_drain_adjustment", "evening_soc_adjustment",
-    "effective_charge_rate", "battery_capacity_estimate", "battery_soh", "battery_runtime", "pv_strings",
-    "marginal_cost", "solar_forecast_p50", "load_profile",
-})
+# Phase 131: one row per SunsynkOptimizerSensor key — registration (name, entity category,
+# pinned entity id), unit and long-term-statistics eligibility ("measurement": always a number
+# or unknown, never a one-off string) — instead of those spread across separate places that could
+# drift apart. native_value/extra_state_attributes stay their own per-key branches below: unlike
+# this metadata, what each one returns is genuinely different logic, not just data.
+_SENSOR_SPECS: dict[str, dict[str, Any]] = {
+    "selected_full_charge_day": {"name": "Selected full charge day"},
+    # Explicit entity id: the dashboard references the pre-rename id.
+    "import_plan_end": {"name": "Import plan", "entity_id": "sensor.import_plan_end"},
+    "flux2_action": {"name": "Flux 2 action"},
+    "next_import_window": {"name": "Next import window"},
+    "current_soc_target": {"name": "Current SOC target", "unit": "%", "measurement": True},
+    "operation_mode": {"name": "Operation mode"},
+    "last_error": {"name": "Last error", "entity_category": EntityCategory.DIAGNOSTIC},
+    "last_updated": {"name": "Last updated", "entity_category": EntityCategory.DIAGNOSTIC},
+    "forecast_correction": {
+        "name": "Forecast correction", "entity_category": EntityCategory.DIAGNOSTIC, "measurement": True,
+    },
+    "overnight_drain_adjustment": {
+        "name": "Overnight drain adjustment", "entity_category": EntityCategory.DIAGNOSTIC,
+        "unit": "%", "measurement": True,
+    },
+    "evening_soc_adjustment": {
+        "name": "Evening SOC adjustment", "entity_category": EntityCategory.DIAGNOSTIC,
+        "unit": "%", "measurement": True,
+    },
+    "effective_charge_rate": {
+        "name": "Effective charge rate", "entity_category": EntityCategory.DIAGNOSTIC,
+        "unit": "kW", "measurement": True,
+    },
+    "battery_capacity_estimate": {
+        "name": "Battery capacity estimate", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.battery_capacity_estimate", "unit": "kWh", "measurement": True,
+    },
+    "battery_soh": {
+        "name": "Battery state of health", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.battery_soh", "unit": "%", "measurement": True,
+    },
+    "shadow_scorecard": {
+        "name": "Shadow scorecard", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.shadow_scorecard",
+    },
+    "mpc_plan": {
+        "name": "MPC plan (shadow)", "entity_category": EntityCategory.DIAGNOSTIC, "entity_id": "sensor.mpc_plan",
+    },
+    "dynamic_tariff": {
+        "name": "Agile vs Flux saving (shadow)", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.dynamic_tariff_shadow", "unit": "GBP",
+    },
+    "tou_shadow": {
+        "name": "Inverter TOU differences (shadow)", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.tou_shadow",
+    },
+    "flex_event": {
+        "name": "Flex event offer (shadow)", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.flex_event_offer",
+    },
+    "upgrade_advisor": {
+        "name": "Upgrade advisor best saving", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.upgrade_advisor", "unit": "GBP",
+    },
+    "solar_forecast_p50": {
+        "name": "Solar forecast P50 (learned)", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.solar_forecast_p50", "unit": "kWh", "measurement": True,
+    },
+    "load_profile": {
+        "name": "Load forecast today (learned)", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.load_profile", "unit": "kWh", "measurement": True,
+    },
+    "consumption": {"name": "Consumption"},
+    "free_event": {"name": "Free event"},
+    "spare_solar": {"name": "Spare solar today", "unit": "kWh"},
+    "import_causes": {"name": "Import causes today", "entity_id": "sensor.import_causes_today", "unit": "kWh"},
+    "health": {"name": "Health", "entity_id": "sensor.health"},
+    "api_success_rate": {
+        "name": "Cloud API success rate", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.api_success_rate", "unit": "%",
+    },
+    "load_vs_expected": {
+        "name": "Load vs expected for the weather", "entity_id": "sensor.load_vs_expected", "unit": "%",
+    },
+    "data_health": {
+        "name": "Data health gaps", "entity_category": EntityCategory.DIAGNOSTIC, "entity_id": "sensor.data_health",
+    },
+    "battery_runtime": {
+        "name": "Battery runtime left", "entity_id": "sensor.battery_runtime", "unit": "h", "measurement": True,
+    },
+    "pv_strings": {
+        "name": "PV string 1 share", "entity_category": EntityCategory.DIAGNOSTIC,
+        "entity_id": "sensor.pv_string_share", "unit": "%", "measurement": True,
+    },
+    "marginal_cost": {
+        "name": "Cost of 1 kWh now", "entity_id": "sensor.cost_of_1_kwh_now", "unit": "p/kWh", "measurement": True,
+    },
+}
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -72,90 +161,7 @@ async def async_setup_entry(
     """Register all optimizer sensor entities for this config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        [
-            SunsynkOptimizerSensor(coordinator, entry, "selected_full_charge_day", "Selected full charge day"),
-            # Explicit entity id: the dashboard references the pre-rename id.
-            SunsynkOptimizerSensor(coordinator, entry, "import_plan_end", "Import plan", entity_id="sensor.import_plan_end"),
-            SunsynkOptimizerSensor(coordinator, entry, "flux2_action", "Flux 2 action"),
-            SunsynkOptimizerSensor(coordinator, entry, "next_import_window", "Next import window"),
-            SunsynkOptimizerSensor(coordinator, entry, "current_soc_target", "Current SOC target"),
-            SunsynkOptimizerSensor(coordinator, entry, "operation_mode", "Operation mode"),
-            SunsynkOptimizerSensor(coordinator, entry, "last_error", "Last error", entity_category=EntityCategory.DIAGNOSTIC),
-            SunsynkOptimizerSensor(coordinator, entry, "last_updated", "Last updated", entity_category=EntityCategory.DIAGNOSTIC),
-            SunsynkOptimizerSensor(coordinator, entry, "forecast_correction", "Forecast correction", entity_category=EntityCategory.DIAGNOSTIC),
-            SunsynkOptimizerSensor(coordinator, entry, "overnight_drain_adjustment", "Overnight drain adjustment", entity_category=EntityCategory.DIAGNOSTIC),
-            SunsynkOptimizerSensor(coordinator, entry, "evening_soc_adjustment", "Evening SOC adjustment", entity_category=EntityCategory.DIAGNOSTIC),
-            SunsynkOptimizerSensor(coordinator, entry, "effective_charge_rate", "Effective charge rate", entity_category=EntityCategory.DIAGNOSTIC),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "battery_capacity_estimate", "Battery capacity estimate",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.battery_capacity_estimate",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "battery_soh", "Battery state of health",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.battery_soh",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "shadow_scorecard", "Shadow scorecard",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.shadow_scorecard",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "mpc_plan", "MPC plan (shadow)",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.mpc_plan",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "dynamic_tariff", "Agile vs Flux saving (shadow)",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.dynamic_tariff_shadow",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "tou_shadow", "Inverter TOU differences (shadow)",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.tou_shadow",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "flex_event", "Flex event offer (shadow)",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.flex_event_offer",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "upgrade_advisor", "Upgrade advisor best saving",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.upgrade_advisor",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "solar_forecast_p50", "Solar forecast P50 (learned)",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.solar_forecast_p50",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "load_profile", "Load forecast today (learned)",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.load_profile",
-            ),
-            SunsynkOptimizerSensor(coordinator, entry, "consumption", "Consumption"),
-            SunsynkOptimizerSensor(coordinator, entry, "free_event", "Free event"),
-            SunsynkOptimizerSensor(coordinator, entry, "spare_solar", "Spare solar today"),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "import_causes", "Import causes today", entity_id="sensor.import_causes_today"
-            ),
-            SunsynkOptimizerSensor(coordinator, entry, "health", "Health", entity_id="sensor.health"),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "api_success_rate", "Cloud API success rate",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.api_success_rate",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "load_vs_expected", "Load vs expected for the weather",
-                entity_id="sensor.load_vs_expected",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "data_health", "Data health gaps",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.data_health",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "battery_runtime", "Battery runtime left", entity_id="sensor.battery_runtime"
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "pv_strings", "PV string 1 share",
-                entity_category=EntityCategory.DIAGNOSTIC, entity_id="sensor.pv_string_share",
-            ),
-            SunsynkOptimizerSensor(
-                coordinator, entry, "marginal_cost", "Cost of 1 kWh now", entity_id="sensor.cost_of_1_kwh_now"
-            ),
-        ]
+        [SunsynkOptimizerSensor(coordinator, entry, key) for key in _SENSOR_SPECS]
         + [SavingsTotalSensor(coordinator, entry), PaybackSensor(coordinator, entry)]
         + [KpiSensor(coordinator, entry, *spec) for spec in KPI_SENSORS]
         + [WeeklyKpiSensor(coordinator, entry, *spec) for spec in WEEKLY_KPI_SENSORS]
@@ -276,40 +282,21 @@ class WeeklyKpiSensor(CoordinatorEntity, SensorEntity):
 class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
 
-    def __init__(
-        self,
-        coordinator,
-        entry: ConfigEntry,
-        sensor_key: str,
-        name: str,
-        entity_category: EntityCategory | None = None,
-        entity_id: str | None = None,
-    ) -> None:
+    def __init__(self, coordinator, entry: ConfigEntry, sensor_key: str) -> None:
         super().__init__(coordinator)
+        spec = _SENSOR_SPECS[sensor_key]
         self._sensor_key = sensor_key
-        self._attr_name = name
+        self._attr_name = spec["name"]
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
-        pin_entity_id(self, "sensor", name, entity_id)
-        if sensor_key in _MEASUREMENT_KEYS:
+        pin_entity_id(self, "sensor", spec["name"], spec.get("entity_id"))
+        if spec.get("measurement"):
             self._attr_state_class = SensorStateClass.MEASUREMENT  # long-term statistics (phase 94)
-        self._attr_entity_category = entity_category
+        self._attr_entity_category = spec.get("entity_category")
         self._attr_device_info = optimizer_device_info(entry)
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        if self._sensor_key == "marginal_cost":
-            return "p/kWh"
-        if self._sensor_key == "battery_runtime":
-            return "h"
-        if self._sensor_key in ("dynamic_tariff", "upgrade_advisor"):
-            return "GBP"
-        if self._sensor_key in ("api_success_rate", "load_vs_expected", "pv_strings", "battery_soh", "current_soc_target", "overnight_drain_adjustment", "evening_soc_adjustment"):
-            return "%"
-        if self._sensor_key == "effective_charge_rate":
-            return "kW"
-        if self._sensor_key in ("battery_capacity_estimate", "solar_forecast_p50", "load_profile"):
-            return "kWh"
-        return "kWh" if self._sensor_key in ("spare_solar", "import_causes") else None
+        return _SENSOR_SPECS[self._sensor_key].get("unit")
 
     @property
     def native_value(self) -> str | int | None:

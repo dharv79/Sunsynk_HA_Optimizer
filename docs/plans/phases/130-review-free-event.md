@@ -1,6 +1,6 @@
 # Phase 130: Review fixes: free electricity event (after the 22/11 live run)
 
-Status: Planned, not built
+Status: Done, merged (a2ac5f45d1c96c4e5cbcf768881a2c19347ccd3e, PR #250)
 
 ## Why
 

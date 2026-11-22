@@ -56,9 +56,13 @@ def test_no_trigger_branch_restores_after_the_hold_and_only_clears_on_success():
 
 
 def test_no_trigger_branch_keeps_the_action_while_a_push_still_holds_flux2():
+    """Phase 131: push_active now feeds flux2_branch ('none_active' vs 'none'); only the 'none'
+    branch blanks last_flux2_action, so the review's intent (don't blot out a live push) is
+    unchanged by moving the decision into one planning helper."""
     src = _source("_async_flux2_decide")
     assert "flux2_push_still_active" in src
-    assert "if not push_active:" in src
+    assert "flux2_branch(" in src and "push_active" in src
+    assert "if branch == 'none':" in src.replace('"', "'")
 
 
 def test_trim_pushes_clamp_their_end_time_to_19_00():
@@ -69,9 +73,11 @@ def test_trim_pushes_clamp_their_end_time_to_19_00():
 
 
 def test_normal_trim_gate_uses_the_plans_full_day_flag():
+    """Phase 131: the >85% gate moved into flux2_trim_due, which still takes trim_full_day (the
+    plan's own full-day flag, from trim_full_day_active) as its first argument."""
     src = _source("_async_flux2_decide")
     assert "trim_full_day_active" in src
-    assert "not trim_full_day and soc > 85" in src.replace("  ", " ")
+    assert "flux2_trim_due(trim_full_day, soc, trim_target," in src.replace("\n", " ").replace("  ", " ")
 
 
 def test_hold_and_trim_branch_still_use_the_weekday_comparison():

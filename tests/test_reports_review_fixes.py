@@ -54,6 +54,16 @@ def test_monthly_battery_value_window_reaches_the_start_of_the_report_month():
     assert "history_days" in src
 
 
+def test_monthly_senders_no_longer_carry_a_dead_force_gate():
+    """Phase 131: _async_monthly_reports is the only caller of either, and it always wants the
+    report sent (the catch-up IS the point), so the `force`-gated day<=7 check never fired."""
+    for name in ("_async_send_monthly_battery_value", "_async_send_monthly_tariff_comparison"):
+        src = _source(name)
+        assert "force" not in src, name
+        assert "today.day > 7" not in src, name
+        assert "last_calendar_month(today)" in src, name
+
+
 def test_weekly_cost_summary_and_ai_insight_use_the_fresh_digest_only():
     for name in ("_async_send_weekly_cost_summary", "_async_send_ai_weekly_insight"):
         src = _source(name)

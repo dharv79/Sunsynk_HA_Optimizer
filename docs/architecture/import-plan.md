@@ -361,3 +361,27 @@ Verification: `tests/test_planning.py`, `tests/test_explain_plan.py`, `tests/tes
 **Backtest `--load-kw` resize.** `tools/backtest.py` used to apply a raw linear SOC delta for an alternative load figure, skipping `bridge_soc`'s own `BRIDGE_LOAD_MARGIN` and its rounding/clamp. It now recomputes `bridge_soc()` for both the logged and alternative load and applies the difference between the two, matching what the live planner would actually have targeted.
 
 See `docs/plans/phases/129-review-logging-reports.md`.
+
+## Refactor: split `async_run_import_plan` (22/11/2026, phase 131)
+
+Behaviour-preserving: the review found the ~375-line function untested and its "rate and window
+glue" the densest, most defect-prone section (phases 61, 113 and 126 among the fixes that have
+landed there). Split into three pieces, same inputs and outputs:
+
+- **`async_run_import_plan`** — pre-flight, forecast correction, `select_target_soc`, the
+  drain/nudge adjustments and the free-event/user-override caps; then the push, retry, logging
+  and notification tail.
+- **`_async_rate_and_window`** — effective/used/BMS-limited charge rate (learned, measured,
+  gentle-charge current) and the Flux 1 window sized from it; returns every `plan_state` field
+  this computes, plus `flux1_end`/`gentle_charge_applied`/`next_import_window` again at top
+  level for the caller's own payload build and post-push gentle-charge undo.
+- **`_async_shadow_forecast_fields`** — the phase 64/70/82 shadow-only newsvendor/quantile
+  fields, which never feed `target_soc` or get pushed.
+
+`planning.forecast._ratio_samples` also now backs both `weighted_forecast_correction` and
+`quantile_correction` (previously two copies of the same actual/forecast sampling loop).
+
+Verification: `tests/test_refactor_review_fixes.py` confirms the split (AST source-pinning, the
+function bodies no longer in each other); the full `tests/test_overnight_review_fixes.py` and
+`tests/test_planning.py` suites, unaffected by the split, stayed green throughout. See
+`docs/plans/phases/131-review-refactor.md`.

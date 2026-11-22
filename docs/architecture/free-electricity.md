@@ -156,3 +156,17 @@ hour on the current code (22/11/2026 09:00–10:00) had run.
 **Verification.** `tests/test_free_event_review_fixes.py` (AST source-pinning, like
 `tests/test_daytime_review_fixes.py`); `tests/test_planning.py::test_free_event_schedule_error_judges_both_fields_at_once`
 and `::test_free_event_push_retry_due_bounded_by_max_attempts`.
+
+## Refactor: the timer plan as a tested planning helper (22/11/2026, phase 131)
+
+Behaviour-preserving. `_arm_free_event_timers`'s "which point-in-time timers for which phase, and
+their delay" was inline and untested; it's now `planning.free_event_timer_plan(phase, watch_from,
+free_start, free_end, now)`, returning `(name, delay_seconds)` pairs (each delay clamped to >= 0,
+so a trigger time already past on an HA restart fires at once). `_arm_free_event_timers` still
+arms each one with a literal `self._async_free_event_<name>` callback — not a name→callback dict
+— so `test_code_integrity.py`'s static check that every scheduled timer is a real coroutine still
+applies.
+
+Verification: `tests/test_planning.py::test_free_event_timer_plan`;
+`tests/test_refactor_review_fixes.py::test_free_event_timers_are_decided_by_the_planning_timer_plan`
+pins the mixin's dispatch. See `docs/plans/phases/131-review-refactor.md`.
