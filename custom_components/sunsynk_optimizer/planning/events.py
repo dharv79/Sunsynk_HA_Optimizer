@@ -286,6 +286,31 @@ def manual_free_event_error(
     return None
 
 
+def free_event_schedule_error(start: datetime, end: datetime, now: datetime, label: str = "Free event") -> str | None:
+    """Validate a complete start/end pair given at once (phase 130: the schedule_free_event service).
+
+    Unlike `manual_free_event_error`, both fields are always known here, so both
+    are judged together: a start in the past, or an end at/before start.
+    """
+    if start <= now:
+        return f"{label} start must be in the future."
+    if end <= start:
+        return f"{label} end must be after start."
+    return None
+
+
+# A failed sell-start or free-start push (phase 130) retries a few times, shortly
+# after, instead of silently moving the event on as if it had landed.
+FREE_EVENT_PUSH_RETRY_MINUTES = 2
+
+FREE_EVENT_PUSH_RETRY_MAX_ATTEMPTS = 3
+
+
+def free_event_push_retry_due(attempts: int) -> bool:
+    """True while a failed sell/free-start push should retry FREE_EVENT_PUSH_RETRY_MINUTES from now."""
+    return attempts < FREE_EVENT_PUSH_RETRY_MAX_ATTEMPTS
+
+
 def _gbp(kwh: float | None, pence: float | None) -> float | None:
     return round(kwh * pence / 100, 2) if _is_number(kwh) and _is_number(pence) else None
 

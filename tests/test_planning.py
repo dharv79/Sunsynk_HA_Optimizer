@@ -443,6 +443,31 @@ def test_manual_free_event_error_only_judges_changed_field(planning):
     assert manual_free_event_error("end", later, soon, now) is not None
 
 
+def test_free_event_schedule_error_judges_both_fields_at_once(planning):
+    """Phase 130: unlike manual_free_event_error, a service call gives both fields together."""
+    from datetime import timedelta
+
+    free_event_schedule_error = planning.free_event_schedule_error
+
+    now = datetime(2026, 9, 28, 22, 0)
+    soon, later, past = now + timedelta(hours=1), now + timedelta(hours=2), now - timedelta(hours=1)
+    assert free_event_schedule_error(soon, later, now) is None
+    assert free_event_schedule_error(past, later, now) is not None  # start in the past
+    assert free_event_schedule_error(soon, past, now) is not None  # end before start
+    assert free_event_schedule_error(soon, soon, now) is not None  # end == start
+
+
+def test_free_event_push_retry_due_bounded_by_max_attempts(planning):
+    """Phase 130: a failed sell/free-start push retries a bounded number of times."""
+    free_event_push_retry_due = planning.free_event_push_retry_due
+    max_attempts = planning.FREE_EVENT_PUSH_RETRY_MAX_ATTEMPTS
+
+    assert free_event_push_retry_due(0) is True
+    assert free_event_push_retry_due(max_attempts - 1) is True
+    assert free_event_push_retry_due(max_attempts) is False
+    assert free_event_push_retry_due(max_attempts + 5) is False
+
+
 @pytest.mark.parametrize(
     "source,hhmm,expected",
     [

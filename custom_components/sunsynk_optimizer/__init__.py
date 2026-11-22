@@ -61,7 +61,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await _optimizer(hass).async_service_override(skip=True)
 
     async def _schedule(call: ServiceCall) -> None:
-        await _optimizer(hass).async_service_schedule_free_event(call.data["start"], call.data["end"])
+        if not await _optimizer(hass).async_service_schedule_free_event(call.data["start"], call.data["end"]):
+            raise HomeAssistantError("Free event NOT scheduled; see the notification for why")
 
     async def _cancel(call: ServiceCall) -> None:
         await _optimizer(hass).async_service_cancel_free_event()

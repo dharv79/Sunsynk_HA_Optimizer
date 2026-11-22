@@ -117,3 +117,42 @@ Records already logged (18/10) stay as written, because they dedup at write. The
 **Design.** `planning.elapsed_seconds(later, earlier)` compares aware datetimes in UTC; `shift_hours` moves a datetime by real hours; `free_event_watch_from` uses it. The optimizer uses `elapsed_seconds` for the three free-event timers, the gentle-charge restore, the SOC trend samples and the hours left to the free start. `free_event_in_watch(now, free_start, watch_from)` is checked first in `_async_do_free_event_watch`, so no sell can start before `watch_from` or after the free start. `free_event_result` gains `sold_from_battery_kwh` ((SOC at sell start − SOC at free start) × capacity, never below 0) and `sold_from_solar_kwh` (sold − battery part, never below 0); each is None when SOC, capacity or the meters are missing. Slot-holding rules (do-not-break 7) are untouched.
 
 **Verification.** `tests/test_free_event_dst.py` (25 Oct and 29 Mar clock changes, the guard, the split). Not live-tested: the next real DST change is 28 Mar 2027.
+
+## Review fixes after the first live run on 2.3.7 (22/11/2026, phase 130)
+
+Fixes the free-event findings of the 21/11/2026 code review, shipped once the first live free
+hour on the current code (22/11/2026 09:00–10:00) had run.
+
+- **Restart race wrapping Flux 1 to ~23 h / stuck in "charging".** `_async_do_free_event_sell_start`,
+  `_async_do_free_event_free_start` and `_async_do_free_event_free_end` each read, push and write
+  back the event with no mutual exclusion. A restart that left both the sell-start and free-start
+  timers overdue could fire them close enough together that `free_start`'s write-back (after its
+  own push awaited the API) landed *after* `free_end` had already finished the event — clobbering
+  "done" back to "charging" with no timer left to fix it, and (since `free_end` was already in the
+  past) pushing a Flux 1 window that wrapped to roughly a day of charging. All three transitions now
+  run their whole read-push-write under `self._flux2_lock` (the same lock every other Flux 2
+  decide-and-push uses), so they can no longer interleave.
+- **Dashboard scheduling bypassed monitor mode (do-not-break 16).** `async_schedule_free_event`
+  called from the manual datetime entities had no `_service_guard()`, unlike the `schedule_free_event`
+  service. A monitor-mode event could still schedule, have its sell/free-start pushes correctly
+  refused, and then have `_async_restore_normal_plan`'s `allow_in_monitor=True` push a real change
+  at free end — not undoing anything of its own, since nothing of its own had landed. Dashboard
+  scheduling now calls `_service_guard()` too (notifying, not raising, to match the entity's existing
+  validation style).
+- **Restore push result was discarded.** `_async_restore_normal_plan` now returns the push's
+  `api_ok`. The "finished" and "cancelled" notifications read it instead of always claiming the
+  normal plan was restored.
+- **A failed sell/free-start push still advanced the phase.** Both pushes now retry
+  (`planning.free_event_push_retry_due`, bounded at `FREE_EVENT_PUSH_RETRY_MAX_ATTEMPTS` attempts,
+  `FREE_EVENT_PUSH_RETRY_MINUTES` apart) instead of moving on as if the push had landed; once retries
+  are exhausted the phase still advances (so the event can't get stuck), with the notification
+  showing the inverter wasn't updated.
+- **`schedule_free_event` service accepted bad times and swallowed a refusal.** `planning.free_event_schedule_error`
+  (both fields judged together, unlike the manual-entry `manual_free_event_error`) now rejects an
+  end at/before start or a start in the past before scheduling; the service's own handler
+  (`__init__.py`) raises when `async_schedule_free_event` refuses (already active, SOC unavailable),
+  instead of silently reporting success with no `supports_response`.
+
+**Verification.** `tests/test_free_event_review_fixes.py` (AST source-pinning, like
+`tests/test_daytime_review_fixes.py`); `tests/test_planning.py::test_free_event_schedule_error_judges_both_fields_at_once`
+and `::test_free_event_push_retry_due_bounded_by_max_attempts`.
