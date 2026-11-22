@@ -653,3 +653,9 @@ setting_text
 FULL_TRIM_HOLD_S
 full_trim_delay_s
 audit_daily_types
+GRID_RESTORED_PLAN_SOURCE
+FLUX1_WINDOW_END_MINUTES
+NIGHTLY_PLAN_WINDOW_END_MINUTES
+flux1_replan_start_minutes
+nightly_plan_catch_up_due
+parse_naive_hourly_forecast

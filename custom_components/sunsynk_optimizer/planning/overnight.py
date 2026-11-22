@@ -161,19 +161,50 @@ def select_target_soc(
     low_solar = low_solar_forecast_kwh < LOW_SOLAR_THRESHOLD_KWH
 
     if is_full_day:
-        if not low_solar and hours_to_solar is not None:
-            # Bridge to solar start; PV charges to 100% during the day for free.
-            return TargetDecision(
-                bridge_soc(hours_to_solar * avg_consumption_kw, battery_capacity_kwh), "weekly_full_charge_day"
-            )
-        # Poor solar on the chosen day — import fully from grid.
-        return TargetDecision(100, "weekly_full_charge_day")
+        if low_solar or hours_to_solar is None:
+            # Poor solar (or no solar start time) on the chosen day — import fully from grid.
+            return TargetDecision(100, "weekly_full_charge_day")
+        # Bridge like a normal day (margin, blend, synthetic ramp, hourly walk), never below
+        # the bare "charge to solar start" bridge — a 7-14 kWh forecast can't fill the battery
+        # from PV alone, so the bare bridge used to leave the morning short (phase 126).
+        bare = bridge_soc(hours_to_solar * avg_consumption_kw, battery_capacity_kwh)
+        bridged = _bridge_decision(
+            hours_to_solar, avg_consumption_kw, battery_capacity_kwh, low_solar_forecast_kwh,
+            hourly_forecast_kwh, hourly_correction, synthetic_profile,
+        )
+        if bridged.target_soc < bare:
+            return TargetDecision(bare, "weekly_full_charge_day_bridge")
+        bridged.reason = "weekly_full_charge_day_bridge"
+        return bridged
 
     if low_solar:
         if band == "winter_like":
             return TargetDecision(100, "low_solar_override_winter_like")
         return TargetDecision(95, "low_solar_override")
 
+    if hourly_forecast_kwh or hours_to_solar is not None:
+        return _bridge_decision(
+            hours_to_solar, avg_consumption_kw, battery_capacity_kwh, low_solar_forecast_kwh,
+            hourly_forecast_kwh, hourly_correction, synthetic_profile,
+        )
+
+    # sun.sun unavailable — band-based fallback.
+    return TargetDecision({"winter_like": 95, "summer_like": 80}.get(band, 85), band)
+
+
+def _bridge_decision(
+    hours_to_solar: float | None,
+    avg_consumption_kw: float,
+    battery_capacity_kwh: float,
+    low_solar_forecast_kwh: float,
+    hourly_forecast_kwh: dict[int, float] | None,
+    hourly_correction: float,
+    synthetic_profile: dict[int, float] | None,
+) -> TargetDecision:
+    """The normal day's bridge target: hourly walk if available, else the simple bridge + ramp.
+
+    Shared by select_target_soc's normal-day and full-charge-day (phase 126) branches.
+    """
     if hourly_forecast_kwh:
         gap, bridge_hour = walk_bridge_gap(hourly_forecast_kwh, avg_consumption_kw, hourly_correction)
         return blend_toward_full(TargetDecision(
@@ -181,24 +212,20 @@ def select_target_soc(
             hourly_forecast_used=True, bridge_hour=bridge_hour,
         ), low_solar_forecast_kwh)
 
-    if hours_to_solar is not None:
-        # Simple bridge assumes solar covers load the instant the sun is up; the
-        # synthetic ramp tops it up on slow-ramp mornings.
-        decision = TargetDecision(
-            bridge_soc(hours_to_solar * avg_consumption_kw * BRIDGE_LOAD_MARGIN, battery_capacity_kwh),
-            "solar_bridge",
-        )
-        if synthetic_profile is not None:
-            gap, decision.bridge_hour = walk_bridge_gap(synthetic_profile, avg_consumption_kw)
-            ramp = bridge_soc(gap, battery_capacity_kwh)
-            if ramp > decision.target_soc:
-                decision.target_soc = ramp
-                decision.reason = "solar_bridge_ramp"
-                decision.synthetic_ramp = True
-        return blend_toward_full(decision, low_solar_forecast_kwh)
-
-    # sun.sun unavailable — band-based fallback.
-    return TargetDecision({"winter_like": 95, "summer_like": 80}.get(band, 85), band)
+    # Simple bridge assumes solar covers load the instant the sun is up; the
+    # synthetic ramp tops it up on slow-ramp mornings.
+    decision = TargetDecision(
+        bridge_soc(hours_to_solar * avg_consumption_kw * BRIDGE_LOAD_MARGIN, battery_capacity_kwh),
+        "solar_bridge",
+    )
+    if synthetic_profile is not None:
+        gap, decision.bridge_hour = walk_bridge_gap(synthetic_profile, avg_consumption_kw)
+        ramp = bridge_soc(gap, battery_capacity_kwh)
+        if ramp > decision.target_soc:
+            decision.target_soc = ramp
+            decision.reason = "solar_bridge_ramp"
+            decision.synthetic_ramp = True
+    return blend_toward_full(decision, low_solar_forecast_kwh)
 
 
 def apply_soc_adjustments(target_soc: int, drain_adjustment: int, evening_adjustment: int) -> int:
@@ -337,18 +364,38 @@ def learned_measured_rate(
     return round(_percentile(warm, MEASURED_RATE_PERCENTILE), 2), False
 
 
-def flux1_end_minutes(energy_needed_kwh: float, charge_rate_kw: float) -> int:
-    """Minutes after midnight the 02:00 import window should end.
+FLUX1_START_MINUTES = 2 * 60
 
-    Rounded up to the next 15-minute slot, clamped to 02:15-05:00 (anything
-    shorter than 15 minutes isn't worth the API call).
+FLUX1_WINDOW_END_MINUTES = 5 * 60
+
+
+def flux1_end_minutes(
+    energy_needed_kwh: float, charge_rate_kw: float, start_minutes: int = FLUX1_START_MINUTES
+) -> int:
+    """Minutes after midnight the import window should end, counting from `start_minutes`.
+
+    `start_minutes` is 02:00 by default, or "now" for a re-plan already inside the window
+    (phase 126): sizing always from 02:00 regardless of when the plan actually runs left a
+    mid-window re-plan's end time already in the past, cutting the charge short the moment it
+    was pushed. Rounded up to the next 15-minute slot, clamped to start+15..05:00 (anything
+    shorter than 15 minutes isn't worth the API call; 05:00 last, so a start after 04:45 never
+    pushes an end past the window).
     """
     raw_minutes = (energy_needed_kwh / charge_rate_kw) * 60
-    quarter_slots = math.ceil(raw_minutes / 15 - 1e-9)
-    return max(2 * 60 + 15, min(5 * 60, 2 * 60 + quarter_slots * 15))
+    end = math.ceil((start_minutes + raw_minutes) / 15 - 1e-9) * 15
+    # 05:00 clamps last: a start already late in the window (e.g. 04:50) must not push the end
+    # past 05:00, even though start+15 alone would exceed it.
+    return min(FLUX1_WINDOW_END_MINUTES, max(start_minutes + 15, end))
 
 
-FLUX1_START_MINUTES = 2 * 60
+def flux1_replan_start_minutes(now_minutes: int) -> int:
+    """Where to size tonight's remaining charge from: `now` inside the window, else 02:00.
+
+    A startup plan outside 02:00-05:00 (e.g. a daytime reload) is sizing tonight's *next* charge,
+    not resuming one in progress, so it keeps the 02:00 default rather than "now"."""
+    if FLUX1_START_MINUTES < now_minutes < FLUX1_WINDOW_END_MINUTES:
+        return now_minutes
+    return FLUX1_START_MINUTES
 
 
 def charge_efficiency(config_rate_kw: float, effective_rate_kw: float | None) -> float:
@@ -364,16 +411,17 @@ def charge_efficiency(config_rate_kw: float, effective_rate_kw: float | None) ->
 
 
 def window_grid_kwh(
-    energy_needed_kwh: float, efficiency: float, window_load_kw: float, end_minutes: int
+    energy_needed_kwh: float, efficiency: float, window_load_kw: float, end_minutes: int,
+    start_minutes: int = FLUX1_START_MINUTES,
 ) -> tuple[float, float]:
-    """Return (window_load_kwh, grid_kwh_needed) for a 02:00→end window.
+    """Return (window_load_kwh, grid_kwh_needed) for a start→end window.
 
     House load during the window is served from the grid in parallel with the
     battery charge, so it adds grid kWh but not window time (the drain
     adjustment already covers charge-end to 06:00). Losses lengthen the window
-    via `flux1_end_minutes(energy_needed_kwh / efficiency, rate)`.
+    via `flux1_end_minutes(energy_needed_kwh / efficiency, rate, start_minutes)`.
     """
-    window_load_kwh = window_load_kw * max(0, end_minutes - FLUX1_START_MINUTES) / 60
+    window_load_kwh = window_load_kw * max(0, end_minutes - start_minutes) / 60
     return round(window_load_kwh, 2), round(energy_needed_kwh / efficiency + window_load_kwh, 2)
 
 
@@ -510,20 +558,38 @@ def charge_progress_ok(
 
 STARTUP_PLAN_SOURCE = "startup"
 
+GRID_RESTORED_PLAN_SOURCE = "grid_restored"
+
 NIGHTLY_PLAN_MINUTES = 1 * 60 + 55
+
+NIGHTLY_PLAN_WINDOW_END_MINUTES = 5 * 60  # matches the cheap import window end, 05:00
 
 
 def should_log_import_plan(source: str, now: datetime) -> bool:
     """Whether a plan run is tonight's record for the JSONL log.
 
-    The log keeps the first plan per date, so a startup/reload plan before
-    01:55 would displace the real nightly plan (and its 01:55 SOC) from
-    pairing. Later startup plans are harmless: the 01:55 record already won,
-    or — if HA was down at 01:55 — it is the plan the inverter actually ran.
+    The log keeps the first plan per date, so a re-plan before 01:55 would displace the real
+    nightly plan (and its 01:55 SOC) from pairing — ``automatic`` is always logged (it only runs
+    at 01:55). A startup or grid_restored re-plan is logged only from 01:55 up to the 05:00 window
+    end (phase 126): earlier than that it would wrongly replace a plan not yet made; from 05:00 on,
+    that night's charge already ran on whatever was pushed before, so a later re-plan is tomorrow
+    night's setup, not a sample of tonight's — it must not be paired as one.
     """
-    if source != STARTUP_PLAN_SOURCE:
+    if source not in (STARTUP_PLAN_SOURCE, GRID_RESTORED_PLAN_SOURCE):
         return True
-    return now.hour * 60 + now.minute >= NIGHTLY_PLAN_MINUTES
+    minutes = now.hour * 60 + now.minute
+    return NIGHTLY_PLAN_MINUTES <= minutes < NIGHTLY_PLAN_WINDOW_END_MINUTES
+
+
+def nightly_plan_catch_up_due(nightly_date: str | None, last_date: str | None, today: str) -> bool:
+    """Whether the 02:00 safety net should run tonight's plan (phase 126).
+
+    True only when no plan has been logged for `today` yet — the 01:55 listener never fired
+    (the UK spring clock change skips the non-existent 01:00-01:59 wall time) or HA was down
+    across it. On an ordinary night, or the autumn night the listener fires twice, the 01:55
+    plan is already dated today and this is False.
+    """
+    return nightly_date != today and last_date != today
 
 
 def daily_report_plans(nightly: dict[str, Any], latest: dict[str, Any], date: str) -> list[dict[str, Any]]:
@@ -743,6 +809,13 @@ def explain_plan(plan: dict[str, Any] | None, shadow: dict[str, Any] | None = No
     low_txt = f"{low:.1f} kWh" if low is not None else "the forecast"
     if reason == "weekly_full_charge_day":
         out.append(f"Target {target:.0f}%: this is the weekly full-charge day, so the battery is charged for the scoring run.")
+    elif reason == "weekly_full_charge_day_bridge":
+        hour = plan.get("bridge_hour")
+        until = f" until solar covers the house around {int(hour):02d}:00" if isinstance(hour, int) else " until solar takes over"
+        out.append(
+            f"Target {target:.0f}%: this is the weekly full-charge day, but today's solar can't fill the battery "
+            f"from empty, so it bridges{until} like a normal night (100% may not be reached)."
+        )
     elif reason == "low_solar_override_winter_like":
         out.append(
             f"Target {target:.0f}%: low-solar winter night — the pessimistic forecast of {low_txt} is below the "
@@ -772,11 +845,13 @@ def explain_plan(plan: dict[str, Any] | None, shadow: dict[str, Any] | None = No
     drain, evening = _num(plan.get("overnight_drain_adjustment")), _num(plan.get("soc_adjustment"))
     if drain:
         out.append(f"+{drain:.0f}% for overnight drain learned from past nights.")
-    if evening:
-        out.append(f"{evening:+.0f}% evening nudge from how past days ended.")
     feedback = _num(plan.get("import_feedback_adjustment"))
+    live = bool(plan.get("import_feedback_live"))
+    # With import feedback live, that adjustment replaces the evening nudge (phase 126): showing
+    # both as if both were added overstates the target.
+    if evening and not live:
+        out.append(f"{evening:+.0f}% evening nudge from how past days ended.")
     if feedback:
-        live = plan.get("import_feedback_live")
         out.append(f"Import feedback suggests {feedback:+.0f}% ({'applied' if live else 'logged only'}).")
     if plan.get("free_event_capped"):
         out.append("Capped by a free-electricity event, which will refill the battery.")

@@ -497,3 +497,23 @@ def scale_hourly(hourly: dict[int, float] | None, ratio: float | None) -> dict[i
     if hourly is None or not _is_number(ratio):
         return hourly
     return {h: kwh * ratio for h, kwh in hourly.items()}
+
+
+def parse_naive_hourly_forecast(raw: dict, today_iso: str) -> dict[int, float] | None:
+    """Parse a Forecast.Solar-style hourly attribute ({"YYYY-MM-DD HH:MM:SS": kwh, ...}; naive,
+    local) into {hour: kWh}, kept to `today_iso` only.
+
+    Kept to one date (phase 126): an attribute covering more than one date (today and tomorrow)
+    would otherwise add the same hour across dates and understate the morning solar gap.
+    """
+    hourly: dict[int, float] = {}
+    for key, val in raw.items():
+        key_str = str(key)
+        if key_str[:10] != today_iso:
+            continue
+        try:
+            hour = int(key_str.split(" ")[1].split(":")[0]) if " " in key_str else int(key_str.split("T")[1].split(":")[0])
+            hourly[hour] = hourly.get(hour, 0.0) + float(val)
+        except (ValueError, IndexError):
+            continue
+    return hourly if hourly else None

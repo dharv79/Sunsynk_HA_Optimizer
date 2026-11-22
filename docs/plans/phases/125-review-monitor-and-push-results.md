@@ -1,6 +1,6 @@
 # Phase 125: Review fixes: monitor mode and push results
 
-Status: In progress
+Status: Done, merged (cc4d92d, PR #245)
 
 ## Why
 
