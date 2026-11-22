@@ -157,3 +157,21 @@ Monthly (first-Sunday catch-up in `_async_monthly_reports`). `planning.shiftable
 ## Savings ledger (phase 118, 16/11/2026)
 
 `planning/savings.py` keeps `{date: [no_system_gbp, actual_gbp, basis]}` in `savings_ledger` (state, not pruned with the logs). The 22:00 day-KPI run adds the day (`day`, that day's rates). `async_run_savings_backfill` runs once at startup and adds every stored snapshot day at today's rates (`est`); free-event days and incomplete days are skipped. `savings_total` (all-time, per month) feeds `sensor.savings_total`, the "Savings by month" dashboard card and the Sunday line "Saved in total since …".
+
+## Review fixes: reports and digest (22/11/2026, phase 129)
+
+**Scorecard capacity window.** The weekly scorecard and shadow scorecard loaded only `SCORECARD_WINDOW_DAYS + 2` (32) days of records, but the capacity feature inside `shadow_scorecard` looks back 70 days. New `kpis.CAPACITY_SCORECARD_WINDOW_DAYS = 70` replaces the magic number; both loads now use `max(SCORECARD_WINDOW_DAYS, CAPACITY_SCORECARD_WINDOW_DAYS) + 2`, so capacity no longer reads `no_records` after a gap of more than 32 days.
+
+**Monthly report retry (locked decision: per-report, the documented behaviour).** `_guarded` swallowed each report's exception, after which the whole month was marked sent regardless of which reports actually succeeded. `coordinator.OptimizerState` gained `monthly_reports_sent: dict[str, str]` (report name → month sent); `_async_monthly_reports` tracks each of the six reports separately, and a failed report isn't marked sent — it retries on its own next run. The month-level gate only advances once every report has succeeded.
+
+**Bill reconciliation.** A `£0` bill with partial-but-sufficient coverage raised a `TypeError` formatting `gap_per_day_pct` (correctly `None` at zero billed) with `:+.1f`; guarded with an `elif ... is not None`. Reconciliation also switched from `async_load_paired_days` to `cost_days_from_records` (see `octopus-cost.md`), so a day with a logged Octopus cost but no import_plan/day_actuals still counts. Monthly battery value's fixed `days=40` window is now computed dynamically back to the 1st of the report month, so a late catch-up run no longer misses the start of the month.
+
+**Stale digest resend.** New `_fresh_weekly_digest()` returns `{}` unless `weekly_digest["date"]` is today; used by both the weekly cost-summary notification and the AI weekly insight prompt, so a failed Sunday digest no longer presents last week's figures as this week's.
+
+**`export_data` blocking I/O.** CSV building (including redaction) now happens inside the executor-job closure, not on the event loop.
+
+**`kpi_week_over_limit_import` always unknown.** `over_limit_import_kwh` was missing from `DAY_KPI_FIELDS`, so `week_kpis` never summed it; added.
+
+**Weekly import-cause £ (locked decision).** `digest.weekly_import_causes` now prices free-event kWh at 0 (shown explicitly, excluded from the `gbp` accumulation) and divides the day's spend by paid kWh only (`imported − free_kwh`), not total imported.
+
+See `docs/plans/phases/129-review-logging-reports.md`.

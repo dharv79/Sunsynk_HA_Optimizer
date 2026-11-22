@@ -38,6 +38,24 @@ def test_last_cause_record_for_a_date_wins(planning):
     assert planning.weekly_import_causes(records, [], START, END)["kwh"] == {"grid_charge": 5.0}
 
 
+def test_import_causes_prices_free_event_at_zero_over_paid_kwh(planning):
+    # 10 kWh/day total, 4 of it free; £2 paid for the remaining 6 kWh paid -> 1/3/kWh paid price.
+    records = [_cause("2026-11-06", grid_charge=6.0, free_event=4.0)]
+    days = [{"date": "2026-11-06", "actual_import_cost_gbp": 2.0, "day_grid_import_kwh": 10.0}]
+    out = planning.weekly_import_causes(records, days, START, END)
+    assert out["kwh"] == {"grid_charge": 6.0, "free_event": 4.0}
+    # free_event is explicitly priced at 0, never averaged in; 6 paid kWh for £2 -> 1/3/kWh for grid_charge.
+    assert out["gbp"] == {"grid_charge": 2.0, "free_event": 0.0}
+    assert out["priced_days"] == 1
+
+
+def test_import_causes_free_event_covering_all_import_leaves_price_unknown(planning):
+    records = [_cause("2026-11-06", free_event=10.0)]
+    days = [{"date": "2026-11-06", "actual_import_cost_gbp": 0.0, "day_grid_import_kwh": 10.0}]
+    out = planning.weekly_import_causes(records, days, START, END)
+    assert out["gbp"] is None and out["priced_days"] == 0
+
+
 def _outcome(date, target, reached, cause=None):
     return {"type": "charge_outcome", "date": date, "target_soc": target, "reached_soc": reached,
             "shortfall_pct": round(target - reached, 1), "likely_cause": cause}

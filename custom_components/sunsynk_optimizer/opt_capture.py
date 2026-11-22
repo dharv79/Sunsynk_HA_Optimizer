@@ -84,6 +84,31 @@ from .opt_common import (
     _octopus_oldest_date,
 )
 
+
+def cost_days_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """{date, cost fields, net_cost_gbp} for every logged daily_cost record.
+
+    Unlike the import_plan/day_actuals join (data_logger._pair_records), this
+    requires nothing but a settled daily_cost record for the date — year-to-date
+    and "latest complete" cost must still count a day whose plan or actuals
+    capture failed, or hasn't run yet, since those figures depend only on the
+    settled Octopus cost sensors (phase 129). Keeps the last daily_cost record
+    per date, matching _pair_records' own "last record per date" behaviour.
+    """
+    by_date: dict[str, dict[str, Any]] = {}
+    for r in records:
+        if r.get("type") == "daily_cost" and "date" in r:
+            by_date[r["date"]] = r
+    return [
+        {
+            "date": date,
+            **{k: rec.get(k) for k in DAILY_COST_FIELDS},
+            "net_cost_gbp": net_cost_gbp(*(rec.get(k) for k in DAILY_COST_FIELDS)),
+        }
+        for date, rec in by_date.items()
+    ]
+
+
 class CaptureMixin:
     """06:00/22:00 captures, meter snapshots, KPIs, daily cost, hourly profile (methods of SunsynkOptimizer)."""
 
@@ -394,10 +419,13 @@ class CaptureMixin:
         cross-check against the SOC-derived overnight_drain_pct.
         """
         soc = self._essential_state(self.battery_soc_entity)
-        pv_power = (
-            self._state_float(self.pv_mppt0_entity, 0)
-            + self._state_float(self.pv_mppt1_entity, 0)
-        )
+        # Phase 129: either MPPT unavailable must read as None, not a partial/zero
+        # sum — a true reading of "0 W, no solar yet" and "sensor unavailable" are
+        # otherwise indistinguishable, and the downstream drain-learning gate (data_logger.py)
+        # treats <200 W as a confirmed-negligible-solar reading; a fake 0 would pass it.
+        mppt0 = self._essential_state(self.pv_mppt0_entity)
+        mppt1 = self._essential_state(self.pv_mppt1_entity)
+        pv_power = None if mppt0 is None or mppt1 is None else mppt0 + mppt1
         overnight_load_kwh = self._essential_state(self.day_load_entity)
         date = dt_util.now().date().isoformat()
         await self.data_logger.async_log_morning_state(
@@ -412,7 +440,7 @@ class CaptureMixin:
                 "type": "morning_state",
                 "date": date,
                 "morning_soc": round_or_none(soc, 1),
-                "morning_pv_power": round(pv_power, 1),
+                "morning_pv_power": round_or_none(pv_power, 1),
                 "overnight_load_kwh": round_or_none(overnight_load_kwh),
             },
         )
@@ -459,18 +487,21 @@ class CaptureMixin:
             }
             self.coordinator.update_state(touch=False, last_daily_cost=shown)
 
-        # Recompute year-to-date net cost from the full paired-day history.
+        # Recompute year-to-date net cost from every settled daily_cost record —
+        # not async_load_paired_days, whose plan+actuals intersection exists for
+        # the drain/nudge learning, not for cost; a day whose plan or actuals
+        # capture failed (or hasn't run yet) must still count here (phase 129).
         # 366 days comfortably covers a rolling year within the 13-month
         # retention window; filtering to the current calendar year below is
         # what actually bounds it to "this year", not the day count.
         now = dt_util.now()
-        paired_days = await self.data_logger.async_load_paired_days(days=366)
+        cost_days = cost_days_from_records(await self.data_logger.async_load_records(366))
         self.coordinator.update_state(
             touch=False,
-            last_complete_daily_cost=latest_complete_cost_day(paired_days, _octopus_oldest_date(now)) or {},
+            last_complete_daily_cost=latest_complete_cost_day(cost_days, _octopus_oldest_date(now)) or {},
         )
         year_days = [
-            d for d in paired_days
+            d for d in cost_days
             if d.get("net_cost_gbp") is not None and str(d.get("date", "")).startswith(str(now.year))
         ]
         if year_days:
@@ -560,17 +591,23 @@ class CaptureMixin:
         too_high = overnight_target_too_high(clipped_kwh, clipped.get("first_full_hour"))
         derated = self._derated if self._derated.get("date") == date else {}
         derated_min = derated.get("minutes") if derated.get("seen") else None  # None: voltage never read
-        await self.data_logger.async_log_day_actuals(
-            date=date,
-            evening_soc=soc,
-            actual_solar_kwh=actual_solar_kwh,
-            evening_export_disabled=evening_export_disabled,
-            day_load_kwh=day_load_kwh,
-            day_grid_import_kwh=day_grid_import_kwh,
-            day_grid_export_kwh=day_grid_export_kwh,
-            clipped_solar_kwh=clipped_kwh,
-            overnight_target_too_high=too_high,
-            export_derated_min=derated_min,
+        # Phase 129: each sub-capture below is independently guarded, so one
+        # exception (e.g. a bad API read) can't take last_day_actuals, a later
+        # sub-capture or the debug bundle down with it.
+        await self._guarded(
+            lambda: self.data_logger.async_log_day_actuals(
+                date=date,
+                evening_soc=soc,
+                actual_solar_kwh=actual_solar_kwh,
+                evening_export_disabled=evening_export_disabled,
+                day_load_kwh=day_load_kwh,
+                day_grid_import_kwh=day_grid_import_kwh,
+                day_grid_export_kwh=day_grid_export_kwh,
+                clipped_solar_kwh=clipped_kwh,
+                overnight_target_too_high=too_high,
+                export_derated_min=derated_min,
+            ),
+            "Day actuals log",
         )
         # After day_actuals is safely logged; before the bundle so its cost lines are fresh.
         await self._guarded(self._async_capture_daily_cost, "Daily cost capture")
@@ -587,10 +624,10 @@ class CaptureMixin:
             "overnight_target_too_high": too_high,
             "export_derated_min": derated_min,
         }
-        kpi_rec = await self._async_capture_day_kpis(date)
+        kpi_rec = await self._guarded(lambda: self._async_capture_day_kpis(date), "Day KPIs capture")
         await self._guarded(lambda: self._async_capture_load_vs_expected(date, day_load_kwh), "Load vs expected")
-        floor_rec = await self._async_review_battery_floor(date)
-        hourly_rec = await self._async_log_hourly_profile(date)
+        floor_rec = await self._guarded(lambda: self._async_review_battery_floor(date), "Battery floor review")
+        hourly_rec = await self._guarded(lambda: self._async_log_hourly_profile(date), "Hourly profile log")
         await self._guarded(lambda: self._async_capture_pv_strings(date), "PV string capture")
         api_rec: dict[str, Any] = {}
         health_rec: dict[str, Any] = {}

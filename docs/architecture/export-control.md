@@ -362,3 +362,17 @@ the 16:00 slot to 100% by design. Tests: `test_planning.py`
 - **Spare-solar estimate.** An unavailable SOC used to count as a full battery (`headroom = 0.0`), so the 06:05 notification could suggest running appliances on solar that would actually charge the battery. `_refresh_spare_solar` now returns `{"total_kwh": None, "hours": [], "window": None, "date": today}` when SOC is unavailable (rule 11).
 
 Verification: new/updated HA-free tests — `tests/test_planning.py`, `tests/test_kpis.py`, `tests/test_peak_cover.py` for the pure logic; `tests/test_daytime_review_fixes.py` (AST-based, same technique as `test_overnight_review_fixes.py`) for the parts only expressible against the optimizer's own source. `pytest`, `py_compile` and `pyflakes` green in CI.
+
+## Review fixes: monitor, settings audit and shadow (22/11/2026, phase 129)
+
+**Drift check.** `_async_read_flux_drift`/`_async_read_current_drift` now return `None` (not `[]`) on a transient read exception — distinct from `[]` ("checked, no drift"). `async_run_drift_check` treats either `None` as "skip this check", leaving an existing drift episode alone instead of clearing it (and later re-alerting once the read succeeds). The recurring `DRIFT_CHECK_INTERVAL_HOURS` timer and the one-shot post-push timer used to share `_async_drift_check`, which unconditionally reset `self._drift_check_unsub = None` — whichever fired second clobbered the other's tracked handle, orphaning a still-pending real HA timer. Split into `_async_drift_check` (one-shot, owns the handle) and `_async_periodic_drift_check` (recurring, touches nothing); `async_track_time_interval` now points at the latter.
+
+**Inverter fault flag.** `async_check_inverter_events` now falls back to the last stored `battery_health.latest` snapshot when this cycle's workdata read fails, instead of feeding `health_fault_flag(None)` and silently clearing a real fault bit on a transient read failure.
+
+**Morning-brief release.** `_async_do_release_held` used to unconditionally clear `held_notifications` to `[]` after sending, discarding anything appended by a concurrent `async_notify` while the brief's own send was in flight. It now slices off only the items the brief actually included.
+
+**Weekly settings audit (locked decision).** `AUDIT_IGNORE_KEYS` now also ignores the Flux timer-slot keys (`sellTimeN`, `capN`, `timeNon` for N=1-6, from `shadow._tou_setting_keys`/`TOU_SLOT_COUNT`) — the integration's own routine Flux writes were being reported as "changed outside this integration". `sellTimeNPac` (power limit) stays audited.
+
+**Flex-event shadow dedup.** For a plain on/off flex-event entity (no calendar `start_time`), the old dedup key fell back to `now`, which changes every 30-minute poll — the shadow logged/posted every poll for the whole event instead of once. Now keyed on `f"{entity}:{state.last_changed.isoformat()}"`, which only changes when the entity itself transitions.
+
+See `docs/plans/phases/129-review-logging-reports.md`. The dynamic-tariff shadow horizon-mismatch fix is in `import-plan.md`.

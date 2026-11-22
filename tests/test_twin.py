@@ -45,6 +45,20 @@ def test_target_uses_real_planner_and_offset(planning):
     assert planning.twin_target({**PLAN, "solar_forecast_kwh": None, "raw_forecast_kwh": None}, dict(planning.TWIN_DEFAULTS)) is None
 
 
+def test_target_reads_logged_is_full_day_not_recomputed_flags(planning):
+    """Phase 129: the twin must use the plan's logged is_full_day outcome, not re-derive it from
+    full_charge_due/full_charge_skip_would — those can disagree with what the real planner actually did.
+    """
+    low_solar_plan = {"solar_forecast_kwh": 3.0, "raw_forecast_kwh": 3.0, "forecast_band": "shoulder",
+                       "hours_to_solar": 4.0, "avg_consumption_kw": 0.5}
+    # Logged as a full-charge day, even though the raw ingredients would have said otherwise.
+    full = {**low_solar_plan, "is_full_day": True, "full_charge_due": False, "full_charge_skip_would": True}
+    assert planning.twin_target(full, dict(planning.TWIN_DEFAULTS)) == 100
+    # Logged as NOT a full-charge day, even though the raw ingredients would have said otherwise.
+    not_full = {**low_solar_plan, "is_full_day": False, "full_charge_due": True, "full_charge_skip_would": False}
+    assert planning.twin_target(not_full, dict(planning.TWIN_DEFAULTS)) == 95
+
+
 def test_run_charges_to_target_then_discharges(planning):
     slots = [{"minute": m, "band": "offpeak" if m < 300 else "day", "load_kwh": 0.2, "solar_kwh": 0.0}
              for m in range(120, 22 * 60, 30)]

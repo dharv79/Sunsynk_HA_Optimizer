@@ -145,6 +145,9 @@ class OptimizerState:
     load_profile: dict[str, Any] = field(default_factory=dict)
     # Month (YYYY-MM) the monthly reports last covered; None until the first send (phase 57).
     last_monthly_report_month: str | None = None
+    # {report key: YYYY-MM it was last sent for} (phase 129): lets a failed monthly report
+    # retry on its own without resending reports that already went out this month.
+    monthly_reports_sent: dict[str, str] = field(default_factory=dict)
     # Today's 16:00 peak export decision (phase 17). Persisted so a restart
     # keeps the 22:00 debug line and a live export's hold on Flux 2.
     peak_export: dict[str, Any] = field(default_factory=dict)

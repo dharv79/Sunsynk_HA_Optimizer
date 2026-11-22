@@ -25,3 +25,11 @@ Moved verbatim from CLAUDE.md (26/09/2026). Read only when changing this area.
 Phase 33. At 06:10, `async_run_tariff_price_check` reads each Flux band from the Octopus rate entities (`_octopus_band_prices`, shared with `_tariff_prices`). It compares them with the configured `charges` (`kpi_prices_pence`) using `planning.tariff_price_changes`, with a 0.05p tolerance. A band missing or `None` on either side is ignored. There is no check when no rate entity is configured.
 
 Each new set of changes sends one notification, "🔋 Sunsynk: Flux prices changed", listing old → new per band. The set is stored in `state.tariff_price_alert` with a signature, and a matching read clears it. While the set is non-empty, the monthly tariff comparison flags that its Flux figures come from stale tariff rows. Decisions already price from Octopus where an entity exists (phase 18); the alert is about keeping `charges` (the fallback and the Sunsynk income figures) current. Test: `test_tariff_price_changes`.
+
+## Review fixes: cost days and tariff alert (22/11/2026, phase 129)
+
+**Year-to-date and latest-complete cost dropped days with no import_plan/day_actuals.** Both fed from `async_load_paired_days`, whose join requires a day to have *both* an `import_plan` and a `day_actuals` record — correct for drain/nudge learning, wrong for cost, which only needs a `daily_cost` record. New pure helper `opt_capture.cost_days_from_records(records)` keys off `daily_cost` records alone (keeping the last per date, computing `net_cost_gbp`); `_async_capture_daily_cost` now calls it against `async_load_records(366)` directly. Bill reconciliation (`weekly-reports.md`) switched to the same source for the same reason.
+
+**Tariff alert cleared on a merely-unavailable Octopus read.** `async_run_tariff_price_check` computed `changes = []` (clearing any existing alert) whenever every configured band's Octopus price came back `None` — indistinguishable from "no entity configured" (already short-circuited separately) but actually meaning "entity exists, temporarily unavailable". Added a guard: if every band price is `None`, leave any existing alert alone instead of clearing it.
+
+See `docs/plans/phases/129-review-logging-reports.md`.

@@ -96,6 +96,7 @@ from .planning import (
     octopus_region,
     tariff_vat_percent,
     battery_value_summary,
+    CAPACITY_SCORECARD_WINDOW_DAYS,
     upgrade_advisor,
     upgrade_summary,
     UPGRADE_HISTORY_DAYS,
@@ -118,23 +119,52 @@ BACKFILL_DAYS = 400  # a little over the 13 months of retained logs (phase 118)
 class ReportsMixin:
     """Weekly summary, AI insight, monthly reports, bill reconciliation, advisors (methods of SunsynkOptimizer)."""
 
+    _MONTHLY_REPORT_KEYS = (
+        "tariff_comparison", "battery_value", "shiftable_report",
+        "load_report", "upgrade_advisor", "capacity_estimate",
+    )
+
     async def _async_monthly_reports(self) -> None:
         """Send last month's reports once, catching up a missed first Sunday (phase 57).
 
-        State is written only after the sends, so a failure retries at the next
-        18:00 or startup. Each report keeps its own error handling via _guarded.
+        Each report is tracked separately in `monthly_reports_sent` (phase 129), so one that
+        fails retries on its own at the next 18:00 or startup without resending reports that
+        already went out this month; `_guarded` still logs and surfaces the failure.
+        `last_monthly_report_month` gates the whole function and is only set once every
+        report for the month has succeeded, so this stops running once it's done.
         """
         today = dt_util.now().date()
         if not monthly_report_due(self.coordinator.state.last_monthly_report_month, today):
             return
-        await self._guarded(lambda: self._async_send_monthly_tariff_comparison(force=True), "Monthly tariff comparison")
-        await self._guarded(lambda: self._async_send_monthly_battery_value(force=True), "Monthly battery value")
-        await self._guarded(self._async_send_shiftable_report, "Shiftable-load report")
-        await self._guarded(self._async_send_load_report, "Weather-normalised load report")
-        await self._guarded(self._async_send_upgrade_advisor, "Upgrade advisor")
-        await self._guarded(self.async_run_capacity_estimate, "Battery capacity estimate")
         report_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
-        self.coordinator.update_state(last_monthly_report_month=report_month)
+        sent = dict(self.coordinator.state.monthly_reports_sent)
+
+        async def _send(key: str, factory, label: str) -> None:
+            if sent.get(key) == report_month:
+                return
+            before = self._guarded_errors.get(label, 0)
+            await self._guarded(factory, label)
+            if self._guarded_errors.get(label, 0) == before:
+                sent[key] = report_month
+
+        await _send(
+            "tariff_comparison",
+            lambda: self._async_send_monthly_tariff_comparison(force=True),
+            "Monthly tariff comparison",
+        )
+        await _send(
+            "battery_value", lambda: self._async_send_monthly_battery_value(force=True), "Monthly battery value"
+        )
+        await _send("shiftable_report", self._async_send_shiftable_report, "Shiftable-load report")
+        await _send("load_report", self._async_send_load_report, "Weather-normalised load report")
+        await _send("upgrade_advisor", self._async_send_upgrade_advisor, "Upgrade advisor")
+        await _send("capacity_estimate", self.async_run_capacity_estimate, "Battery capacity estimate")
+
+        all_sent = all(sent.get(key) == report_month for key in self._MONTHLY_REPORT_KEYS)
+        self.coordinator.update_state(
+            monthly_reports_sent=sent,
+            last_monthly_report_month=report_month if all_sent else self.coordinator.state.last_monthly_report_month,
+        )
 
     async def _async_send_shiftable_report(self) -> None:
         """Monthly (phase 102): recurring daytime import blocks and what moving them to the cheap window is worth.
@@ -181,11 +211,14 @@ class ReportsMixin:
         folder = os.path.join(
             self.hass.config.path(EXPORT_DIR_NAME), dt_util.now().strftime("%Y%m%d-%H%M%S")
         )
-        files = {name: to_csv(rows, sensitive) for name, rows in tables.items()}
-        if summary and not types:
-            files[SUMMARY_FILE] = to_csv(summary, sensitive)
+        write_needed = bool(tables) or bool(summary and not types)
 
         def _write() -> list[str]:
+            # CSV building (incl. redaction) happens here too (phase 129): it's real work on
+            # a long export, not just the file write, so it must stay off the event loop.
+            files = {name: to_csv(rows, sensitive) for name, rows in tables.items()}
+            if summary and not types:
+                files[SUMMARY_FILE] = to_csv(summary, sensitive)
             os.makedirs(folder, exist_ok=True)
             paths = []
             for name in sorted(files):
@@ -195,7 +228,7 @@ class ReportsMixin:
                 paths.append(path)
             return paths
 
-        paths = await self.hass.async_add_executor_job(_write) if files else []
+        paths = await self.hass.async_add_executor_job(_write) if write_needed else []
         return {"folder": folder if paths else None, "files": paths, "from": first.isoformat(), "to": last.isoformat()}
 
     async def async_heatmap_data(self, kind: str, days: int) -> dict[str, Any]:
@@ -271,7 +304,9 @@ class ReportsMixin:
         """
         today = dt_util.now().date()
         start, end = trailing_week(today)
-        records = await self.data_logger.async_load_records(SCORECARD_WINDOW_DAYS + 2)
+        records = await self.data_logger.async_load_records(
+            max(SCORECARD_WINDOW_DAYS, CAPACITY_SCORECARD_WINDOW_DAYS) + 2
+        )
         paired = days_in_period(await self.data_logger.async_load_paired_days(days=WEEK_HISTORY_DAYS), start, end)
         verdicts = scorecard_verdicts(shadow_scorecard(records, today.isoformat()))
         trip = round_trip_measured(round_trip_intervals(records), self._capacity_kwh())
@@ -300,6 +335,15 @@ class ReportsMixin:
         text = system_value_text(digest["system_value"], self.coordinator.state.savings_total)
         if text:
             await self.async_notify("🔋 Sunsynk: last week with and without solar and battery", text)
+
+    def _fresh_weekly_digest(self) -> dict[str, Any]:
+        """This week's digest, or {} if `_async_weekly_digest` hasn't run (or failed) today (phase 129).
+
+        Without this, a failed Sunday digest left last week's stored digest in place, and the cost
+        summary and AI insight presented it as this week's rather than surfacing the gap.
+        """
+        digest = self.coordinator.state.weekly_digest
+        return digest if digest.get("date") == dt_util.now().date().isoformat() else {}
 
     async def _async_send_weekly_cost_summary(self) -> None:
         """Sunday 18:00: roll up the 7 complete days ending yesterday (Sun–Sat) and send it as JSON.
@@ -356,7 +400,7 @@ class ReportsMixin:
             "week_peak_export_gain_gbp": _sum("peak_export_gain_gbp"),
             "peak_export_live": bool(self.cfg.get(CONF_PEAK_EXPORT_LIVE, DEFAULT_PEAK_EXPORT_LIVE)),
             "api_health_week": api_week(self.coordinator.state.api_health_days),  # phase 101
-            "digest": self.coordinator.state.weekly_digest,  # phase 104
+            "digest": self._fresh_weekly_digest(),  # phase 104
             # Phase 37: days behind week_battery_saving_gbp.
             "battery_saving_days": battery_value_summary(paired_days)["days"],
         }
@@ -422,7 +466,7 @@ class ReportsMixin:
             f"solar generated {_sum('actual_solar_kwh')} kWh, "
             f"solar forecast {_sum('solar_forecast_kwh')} kWh. "
             f"Year-to-date net cost: £{ytd.get('net_cost_gbp', 'unknown')} over {ytd.get('days_counted', 0)} days. "
-            f"{digest_text(self.coordinator.state.weekly_digest)}"
+            f"{digest_text(self._fresh_weekly_digest())}"
         )
         instructions = (
             "You are reviewing one week of data for a home battery/solar optimiser on the Octopus "
@@ -489,9 +533,13 @@ class ReportsMixin:
         today = dt_util.now().date()
         if today.day > 7 and not force:
             return
-        month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        last_day_of_month = today.replace(day=1) - timedelta(days=1)
+        month = last_day_of_month.strftime("%Y-%m")
+        # A missed first Sunday is caught up later in the current month (phase 57's force=True),
+        # so the window must always reach back to that month's 1st, however late the catch-up runs.
+        history_days = (today - last_day_of_month.replace(day=1)).days + 2
         days = [
-            d for d in await self.data_logger.async_load_paired_days(days=40)
+            d for d in await self.data_logger.async_load_paired_days(days=history_days)
             if str(d.get("date", "")).startswith(month)
         ]
         summary = battery_value_summary(days)
@@ -564,7 +612,9 @@ class ReportsMixin:
         today = dt_util.now().date()
         if today.day > 7:
             return
-        records = await self.data_logger.async_load_records(SCORECARD_WINDOW_DAYS + 2)
+        records = await self.data_logger.async_load_records(
+            max(SCORECARD_WINDOW_DAYS, CAPACITY_SCORECARD_WINDOW_DAYS) + 2
+        )
         card = shadow_scorecard(records, today.isoformat())
         self.coordinator.update_state(touch=False, shadow_scorecard=card)
         data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
@@ -599,8 +649,10 @@ class ReportsMixin:
             start, end = f"{month}-01", f"{month}-{calendar.monthrange(year, mon)[1]:02d}"
         days_in_month = (date_cls.fromisoformat(end) - date_cls.fromisoformat(start)).days + 1
         include_gas = bool(self._cfg_str(CONF_OCTOPUS_GAS_COST_SENSOR))
+        # Cost days, not paired days (phase 129): a day with a logged Octopus cost but no matching
+        # import_plan/day_actuals record must still count towards the bill, same as year-to-date does.
         days = {
-            d["date"]: d for d in await self.data_logger.async_load_paired_days(days=100)
+            d["date"]: d for d in await self.data_logger.async_load_cost_days(100)
             if start <= str(d.get("date", "")) <= end
         }
         result = reconcile_month(
@@ -636,10 +688,10 @@ class ReportsMixin:
             )
             if result["partial"] and result["projected_logged_gbp"] is not None:
                 body += f" Projected to the full period: £{result['projected_logged_gbp']:.2f}"
-                body += (
-                    " (too few days logged to trust)." if result["coverage_low"]
-                    else f", {result['gap_per_day_pct']:+.1f}% off the bill."
-                )
+                if result["coverage_low"]:
+                    body += " (too few days logged to trust)."
+                elif result["gap_per_day_pct"] is not None:
+                    body += f", {result['gap_per_day_pct']:+.1f}% off the bill."
             if result["alert"]:
                 body += " Over £2: check credits, standing-charge or VAT changes, or a missed day's cost."
         title = "⚠️ Sunsynk: bill differs from logged cost" if result["alert"] else "🔋 Sunsynk: bill check for " + month

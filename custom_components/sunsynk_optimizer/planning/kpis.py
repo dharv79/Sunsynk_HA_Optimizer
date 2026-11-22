@@ -46,6 +46,7 @@ DAY_KPI_FIELDS = (
     "export_peak_kwh",
     "export_peak_gbp",
     "unused_charge_kwh",
+    "over_limit_import_kwh",  # phase 129: so week_kpis/digest can roll it up (kpi_week_over_limit_import)
     "battery_saving_gbp",  # phase 37
     "no_system_gbp",  # phase 117: the house load priced as if all of it came from the grid
     "system_actual_gbp",  # phase 117: metered import less export, same hours and prices
@@ -420,6 +421,10 @@ SCORECARD_HARM_GBP = 0.5
 
 SCORECARD_SILENT_DAYS = 14
 
+# phase 129: the capacity feature below looks back further than the rest of the scorecard, so a caller
+# must load at least this many days of records too, or the wider window it asks _in_window for is empty.
+CAPACITY_SCORECARD_WINDOW_DAYS = 70
+
 SCORECARD_ERROR_GAIN = 0.05  # weighted correction must beat the live factor by 5%
 
 SCORECARD_ERROR_LOSS = 0.10  # ...and is harmful if 10% worse
@@ -605,7 +610,7 @@ def shadow_scorecard(
         "measured round trip vs 0.85; delta is the £ the measured figure would have moved; changed = days the call flips",
     )
     # 34 capacity: latest estimate present and sampled.
-    caps_est = win("capacity_estimate", 70)
+    caps_est = win("capacity_estimate", CAPACITY_SCORECARD_WINDOW_DAYS)
     latest = caps_est[-1] if caps_est else {}
     est = latest.get("estimate_kwh")
     out["capacity"] = _score(len(caps_est), 0, None, [c["date"] for c in caps_est], "monthly estimate")

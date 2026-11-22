@@ -66,7 +66,16 @@ def fit_load_temp(rows: list[dict[str, Any]], min_days: int = LOAD_FIT_MIN_DAYS)
     base = my - slope * mx
     resid = [y - (base + slope * x) for x, y in zip(xs, ys)]
     sd = sqrt(sum(e * e for e in resid) / max(1, n - 2))
-    return {"base_kwh": round(base, 2), "slope_kwh_per_c": round(slope, 3), "sd_kwh": round(sd, 2), "days": n}
+    # Standard error of the fitted base load, so a shift can be judged against its own uncertainty
+    # rather than its raw size; the slope=0 (flat) case is just the standard error of the mean.
+    se_base = sd * sqrt(1 / n + mx * mx / var) if var >= 1.0 else sd / sqrt(n)
+    return {
+        "base_kwh": round(base, 2),
+        "slope_kwh_per_c": round(slope, 3),
+        "sd_kwh": round(sd, 2),
+        "se_base_kwh": round(se_base, 3),
+        "days": n,
+    }
 
 
 def expected_load(fit: dict[str, Any], temp_c: float) -> float:
@@ -130,6 +139,7 @@ def month_vs_fit(rows: list[dict[str, Any]], month: str) -> dict[str, Any] | Non
         "pct": round(pct, 1),
         "flag": flag,
         "base_kwh": own["base_kwh"] if own else None,
+        "se_base_kwh": own["se_base_kwh"] if own else None,
     }
 
 
@@ -146,15 +156,27 @@ def monthly_load_report(rows: list[dict[str, Any]], month: str) -> dict[str, Any
         return None
     last, last_year = month_vs_fit(rows, prior_month(month)), month_vs_fit(rows, prior_month(month, 12))
     base_shift = None
+    base_flag = False
     if last and this["base_kwh"] and last["base_kwh"]:
         base_shift = round((this["base_kwh"] - last["base_kwh"]) / last["base_kwh"] * 100, 1)
+        this_se, last_se = this.get("se_base_kwh"), last.get("se_base_kwh")
+        # Each month's own base_kwh is a small-sample fit; without a significance gate a shift
+        # this size is mostly noise in heating months, where base and slope are hard to separate.
+        if this_se is not None and last_se is not None:
+            diff_se = sqrt(this_se ** 2 + last_se ** 2)
+            # diff_se == 0 (a perfect, noise-free fit on both sides) is the most significant case,
+            # not the least: LOAD_FLAG_SIGMA * 0 == 0, so any genuine non-zero difference still flags.
+            base_flag = (
+                abs(base_shift) >= LOAD_BASE_SHIFT_PCT
+                and abs(this["base_kwh"] - last["base_kwh"]) >= LOAD_FLAG_SIGMA * diff_se
+            )
     return {
         "month": month,
         "this": this,
         "last": last,
         "last_year": last_year,
         "base_shift_pct": base_shift,
-        "base_flag": base_shift is not None and abs(base_shift) >= LOAD_BASE_SHIFT_PCT,
+        "base_flag": base_flag,
     }
 
 
@@ -173,4 +195,7 @@ def load_report_text(report: dict[str, Any] | None) -> str | None:
         )
     if report["base_flag"]:
         parts.append(f"the temperature-independent base load moved {report['base_shift_pct']:+.0f}% on last month")
-    return "; ".join(parts).capitalize() + ". Worth checking for a changed habit or a failing appliance."
+    text = "; ".join(parts)
+    # str.capitalize() lowercases the rest of the string too, turning "kWh" into "kwh"; just upper-case the first letter.
+    text = text[:1].upper() + text[1:]
+    return text + ". Worth checking for a changed habit or a failing appliance."

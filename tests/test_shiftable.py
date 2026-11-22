@@ -42,6 +42,30 @@ def test_fit_check_and_text(planning):
     assert planning.shiftable_text({"blocks": []}) is None
 
 
+def _days_with_starts(n, start_by_day, kwh=1.5):
+    out = {}
+    for k in range(1, n + 1):
+        day = [0.2] * 48
+        start = start_by_day.get(k)
+        if start is not None:
+            for i in (start, start + 1, start + 2):
+                day[i] += kwh / 3
+        out[(TODAY - timedelta(days=k)).isoformat()] = day
+    return out
+
+
+def test_clusters_do_not_chain_through_intermediate_blocks(planning):
+    # Four distinct block starts (10:00, 11:00, 12:00, 13:00 -> slots 20/22/24/26), each only two
+    # half-hours from its neighbour, on 4 different days. Comparing each new block to the LAST one
+    # added to the cluster lets 20->22->24->26 chain into a single cluster spanning 3 hours end to
+    # end, even though slot 20 and slot 26 are not within tolerance of each other. Anchoring every
+    # cluster to its first block instead means each genuine pair (20/22 and 24/26) only recurs on
+    # 2 of the 4 days -- below SHIFT_RECUR_DAYS -- so nothing should be reported.
+    days = _days_with_starts(20, {1: 20, 2: 22, 3: 24, 4: 26})
+    res = planning.shiftable_loads(days, BANDS, 15.0, TODAY)
+    assert res["blocks"] == []
+
+
 def test_cheap_window_and_bad_days_skipped(planning):
     days = _days(20, set(range(1, 11)))
     days["bad"] = [1.0] * 10

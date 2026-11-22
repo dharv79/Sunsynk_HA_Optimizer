@@ -14,9 +14,17 @@ from __future__ import annotations
 from typing import Any
 
 from .redact import _AUDIT_REDACT_PARTS, _REDACTED
+from .shadow import TOU_SLOT_COUNT, _tou_setting_keys
 
 # Keys that change on every read or that the integration writes itself, so are never a finding.
-AUDIT_IGNORE_KEYS = frozenset({"sdBatteryCurrent", "sn", "id"})
+# The Flux timer slots (sellTimeN / capN / timeNon, phase 73) are the integration's own normal
+# writes as it opens and closes windows; a weekly audit must not report its own work as a change
+# "outside this integration" (phase 129). sellTimeNPac (the power-limit variant, phase 115) is not
+# written by anything today, so it stays audited: a change there is real.
+AUDIT_IGNORE_KEYS = frozenset(
+    {"sdBatteryCurrent", "sn", "id"}
+    | {key for n in range(1, TOU_SLOT_COUNT + 1) for key in _tou_setting_keys(n)}
+)
 AUDIT_IGNORE_SUFFIXES = ("updatetime", "update_time", "createtime", "create_time", "updatedat", "createdat", "timestamp")
 AUDIT_MAX_LISTED = 12  # changes quoted in the notification; the log holds them all
 

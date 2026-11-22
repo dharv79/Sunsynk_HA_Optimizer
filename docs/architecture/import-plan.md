@@ -345,3 +345,19 @@ From the 21/11/2026 code review.
 - **Import-feedback display.** With `import_feedback_live` on, the notification and `explain_plan` used to show both the computed evening nudge and the applied import-feedback adjustment, reading as if both had been added. The evening-nudge line is now left out when feedback is live; only the feedback line shows, labelled "(applied)".
 
 Verification: `tests/test_planning.py`, `tests/test_explain_plan.py`, `tests/test_forecast_quantiles.py` (new/updated cases per item above); `tests/test_overnight_review_fixes.py` pins the outage/DST/fallback/hourly-forecast/weekday-scoring behaviour that lives in the optimizer's own instance methods (not pure planning logic) by inspecting the source, since this repo's tests are HA-free.
+
+## Review fixes: overnight plan, twin and planning maths (22/11/2026, phase 129)
+
+**Drain adjustment computed unconditionally.** See `data-logging.md`'s "Review fixes: logging" — `overnight_drain_adjustment` is now always computed in `async_run_import_plan` (only *applied* to `target_soc` inside `if target_soc < 100`), since the charge-rate calibration below it needs the real value on every night, not just one with headroom.
+
+**Load-profile heating scale.** `_refresh_load_profile` was passing the current 01:55 instantaneous outside temperature into `heating_scale`, but that function's fit (`fit_load_temp`) is built on logged *daily-mean* temperatures — an instant reading doesn't sit on the same scale. Now passes yesterday's logged daily-mean temperature, falling back to `None` (no scaling) rather than the mismatched instant value when yesterday's mean is missing.
+
+**Digital twin full-charge detection.** `twin_target` re-derived "is tonight a full-charge day" from `full_charge_due`/`full_charge_skip_would` using a formula that had drifted from the live `is_full_day = today == full_day` / `skip_would` logic in `opt_overnight.py`. It now reads the logged `plan.get("is_full_day")` directly.
+
+**Dynamic-tariff shadow horizon mismatch.** When tomorrow's Agile prices aren't published, `mpc_slots` stops the Agile horizon at midnight tonight (no day-1 price vector), but the Flux side kept using `hourly_tomorrow` and ran on into tomorrow via the solar forecast — comparing a ~24h Flux total against a shorter Agile total in `saving_gbp`. `opt_shadow.async_run_flux2_check` now computes `tomorrow_for_slots = hourly_tomorrow if vectors.get(1) is not None else None` and passes that (not the raw `hourly_tomorrow`) to both `_solve` calls, so both horizons stop at the same point.
+
+**Planning maths (shared helpers).** `core._num`/`_is_number`/`percentile`/`median` now reject/drop NaN (`v == v` check) — a NaN value passes a plain `isinstance(x, float)` guard and corrupts `sorted()` ordering. `shiftable.py`'s clustering now anchors each cluster to its *first* block's start slot instead of its last, so it no longer transitively chains genuinely separate appliance runs into one. `weather_load.fit_load_temp`/`month_vs_fit` now also return `se_base_kwh` (the fitted base load's standard error); `monthly_load_report`'s `base_flag` gates on standard errors as well as the raw `LOAD_BASE_SHIFT_PCT` threshold, so a zero-noise perfect fit still flags correctly and a noisy one doesn't flag on chance. `load_report_text` uses a first-letter-only uppercase instead of `.capitalize()`, which was lowercasing "kWh" to "kwh" in the notification.
+
+**Backtest `--load-kw` resize.** `tools/backtest.py` used to apply a raw linear SOC delta for an alternative load figure, skipping `bridge_soc`'s own `BRIDGE_LOAD_MARGIN` and its rounding/clamp. It now recomputes `bridge_soc()` for both the logged and alternative load and applies the difference between the two, matching what the live planner would actually have targeted.
+
+See `docs/plans/phases/129-review-logging-reports.md`.

@@ -482,14 +482,15 @@ class OvernightMixin:
         )
         target_soc = decision.target_soc
 
-        overnight_drain_adjustment = 0
+        # Computed unconditionally: compute_effective_charge_rate_kw (below) needs the
+        # real learned drain for every historical night's calibration, not just tonight's.
+        overnight_drain_adjustment = self.data_logger.compute_overnight_drain_adjustment(paired_days, away)
         soc_adjustment = 0
         feedback_adj, feedback_days, feedback_reason = 0, 0, "target_full"
         feedback_live = bool(cfg.get(CONF_IMPORT_FEEDBACK_LIVE, DEFAULT_IMPORT_FEEDBACK_LIVE))
         if target_soc < 100:
-            # Drain and evening-nudge corrections apply whenever the target has
+            # Evening-nudge corrections apply whenever the target has
             # headroom — regular nights and full-charge-day solar-bridge plans.
-            overnight_drain_adjustment = self.data_logger.compute_overnight_drain_adjustment(paired_days, away)
             soc_adjustment = self.data_logger.compute_soc_target_adjustment(paired_days, band, away)
             # Phase 15: day-rate import feedback; logged only (shadow) unless
             # the live option is on, where it replaces the evening-SOC nudge.
@@ -1182,10 +1183,16 @@ class OvernightMixin:
         await self._guarded(lambda: self._refresh_load_profile(days, today, weekend, skip), "Load profile")
 
     async def _refresh_load_profile(self, days, today, weekend: bool, skip: set[str]) -> None:
-        """Phase 71: per-slot median load for today's day type, scaled by today's outside temperature."""
+        """Phase 71: per-slot median load for today's day type, scaled by yesterday's logged mean outside temperature."""
         half_import, _export = await self.data_logger.async_load_half_hourly(30)
         temps = await self._async_outside_temp_by_date(30)
-        self._load_profile = load_profile(days, half_import, today, weekend, skip, temps, self._outside_temp_now())
+        # The heating fit is built on logged DAILY MEAN temperatures; projecting it with the current
+        # instantaneous reading (this runs at 01:55, the coldest part of the night) compares the wrong
+        # units and skews the scale. Yesterday's own logged mean is the best apples-to-apples estimate
+        # of today's mean we have before today has happened; heating_scale already returns None (no
+        # scaling) when it is missing, rather than falling back to the mismatched instantaneous value.
+        temp_estimate = temps.get((today - timedelta(days=1)).isoformat())
+        self._load_profile = load_profile(days, half_import, today, weekend, skip, temps, temp_estimate)
         self.coordinator.update_state(
             touch=False, load_profile={**(self._load_profile or {}), "date": today.isoformat()}
         )

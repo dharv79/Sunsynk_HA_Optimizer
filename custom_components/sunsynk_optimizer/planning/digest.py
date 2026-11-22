@@ -39,7 +39,9 @@ def weekly_import_causes(
 ) -> dict[str, Any] | None:
     """Grid import by cause over the week (phase 42 ledger): kWh, and £ at each day's own average price.
 
-    A day's price is its settled import cost over its import kWh, so £ covers only days with both and
+    A day's price is its settled import cost over its PAID import kWh (the day's grid import less its
+    own free_event kWh, phase 129) — free-event import costs nothing, so it must not inflate or share in
+    the average, and its own cause is never charged. £ covers only days with both cost and paid kWh and
     is None when none has. None overall when the ledger has no record in the week.
     """
     rows = _in_week(records, "import_causes", start, end)
@@ -51,13 +53,15 @@ def weekly_import_causes(
     priced = 0
     for row in rows:
         day = cost.get(row["date"]) or {}
+        free_kwh = _num(row.get("free_event")) or 0.0
         spent, imported = _num(day.get("actual_import_cost_gbp")), _num(day.get("day_grid_import_kwh"))
-        price = spent / imported if spent is not None and imported else None
+        paid_kwh = None if imported is None else max(0.0, imported - free_kwh)
+        price = spent / paid_kwh if spent is not None and paid_kwh else None
         priced += price is not None
         for cause in IMPORT_CAUSES:
             value = _num(row.get(cause)) or 0.0
             kwh[cause] += value
-            if price is not None:
+            if price is not None and cause != "free_event":
                 gbp[cause] += value * price
     grid = [v for v in (_num(r.get("grid_import_kwh")) for r in rows) if v is not None]
     return {

@@ -40,6 +40,24 @@ def test_01_55_listener_skips_the_autumn_duplicate():
     assert "nightly_import_plan" in src and "'automatic'" in src.replace('"', "'")
 
 
+def test_load_profile_heating_scale_uses_a_daily_mean_not_the_01_55_instant(_module="ignored"):
+    """Phase 129: heating_scale's fit is built on logged DAILY MEANS, so the value handed in as
+    today's estimate must be a daily mean too (yesterday's), not the current instantaneous reading."""
+    src = _source("_refresh_load_profile")
+    assert "_outside_temp_now" not in src
+    assert "timedelta(days=1)" in src
+
+
+def test_overnight_drain_adjustment_is_computed_even_on_a_100pct_target_night():
+    """Phase 129: a 100%-target night must still compute the real learned drain adjustment
+    (even though it isn't applied to tonight's target_soc), since compute_effective_charge_rate_kw
+    uses it to calibrate every historical night's charge rate, not just tonight's."""
+    src = _source("async_run_import_plan")
+    compute_idx = src.index("compute_overnight_drain_adjustment(")
+    gate_idx = src.index("if target_soc < 100")
+    assert compute_idx < gate_idx, "drain adjustment must be computed before the target_soc<100 gate"
+
+
 def test_02_00_runs_the_dst_catch_up():
     assert "_async_nightly_plan_catch_up" in _source("_async_meter_snapshot")
     src = _source("_async_nightly_plan_catch_up")

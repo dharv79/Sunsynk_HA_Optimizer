@@ -90,7 +90,7 @@ def twin_target(plan: dict[str, Any], params: dict[str, float]) -> int | None:
         return None
     hours = plan.get("hours_to_solar")
     decision = select_target_soc(
-        is_full_day=bool(plan.get("full_charge_due")) and not plan.get("full_charge_skip_would"),
+        is_full_day=bool(plan.get("is_full_day")),
         low_solar_forecast_kwh=min(forecasts),
         band=plan.get("forecast_band") or "",
         hours_to_solar=float(hours) if _is_number(hours) else None,

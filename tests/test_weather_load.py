@@ -1,4 +1,5 @@
 """Phase 105: weather-normalised load fit, daily comparison and monthly report (pure)."""
+import random
 from datetime import date, timedelta
 
 
@@ -44,7 +45,41 @@ def test_month_flagged_when_higher_at_same_temperature(planning):
     rows = _rows(120, bump=3.0, bump_from=date(2026, 10, 1))  # Oct and Nov up 3 kWh
     rep = planning.monthly_load_report(rows, "2026-10")
     assert rep["this"]["flag"] == "higher" and rep["this"]["pct"] > 8
-    assert planning.load_report_text(rep).startswith("2026-10 load averaged")
+    text = planning.load_report_text(rep)
+    assert text.startswith("2026-10 load averaged")
+    assert "kWh" in text and "kwh" not in text  # str.capitalize() used to lowercase the rest of the string
+
+
+def _noisy_rows(n, base, slope, end, bump, bump_from, seed, noise_sd):
+    rng = random.Random(seed)
+    out = []
+    for k in range(n):
+        d = end - timedelta(days=k)
+        temp = 3.0 + (k * 7) % 13
+        load = base + slope * max(0.0, 15.5 - temp)
+        if bump_from and d >= bump_from:
+            load += bump
+        load += rng.gauss(0, noise_sd)
+        out.append({"date": d.isoformat(), "load_kwh": max(0.1, load), "temp_c": temp})
+    return sorted(out, key=lambda r: r["date"])
+
+
+def test_base_flag_needs_significance_not_just_size(planning):
+    # A real, essentially noise-free base shift must flag: diff_se == 0 is the most significant
+    # case, not the least, so LOAD_FLAG_SIGMA * 0 == 0 and any genuine difference still clears it.
+    clean = _rows(120, bump=1.5, bump_from=date(2026, 10, 1))
+    rep_clean = planning.monthly_load_report(clean, "2026-10")
+    assert abs(rep_clean["base_shift_pct"]) >= planning.LOAD_BASE_SHIFT_PCT
+    assert rep_clean["base_flag"] is True
+
+    # The same size of shift, swamped by noise far bigger than the signal, must NOT flag: the raw
+    # percent move alone clears LOAD_BASE_SHIFT_PCT, but it is not statistically significant.
+    noisy = _noisy_rows(120, base=8.0, slope=0.8, end=date(2026, 11, 12), bump=1.5,
+                         bump_from=date(2026, 10, 1), seed=7, noise_sd=6.0)
+    rep_noisy = planning.monthly_load_report(noisy, "2026-10")
+    assert rep_noisy["base_shift_pct"] is not None
+    assert abs(rep_noisy["base_shift_pct"]) >= planning.LOAD_BASE_SHIFT_PCT
+    assert rep_noisy["base_flag"] is False
 
 
 def test_quiet_month_says_nothing(planning):
