@@ -88,6 +88,8 @@ FREE_EVENT_ATTRIBUTE_KEYS
 FREE_EVENT_ESTIMATE_KEYS
 FREE_EVENT_MAX_SELL_HOURS
 FREE_EVENT_MIN_FLOOR_SOC
+FREE_EVENT_PUSH_RETRY_MAX_ATTEMPTS
+FREE_EVENT_PUSH_RETRY_MINUTES
 FREE_EVENT_SELL_MARGIN_HOURS
 FREE_EVENT_TREND_MINUTES
 FREE_EVENT_TREND_MIN_MINUTES
@@ -414,7 +416,9 @@ forecast_ratio_samples
 free_event_attributes
 free_event_in_watch
 free_event_kpi_credit
+free_event_push_retry_due
 free_event_result
+free_event_schedule_error
 free_event_sell_decision
 free_event_sell_status
 free_event_sold
