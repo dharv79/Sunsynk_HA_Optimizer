@@ -142,6 +142,31 @@ def free_event_in_watch(now: datetime, free_start: datetime, watch_from: datetim
     return elapsed_seconds(now, start) >= 0 and elapsed_seconds(free_start, now) > 0
 
 
+FREE_EVENT_TIMER_NAMES = ("watch_start", "free_start", "free_end")
+
+
+def free_event_timer_plan(
+    phase: str | None, watch_from: datetime, free_start: datetime, free_end: datetime, now: datetime
+) -> list[tuple[str, float]]:
+    """Which point-in-time timers to (re-)arm for a scheduled/in-progress free event, and each
+    one's delay in seconds (phase 131; previously inline in `_arm_free_event_timers`).
+
+    Called both right after scheduling and on an HA restart to resume an event that survived it:
+    a delay is clamped to >= 0, so a trigger time already in the past fires the timer at once
+    instead of not at all. The watch for when to start selling only matters before a sell has
+    started; the free-start and free-end timers stay armed through "selling"/"charging" too, in
+    case a restart lands after one of them already fired live.
+    """
+    plan: list[tuple[str, float]] = []
+    if phase == "scheduled":
+        plan.append(("watch_start", max(0.0, elapsed_seconds(watch_from, now))))
+    if phase in ("scheduled", "selling"):
+        plan.append(("free_start", max(0.0, elapsed_seconds(free_start, now))))
+    if phase in ("scheduled", "selling", "charging"):
+        plan.append(("free_end", max(0.0, elapsed_seconds(free_end, now))))
+    return plan
+
+
 # Scheduling-time sell estimates; only meaningful once the live watch has started a sell.
 FREE_EVENT_ESTIMATE_KEYS = ("sell_start", "sell_end", "skip_sell", "expected_export_kwh")
 

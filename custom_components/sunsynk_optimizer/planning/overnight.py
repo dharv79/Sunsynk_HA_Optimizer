@@ -774,6 +774,12 @@ def achievable_max_soc(outcomes: list[dict[str, Any]], min_target: float = 95.0)
     return float(vals[mid]) if len(vals) % 2 else round((vals[mid - 1] + vals[mid]) / 2, 1)
 
 
+def last_calendar_month(today: date) -> tuple[date, str]:
+    """(last day of last calendar month, that month as "YYYY-MM"); shared by the monthly reports."""
+    last_day = today.replace(day=1) - timedelta(days=1)
+    return last_day, last_day.strftime("%Y-%m")
+
+
 def monthly_report_due(last_month: str | None, today: date) -> bool:
     """True when last month's reports are unsent and the first Sunday has passed (phase 57).
 
@@ -1182,6 +1188,41 @@ def export_pause_restore_due(elapsed_minutes: float | None, in_peak_window: bool
     EXPORT_PAUSE_MIN_HOLD_MINUTES so a brief trigger clear doesn't flip-flop the push.
     """
     return in_peak_window and (elapsed_minutes is None or elapsed_minutes >= EXPORT_PAUSE_MIN_HOLD_MINUTES)
+
+
+def flux2_trim_due(
+    trim_full_day: bool, soc: float, trim_target: int | None, peak_export_holds: bool, cooldown_ok: bool
+) -> bool:
+    """True when the normal >85% trim should fire: not a full-charge day, a target to trim to
+    exists, a live peak export isn't already holding Flux 2, and the last-trim cooldown has
+    elapsed (phase 65/127)."""
+    return not trim_full_day and soc > 85 and trim_target is not None and not peak_export_holds and cooldown_ok
+
+
+def flux2_branch(
+    trigger_disable: bool,
+    already_disabled: bool,
+    trim_due: bool,
+    was_paused: bool,
+    in_peak_window: bool,
+    restore_due: bool,
+    push_active: bool,
+) -> str:
+    """Which Flux 2 action this check fires (phase 131): "disable" (a new export pause),
+    "already_disabled" (a held one, re-notified as idempotent), "trim" (the >85% trim),
+    "restore"/"restore_deferred" (a held pause's 30-min hold is up, or still waiting), or
+    "none"/"none_active" (nothing to do, with or without another push still owning the slot).
+
+    Same priority order as before this was one function: a trigger always wins, then the trim,
+    then a held pause's restore, then nothing.
+    """
+    if trigger_disable:
+        return "already_disabled" if already_disabled else "disable"
+    if trim_due:
+        return "trim"
+    if was_paused and in_peak_window:
+        return "restore" if restore_due else "restore_deferred"
+    return "none_active" if push_active else "none"
 
 
 def export_pause_clear_slot(peak_export_target_soc: int | None, now_minutes: int) -> dict[str, Any]:

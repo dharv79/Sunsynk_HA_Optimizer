@@ -43,6 +43,7 @@ from .planning import (
     free_event_sell_decision,
     elapsed_seconds,
     free_event_in_watch,
+    free_event_timer_plan,
     free_event_watch_from,
     soc_trend_kw,
     restore_flux2_slot,
@@ -122,27 +123,30 @@ class EventsMixin:
 
         Called right after scheduling and on startup to resume an event that
         survived an HA restart — each callback fires immediately (0-second
-        delay) if its trigger time has already passed.
+        delay) if its trigger time has already passed. Which timers that is,
+        and their delay, is `free_event_timer_plan` (phase 131); the sell
+        start itself is decided live from the SOC and its trend
+        (_async_do_free_event_watch), not by a fixed timer.
         """
         self._clear_free_event_timers()
         now = dt_util.now()
-        phase = event.get("phase")
         free_start = dt_util.as_local(dt_util.parse_datetime(event["free_start"]))
         free_end = dt_util.as_local(dt_util.parse_datetime(event["free_end"]))
-
-        if phase == "scheduled":
-            # The sell start is decided live from the SOC and its trend (_async_do_free_event_watch).
-            watch_from = free_event_watch_from(free_start)
+        watch_from = free_event_watch_from(free_start)
+        plan = dict(free_event_timer_plan(event.get("phase"), watch_from, free_start, free_end, now))
+        # Callbacks stay literal self.attr references (not a name -> callback dict) so
+        # test_code_integrity's static check can still confirm each one is a real coroutine.
+        if "watch_start" in plan:
             self._free_event_unsubs.append(
-                async_call_later(self.hass, max(0, elapsed_seconds(watch_from, now)), self._async_free_event_watch_start)
+                async_call_later(self.hass, plan["watch_start"], self._async_free_event_watch_start)
             )
-        if phase in ("scheduled", "selling"):
+        if "free_start" in plan:
             self._free_event_unsubs.append(
-                async_call_later(self.hass, max(0, elapsed_seconds(free_start, now)), self._async_free_event_free_start)
+                async_call_later(self.hass, plan["free_start"], self._async_free_event_free_start)
             )
-        if phase in ("scheduled", "selling", "charging"):
+        if "free_end" in plan:
             self._free_event_unsubs.append(
-                async_call_later(self.hass, max(0, elapsed_seconds(free_end, now)), self._async_free_event_free_end)
+                async_call_later(self.hass, plan["free_end"], self._async_free_event_free_end)
             )
 
     async def async_try_schedule_manual_free_event(self, changed: str = "end") -> None:

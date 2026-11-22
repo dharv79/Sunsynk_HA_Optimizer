@@ -465,6 +465,25 @@ def _score(days: int, changed: int, delta_gbp: float | None, dates: list[str], n
     }
 
 
+def _apply_error_ratio_verdict(
+    score: dict[str, Any], n_days: int, challenger_err: list[float], baseline_err: list[float]
+) -> dict[str, Any]:
+    """Fill in changed/delta_gbp/error_ratio/verdict from a challenger-vs-baseline error ratio, in place.
+
+    Shared by the weighted_correction, weather_bins and newsvendor_target rows of
+    shadow_scorecard, which differ only in which two error series they compare.
+    Below SCORECARD_MIN_DAYS, or with no baseline error to divide by, ``score``
+    (already a no_records/not_yet _score()) is returned unchanged.
+    """
+    if n_days >= SCORECARD_MIN_DAYS and sum(baseline_err) > 0:
+        ratio = sum(challenger_err) / sum(baseline_err)
+        score["changed"] = n_days
+        score["delta_gbp"] = None
+        score["error_ratio"] = round(ratio, 3)
+        score["verdict"] = "ready" if ratio <= 1 - SCORECARD_ERROR_GAIN else "harmful" if ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
+    return score
+
+
 def _sum_or_none(values: list[Any]) -> float | None:
     nums = [v for v in values if isinstance(v, (int, float))]
     return sum(nums) if nums else None
@@ -527,13 +546,7 @@ def shadow_scorecard(
         weighted_err.append(abs(raw * weighted - actual))
         dates.append(p["date"])
     score = _score(len(dates), 0, None, dates, "mean absolute error vs live factor")
-    if len(dates) >= SCORECARD_MIN_DAYS and sum(live_err) > 0:
-        ratio = sum(weighted_err) / sum(live_err)
-        score["changed"] = len(dates)
-        score["delta_gbp"] = None
-        score["error_ratio"] = round(ratio, 3)
-        score["verdict"] = "ready" if ratio <= 1 - SCORECARD_ERROR_GAIN else "harmful" if ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
-    out["weighted_correction"] = score
+    out["weighted_correction"] = _apply_error_ratio_verdict(score, len(dates), weighted_err, live_err)
     # 82 weather bins: mean absolute P50 error with the cloud bucket vs without it (shadow, no £ counterfactual).
     base_err: list[float] = []
     cloud_err: list[float] = []
@@ -548,13 +561,7 @@ def shadow_scorecard(
         cloud_err.append(abs(binned - actual))
         cloud_dates.append(p["date"])
     score = _score(len(cloud_dates), 0, None, cloud_dates, "mean absolute P50 error, cloud bins vs band x season")
-    if len(cloud_dates) >= SCORECARD_MIN_DAYS and sum(base_err) > 0:
-        ratio = sum(cloud_err) / sum(base_err)
-        score["changed"] = len(cloud_dates)
-        score["delta_gbp"] = None
-        score["error_ratio"] = round(ratio, 3)
-        score["verdict"] = "ready" if ratio <= 1 - SCORECARD_ERROR_GAIN else "harmful" if ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
-    out["weather_bins"] = score
+    out["weather_bins"] = _apply_error_ratio_verdict(score, len(cloud_dates), cloud_err, base_err)
     # 86 reserve hold: days that bought day-rate import with charge still in the battery (shadow, no £ counterfactual).
     holds = win("hourly_profile")
     flagged = [r for r in holds if (r.get("above_floor_day_import_kwh") or 0) >= RESERVE_HOLD_MIN_KWH]
@@ -578,16 +585,7 @@ def shadow_scorecard(
         nv_shadow.append(under * max(0.0, ratio - true) + over * max(0.0, true - ratio))
         nv_dates.append(p["date"])
     nv_score = _score(len(nv_dates), 0, None, nv_dates, "asymmetric solar-scale error cost vs live factor")
-    if len(nv_dates) >= SCORECARD_MIN_DAYS and sum(nv_live) > 0:
-        nv_ratio = sum(nv_shadow) / sum(nv_live)
-        nv_score["changed"] = len(nv_dates)
-        nv_score["delta_gbp"] = None
-        nv_score["error_ratio"] = round(nv_ratio, 3)
-        nv_score["verdict"] = (
-            "ready" if nv_ratio <= 1 - SCORECARD_ERROR_GAIN
-            else "harmful" if nv_ratio >= 1 + SCORECARD_ERROR_LOSS else "not_yet"
-        )
-    out["newsvendor_target"] = nv_score
+    out["newsvendor_target"] = _apply_error_ratio_verdict(nv_score, len(nv_dates), nv_shadow, nv_live)
     # 23 gentle charge: nights it was applied (no £ counterfactual).
     gentle = [p for p in plans if p.get("gentle_charge_applied")]
     out["gentle_charge"] = _score(

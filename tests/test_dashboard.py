@@ -312,6 +312,10 @@ def _pinned_ids() -> set[str]:
         ids.update(_ID_RE.findall(src))
         ids.update(f"{domain}.{slug(name)}" for name in re.findall(r'coordinator, entry, "\w+", "([^"]+)"', src))
         ids.update(f"{domain}.{slug(name)}" for name in re.findall(r'pin_entity_id\(self, "\w+", "([^"]+)"', src))
+        # Phase 131: sensor.py's registration table gives each entity's name as a "name": "..."
+        # dict entry instead of a positional string literal; an id with an explicit "entity_id"
+        # override is already covered by _ID_RE above, so a wrong slug from this is harmless.
+        ids.update(f"{domain}.{slug(name)}" for name in re.findall(r'"name":\s*"([^"]+)"', src))
     return ids
 
 

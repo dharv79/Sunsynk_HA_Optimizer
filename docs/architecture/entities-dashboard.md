@@ -195,3 +195,24 @@ Generated dashboard view "Heat map" (`heat-map`, panel) with `custom:sunsynk-opt
 - The diagnostics download now also masks the `notify_service`, `notify_target` and `data_report_target` config keys by exact name (a substring match on "target" would also catch legitimate numeric fields like `current_soc_target`), and the weekly settings-audit notification is redacted the same way `settings_dump` already was (`planning.redact_settings_changes`), not sent raw.
 - `sunsynk-optimizer-heatmap.js` now defers `customElements.define` behind the same `whenDefined("home-assistant")` race fix phase 80 gave the day chart, and no longer disconnects its `ResizeObserver` on `disconnectedCallback` (that observer is never recreated on an SPA reattach, so resize redraws had silently stopped working after the first tab switch away and back).
 - `sunsynk-optimizer-day-chart.js`'s `resample()` now bins each sample by its local hour/minute instead of elapsed milliseconds since local midnight, so a 23- or 25-hour clock-change day no longer drifts the chart's readings away from their true time of day.
+
+## Refactor: one sensor description table (22/11/2026, phase 131)
+
+Behaviour-preserving. `SunsynkOptimizerSensor` used to spread each sensor's registration args
+(name, entity category, pinned entity id), its unit (`native_unit_of_measurement`'s if/elif
+chain) and its long-term-statistics eligibility (`_MEASUREMENT_KEYS`) across three separate
+places that could drift apart as sensors were added. All three are now one module-level
+`_SENSOR_SPECS` table (`{sensor_key: {"name", "unit"?, "entity_category"?, "entity_id"?,
+"measurement"?}}`); `async_setup_entry` registers `[SunsynkOptimizerSensor(coordinator, entry,
+key) for key in _SENSOR_SPECS]`, and `__init__`/`native_unit_of_measurement` just look up the
+table. `native_value`/`extra_state_attributes` are unchanged — what each sensor key returns is
+real per-sensor logic, not metadata, so splitting those out wasn't in scope.
+
+`tests/test_dashboard.py`'s `_pinned_ids()` (which checks every dashboard-referenced entity id
+has a pinned source) gained a fourth extraction pattern, `"name": "..."` dict entries, since the
+old `coordinator, entry, "key", "Name"` positional literal it previously matched no longer
+appears for most sensors.
+
+Verification: `tests/test_refactor_review_fixes.py::test_sensor_registration_and_unit_lookup_share_one_table`
+and `::test_sensor_specs_cover_every_registered_sensor_with_a_name`; the full `test_dashboard.py`
+suite stayed green. See `docs/plans/phases/131-review-refactor.md`.

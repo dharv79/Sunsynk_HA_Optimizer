@@ -157,3 +157,16 @@ def test_morning_brief_release_keeps_notifications_held_mid_send():
     src = _source("_async_do_release_held")
     assert "held_notifications=[]" not in src
     assert "[len(held):]" in src
+
+
+def test_settings_reads_all_go_through_the_shared_guarded_read():
+    """Phase 131: the four inline try/except settings reads now share _async_api_read, so a network
+    failure logs and degrades the same way everywhere instead of four near-identical copies."""
+    for name in (
+        "async_run_settings_dump", "_async_read_current_drift", "async_run_settings_audit",
+        "async_run_settings_efficiency",
+    ):
+        src = _source(name)
+        assert "self._async_api_read(" in src, name
+        assert "async_read_settings(self.inverter_serial)" not in src, name
+        assert "except Exception" not in src, name

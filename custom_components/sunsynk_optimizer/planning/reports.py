@@ -84,12 +84,11 @@ TARIFF_VAT_PERCENT = 0.0
 
 
 def band_price(bands: list[tuple[int, int, float]], minute: int) -> float | None:
-    """Price (p/kWh) of the band covering ``minute`` of the day; None when no band does."""
-    for start, end, price in bands:
-        inside = start <= minute < end if start < end else (minute >= start or minute < end)
-        if inside:
-            return price
-    return None
+    """Price (p/kWh) of the band covering ``minute`` of the day; None when no band does.
+
+    Same lookup as `core.price_at`, under the name this module's callers use.
+    """
+    return price_at(bands, minute)
 
 
 def bands_from_rates(
