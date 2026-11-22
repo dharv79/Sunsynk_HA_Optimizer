@@ -78,9 +78,10 @@
       this._timer = setInterval(() => this._load(), REFRESH_MS);
     }
 
+    // Not disconnecting the ResizeObserver here: SPA navigation away and back reuses this element
+    // (detach/reattach, not destroy), and a disconnected observer never gets reconnected on reattach.
     disconnectedCallback() {
       clearInterval(this._timer);
-      if (this._ro) this._ro.disconnect();
     }
 
     _start() {
@@ -206,7 +207,14 @@
     }
   }
 
-  if (!customElements.get(TAG)) customElements.define(TAG, SunsynkOptimizerHeatmap);
-  window.customCards = window.customCards || [];
-  window.customCards.push({ type: TAG, name: "Sunsynk Optimizer heat map", description: "Import by half-hour over the last weeks." });
+  // The frontend swaps in a scoped custom-element registry while it boots. An element defined
+  // before that is invisible to it and the card renders "Configuration error" (a load-order race),
+  // so define once the app shell exists. The timeout covers pages without <home-assistant>.
+  const define = () => {
+    if (customElements.get(TAG)) return;
+    customElements.define(TAG, SunsynkOptimizerHeatmap);
+    window.customCards = window.customCards || [];
+    window.customCards.push({ type: TAG, name: "Sunsynk Optimizer heat map", description: "Import by half-hour over the last weeks." });
+  };
+  Promise.race([customElements.whenDefined("home-assistant"), new Promise((r) => setTimeout(r, 10000))]).then(define);
 })();

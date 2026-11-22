@@ -320,7 +320,7 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=50, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWh")
             ),
-            vol.Optional(CONF_FLEX_EVENT_ENTITY, default=values.get(CONF_FLEX_EVENT_ENTITY, "")): selector.TextSelector(),
+            vol.Optional(CONF_FLEX_EVENT_ENTITY, description={"suggested_value": values.get(CONF_FLEX_EVENT_ENTITY)}): selector.TextSelector(),
             vol.Optional(
                 CONF_FLEX_PRICE_PENCE,
                 description={"suggested_value": values.get(CONF_FLEX_PRICE_PENCE)},
@@ -354,8 +354,8 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Optional(CONF_AWAY_AVG_CONSUMPTION_KW, default=values.get(CONF_AWAY_AVG_CONSUMPTION_KW, DEFAULT_AWAY_AVG_CONSUMPTION_KW)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.1, max=5.0, step=0.05, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kW")
             ),
-            vol.Optional(CONF_AUTO_AWAY_PERSONS, default=values.get(CONF_AUTO_AWAY_PERSONS, "")): selector.TextSelector(),
-            vol.Optional(CONF_AUTO_AWAY_CALENDAR, default=values.get(CONF_AUTO_AWAY_CALENDAR, "")): selector.TextSelector(),
+            vol.Optional(CONF_AUTO_AWAY_PERSONS, description={"suggested_value": values.get(CONF_AUTO_AWAY_PERSONS)}): selector.TextSelector(),
+            vol.Optional(CONF_AUTO_AWAY_CALENDAR, description={"suggested_value": values.get(CONF_AUTO_AWAY_CALENDAR)}): selector.TextSelector(),
             vol.Optional(CONF_AUTO_AWAY_KEYWORD, default=values.get(CONF_AUTO_AWAY_KEYWORD, DEFAULT_AUTO_AWAY_KEYWORD)): selector.TextSelector(),
             vol.Optional(CONF_AUTO_AWAY_MIN_HOURS, default=values.get(CONF_AUTO_AWAY_MIN_HOURS, DEFAULT_AUTO_AWAY_MIN_HOURS)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=1, max=168, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="h")
@@ -366,23 +366,23 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
             vol.Required(CONF_SOLAR_START_OFFSET_HOURS, default=values.get(CONF_SOLAR_START_OFFSET_HOURS, DEFAULT_SOLAR_START_OFFSET_HOURS)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0.5, max=6.0, step=0.5, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="h")
             ),
-            vol.Optional(CONF_HOURLY_FORECAST_SENSOR, default=values.get(CONF_HOURLY_FORECAST_SENSOR, "")): selector.TextSelector(),
+            vol.Optional(CONF_HOURLY_FORECAST_SENSOR, description={"suggested_value": values.get(CONF_HOURLY_FORECAST_SENSOR)}): selector.TextSelector(),
             vol.Optional(CONF_HOURLY_FORECAST_ATTRIBUTE, default=values.get(CONF_HOURLY_FORECAST_ATTRIBUTE, DEFAULT_HOURLY_FORECAST_ATTRIBUTE)): selector.TextSelector(),
             vol.Optional(CONF_TOMORROW_FORECAST_SENSOR, default=values.get(CONF_TOMORROW_FORECAST_SENSOR, DEFAULT_TOMORROW_FORECAST_SENSOR)): selector.TextSelector(),
-            vol.Optional(CONF_OCTOPUS_IMPORT_COST_SENSOR, default=values.get(CONF_OCTOPUS_IMPORT_COST_SENSOR, "")): selector.TextSelector(),
-            vol.Optional(CONF_OCTOPUS_EXPORT_INCOME_SENSOR, default=values.get(CONF_OCTOPUS_EXPORT_INCOME_SENSOR, "")): selector.TextSelector(),
-            vol.Optional(CONF_OCTOPUS_GAS_COST_SENSOR, default=values.get(CONF_OCTOPUS_GAS_COST_SENSOR, "")): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_IMPORT_COST_SENSOR, description={"suggested_value": values.get(CONF_OCTOPUS_IMPORT_COST_SENSOR)}): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_EXPORT_INCOME_SENSOR, description={"suggested_value": values.get(CONF_OCTOPUS_EXPORT_INCOME_SENSOR)}): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_GAS_COST_SENSOR, description={"suggested_value": values.get(CONF_OCTOPUS_GAS_COST_SENSOR)}): selector.TextSelector(),
             vol.Optional(CONF_BILL_START_DAY, default=values.get(CONF_BILL_START_DAY, DEFAULT_BILL_START_DAY)): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=1, max=28, step=1, mode=selector.NumberSelectorMode.BOX)
             ),
-            vol.Optional(CONF_OCTOPUS_IMPORT_RATES_ENTITY, default=values.get(CONF_OCTOPUS_IMPORT_RATES_ENTITY, "")): selector.TextSelector(),
-            vol.Optional(CONF_OCTOPUS_EXPORT_RATES_ENTITY, default=values.get(CONF_OCTOPUS_EXPORT_RATES_ENTITY, "")): selector.TextSelector(),
-            vol.Optional(CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR, default=values.get(CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR, "")): selector.TextSelector(),
-            vol.Optional(CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR, default=values.get(CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR, "")): selector.TextSelector(),
-            vol.Optional(CONF_TARIFF_RATE_OVERRIDES, default=values.get(CONF_TARIFF_RATE_OVERRIDES, "")): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_IMPORT_RATES_ENTITY, description={"suggested_value": values.get(CONF_OCTOPUS_IMPORT_RATES_ENTITY)}): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_EXPORT_RATES_ENTITY, description={"suggested_value": values.get(CONF_OCTOPUS_EXPORT_RATES_ENTITY)}): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR, description={"suggested_value": values.get(CONF_OCTOPUS_IMPORT_CONSUMPTION_SENSOR)}): selector.TextSelector(),
+            vol.Optional(CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR, description={"suggested_value": values.get(CONF_OCTOPUS_EXPORT_CONSUMPTION_SENSOR)}): selector.TextSelector(),
+            vol.Optional(CONF_TARIFF_RATE_OVERRIDES, description={"suggested_value": values.get(CONF_TARIFF_RATE_OVERRIDES)}): selector.TextSelector(),
             vol.Optional(
                 CONF_DATA_REPORT_TARGET,
-                default=values.get(CONF_DATA_REPORT_TARGET, ""),
+                description={"suggested_value": values.get(CONF_DATA_REPORT_TARGET)},
             ): selector.TextSelector(),
             vol.Required(
                 CONF_NOTIFY_MIN_LEVEL, default=values.get(CONF_NOTIFY_MIN_LEVEL, DEFAULT_NOTIFY_MIN_LEVEL)
@@ -396,9 +396,9 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Optional(CONF_QUIET_START, default=values.get(CONF_QUIET_START, "")): selector.TextSelector(),
-            vol.Optional(CONF_QUIET_END, default=values.get(CONF_QUIET_END, "")): selector.TextSelector(),
-            vol.Optional(CONF_MORNING_BRIEF_TIME, default=values.get(CONF_MORNING_BRIEF_TIME, "")): selector.TextSelector(),
+            vol.Optional(CONF_QUIET_START, description={"suggested_value": values.get(CONF_QUIET_START)}): selector.TextSelector(),
+            vol.Optional(CONF_QUIET_END, description={"suggested_value": values.get(CONF_QUIET_END)}): selector.TextSelector(),
+            vol.Optional(CONF_MORNING_BRIEF_TIME, description={"suggested_value": values.get(CONF_MORNING_BRIEF_TIME)}): selector.TextSelector(),
             vol.Required(
                 CONF_ENABLE_AI_WEEKLY_INSIGHT,
                 default=values.get(CONF_ENABLE_AI_WEEKLY_INSIGHT, DEFAULT_ENABLE_AI_WEEKLY_INSIGHT),

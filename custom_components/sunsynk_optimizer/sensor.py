@@ -329,7 +329,13 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         # Default values keep history continuous even before the first plan runs.
         if self._sensor_key in _ADAPTIVE_PLAN_KEYS:
             key, default, _ = _ADAPTIVE_PLAN_KEYS[self._sensor_key]
-            return _as_dict(state.last_import_plan).get(key, default)
+            plan = _as_dict(state.last_import_plan)
+            if key not in plan:
+                # Monitor mode stubs last_import_plan (no push, so no real feedback to learn from);
+                # the placeholder would otherwise stand in forever, not just before the first plan,
+                # and get recorded as a flat, made-up reading in long-term statistics.
+                return None if state.operation_mode == "monitor" else default
+            return plan[key]
 
         if self._sensor_key == "consumption":
             load = _as_dict(state.last_day_actuals).get("day_load_kwh")
@@ -566,7 +572,10 @@ class SunsynkOptimizerSensor(CoordinatorEntity, SensorEntity):
         if self._sensor_key in _ADAPTIVE_THRESHOLDS:
             days_required = _ADAPTIVE_THRESHOLDS[self._sensor_key]
             days_key = _ADAPTIVE_PLAN_KEYS[self._sensor_key][2]
-            days_collected = _as_dict(state.last_import_plan).get(days_key, 0) or 0
+            plan = _as_dict(state.last_import_plan)
+            if days_key not in plan and state.operation_mode == "monitor":
+                return {"days_collected": None, "days_required": days_required, "active": None}
+            days_collected = plan.get(days_key, 0) or 0
             return {
                 "days_collected": days_collected,
                 "days_required": days_required,

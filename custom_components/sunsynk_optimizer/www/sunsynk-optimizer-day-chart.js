@@ -76,23 +76,30 @@
   const fmtV = (key, v) => (key === "soc" ? (v === null || v === undefined ? "—" : `${Math.round(v)}%`) : fmtW(v));
   const scale = (u, kind) => (kind === "kwh" ? (u === "Wh" ? 0.001 : u === "MWh" ? 1000 : 1) : u === "kW" ? 1000 : u === "MW" ? 1e6 : 1);
 
+  // Bin index from local wall-clock time of day, not elapsed ms from midnight: on a clock-change day
+  // (23 or 25 real hours) elapsed time drifts away from the clock, which would otherwise line a
+  // reading up with the wrong hour for the rest of the day.
+  const binOfDay = (t) => {
+    const d = new Date(t);
+    return Math.min(BINS - 1, Math.floor((d.getHours() * 60 + d.getMinutes()) / BIN_MIN));
+  };
+
   /** Step-resample [[ms, value|null], ...] (sorted) onto the day's bins: each bin takes the mean of the
    * samples inside it, or carries the last known value forward. Bins after `nowMs` stay null. */
-  function resample(points, dayStart, nowMs) {
+  function resample(points, dayStart, dayEnd, nowMs) {
     const out = new Array(BINS).fill(null);
-    const step = BIN_MIN * 60000;
-    let i = 0, last = null;
-    for (let b = 0; b < BINS; b++) {
-      const t0 = dayStart + b * step, t1 = t0 + step;
-      if (t0 > nowMs) break;
-      let sum = 0, n = 0;
-      while (i < points.length && points[i][0] < t1) {
-        const v = points[i][1];
-        if (points[i][0] >= t0 && v !== null) { sum += v; n++; }
-        last = v;
-        i++;
-      }
-      out[b] = n ? sum / n : last;
+    const sums = new Array(BINS).fill(0), counts = new Array(BINS).fill(0);
+    let carry = null;
+    for (const [t, v] of points) {
+      if (t > nowMs) break;
+      if (t < dayStart) { carry = v; continue; } // the day's start state, from before the query window
+      const b = binOfDay(t);
+      if (v !== null) { sums[b] += v; counts[b]++; }
+    }
+    const lastBin = nowMs >= dayEnd ? BINS - 1 : binOfDay(Math.min(nowMs, dayEnd - 1));
+    for (let b = 0; b <= lastBin; b++) {
+      out[b] = counts[b] ? sums[b] / counts[b] : carry;
+      if (out[b] !== null) carry = out[b];
     }
     return out;
   }
@@ -345,16 +352,17 @@
         }
       }
       if (seq !== this._seq) return; // a newer day was requested meanwhile
-      this._data = this._shape(raw, dayStart, Math.min(nowMs, dayEnd), mode);
+      this._data = this._shape(raw, dayStart, dayEnd, nowMs, mode);
       this._draw();
     }
 
-    _shape(raw, dayStart, endMs, mode) {
+    _shape(raw, dayStart, dayEnd, nowMs, mode) {
       const e = this._cfg.entities;
+      const endMs = Math.min(nowMs, dayEnd);
       const series = (id, kind = "w") => {
         if (!id || !raw[id] || !raw[id].length) return null;
         const k = kind === "pct" ? 1 : scale(this._unit(id), "w");
-        return resample(raw[id].map(([t, v]) => [t, v === null ? null : v * k]), dayStart, endMs);
+        return resample(raw[id].map(([t, v]) => [t, v === null ? null : v * k]), dayStart, dayEnd, endMs);
       };
       const comb = (a, b, f) => (a || b ? a ? a.map((v, i) => f(v, b ? b[i] : null)) : b.map((v) => f(null, v)) : null);
       const pv = comb(series(e.pv1_power), series(e.pv2_power), (a, b) => (a === null && b === null ? null : (a || 0) + (b || 0)));

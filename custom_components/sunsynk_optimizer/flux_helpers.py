@@ -225,7 +225,7 @@ def merge_entry_data(data: dict[str, Any], options: dict[str, Any]) -> dict[str,
     at initial setup or via a later reconfiguration.
     """
     merged = deepcopy(data)
-    merged.update(options)
+    merged.update(deepcopy(options))  # a shared nested list would let an in-place edit (e.g. tariff rows) mutate entry.options itself
     merged.setdefault(CONF_CHARGES, default_charges())
     merged.setdefault(CONF_FLUX_PRODUCTS, default_flux_products())
     merged.setdefault(CONF_NOTIFY_TARGET, DEFAULT_NOTIFY_TARGET)

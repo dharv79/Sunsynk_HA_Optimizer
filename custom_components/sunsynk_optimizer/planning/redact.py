@@ -17,15 +17,25 @@ from typing import Any
 from urllib.parse import quote
 
 
-_AUDIT_REDACT_PARTS = ("password", "username", "token", "secret", "key", "email", "plant_id", "serial", "account")
+_AUDIT_REDACT_PARTS = ("password", "username", "token", "secret", "key", "email", "plant", "serial", "account", "phone", "address")
+
+# Exact config keys that are not a credential/identifier by name but still name a destination
+# (a notify service/target or the debug-stream target) and so can carry a phone number, device
+# name or webhook URL that a substring match in _AUDIT_REDACT_PARTS would not catch.
+_AUDIT_REDACT_KEYS = frozenset({"notify_service", "notify_target", "data_report_target"})
+
+
+def _is_redacted_key(name: Any) -> bool:
+    """True when a config/state key should be masked by name: a credential/identifier word, or an exact match."""
+    lowered = str(name).lower()
+    return lowered in _AUDIT_REDACT_KEYS or any(part in lowered for part in _AUDIT_REDACT_PARTS)
 
 
 def redact_config(data: Mapping[str, Any]) -> dict[str, Any]:
     """Copy of a config mapping with credentials and identifiers masked, for the diagnostics download."""
     out: dict[str, Any] = {}
     for key, value in data.items():
-        lowered = str(key).lower()
-        if any(part in lowered for part in _AUDIT_REDACT_PARTS):
+        if _is_redacted_key(key):
             out[key] = "**REDACTED**"
         else:
             out[key] = _redact_value(value)
@@ -86,7 +96,7 @@ def sensitive_values(config: Mapping[str, Any]) -> list[str]:
         text = "" if value is None or isinstance(value, (bool, Mapping, list, tuple)) else str(value).strip()
         if not text:
             continue
-        if any(part in lowered for part in _AUDIT_REDACT_PARTS):
+        if _is_redacted_key(key):
             found.add(text)
         elif "person" in lowered or "calendar" in lowered:
             found.update(part.strip() for part in text.split(","))
