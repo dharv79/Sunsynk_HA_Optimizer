@@ -242,6 +242,7 @@ Checked every 30 min and on SOC change, 16:00–19:00.
 - **Watt trigger (default):** grid draw above `export_disable_threshold` (1500 W).
 - **Cost trigger:** grid kW × peak import price above `export_disable_cost_threshold_pence_per_hour` (58.32 p/h). Used only when `cost_aware_export_shadow_mode` is off; otherwise just logged, and disagreements are tallied in the weekly summary.
 - Action: Flux 2 16:00 → 16:15 at 100%, which stops export. Pushed once per pause, not on every check.
+- Clears once the trigger has dropped for 30 minutes, restoring the default 85% slot (or a live peak export's own, usually lower, target).
 
 ### Peak surplus export (shadow)
 
@@ -252,8 +253,9 @@ target = evening reserve + expected 16:00–19:00 use + 5%
 ```
 
 - Only when at least 0.5 kWh is spare and the peak export price beats the off-peak price ÷ 0.85 (plus battery wear, if set).
+- Floored at the higher of the **Peak minimum SOC** and today's peak-cover requirement, so the export never sells below what peak cover just topped up to.
 - Live with `peak_export_live`: Flux 2 16:00 → 19:00 at the target.
-- **17:00 and 18:00 re-checks** resize the target from the load actually seen since 16:00. A push needs a move of at least 0.5 kWh.
+- **17:00 and 18:00 re-checks** resize the target from the load actually seen since 16:00 (same floor). A push needs a move of at least 0.5 kWh.
 - The export pause wins: if it fires, the battery is held at 100%.
 
 ---

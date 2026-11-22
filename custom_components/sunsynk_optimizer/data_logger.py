@@ -478,15 +478,6 @@ class DataLogger:
             if r.get("type") == "overnight_load" and r.get("date") != today
         ]
 
-    async def async_recent_peak_loads(self, days: int = 14) -> list[float]:
-        """House load (kWh) in recent 16:00-19:00 windows, from peak_window_usage records."""
-        records = await self.hass.async_add_executor_job(self._read_recent, days)
-        return [
-            float(r["peak_load_kwh"])
-            for r in records
-            if r.get("type") == "peak_window_usage" and isinstance(r.get("peak_load_kwh"), (int, float))
-        ]
-
     async def async_recent_peak_load_days(self, days: int = 14) -> list[tuple[str, float]]:
         """(date, kWh) of recent 16:00-19:00 house load, for the weekday/weekend split (phase 60)."""
         records = await self.hass.async_add_executor_job(self._read_recent, days)

@@ -202,3 +202,24 @@ def test_recent_high_never_lowers_and_needs_history(planning):
     # only the newest PEAK_COVER_RECENT_DAYS count, whatever the input order
     old = [("2026-10-0%d" % i, 9.0) for i in range(1, 8)]
     assert planning.peak_load_recent_high(days + old, 1.0, 1.0, 20.0) == (2.0, "recent_high", 1.0)
+
+
+# ---------------------------------------------------------------- phase 127 review fixes
+
+def test_peak_cover_retry_due_only_retries_a_failed_push(planning):
+    assert planning.peak_cover_retry_due(True, 13 * 60, 0) is False
+    assert planning.peak_cover_retry_due(None, 13 * 60, 0) is False
+    assert planning.peak_cover_retry_due(False, 13 * 60, 0) is True
+    assert planning.peak_cover_retry_due(False, 13 * 60, planning.PEAK_COVER_PUSH_RETRIES - 1) is True
+    assert planning.peak_cover_retry_due(False, 13 * 60, planning.PEAK_COVER_PUSH_RETRIES) is False
+
+
+def test_peak_cover_retry_due_stops_at_the_last_log_time(planning):
+    assert planning.peak_cover_retry_due(False, planning.PEAK_COVER_LAST_LOG_MINUTES - 1, 0) is True
+    assert planning.peak_cover_retry_due(False, planning.PEAK_COVER_LAST_LOG_MINUTES, 0) is False
+
+
+def test_exclude_away_days_drops_only_away_dates(planning):
+    samples = [("2026-11-10", 2.0), ("2026-11-11", 3.0), ("2026-11-12", 1.0)]
+    assert planning.exclude_away_days(samples, {"2026-11-11"}) == [("2026-11-10", 2.0), ("2026-11-12", 1.0)]
+    assert planning.exclude_away_days(samples, frozenset()) == samples

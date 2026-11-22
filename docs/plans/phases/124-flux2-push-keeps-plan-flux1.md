@@ -12,8 +12,10 @@ default. Until the 01:55 plan re-pushes, the inverter holds a 30-minute shorter
 cheap charge; if that push failed, the night would charge to 04:30 only.
 
 The 4pm slot at 100% in the same dump is the export pause working as designed
-(it holds target SOC at 100% so the battery does not export during the peak)
-and returns to 85% when export re-enables. It is not changed.
+(it holds target SOC at 100% so the battery does not export during the peak).
+It is not changed here — **correction (phase 127):** no code actually restored
+the normal slot when export re-enabled; the pause only cleared in state until
+the 01:55 plan. Phase 127 adds the restore.
 
 ## What
 

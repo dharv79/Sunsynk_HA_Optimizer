@@ -20,6 +20,7 @@ from .core import (
     DISCHARGE_EFFICIENCY,
     EVENING_RESERVE_HOURS,
     KPI_RESERVE_SOC,
+    PEAK_COVER_LAST_LOG_MINUTES,
     PEAK_COVER_MARGIN,
     PEAK_COVER_PEAK_START_MINUTES,
     PEAK_END_MINUTES,
@@ -153,8 +154,14 @@ def arbitrage_worth_it(
     return sell_pence > buy_pence / round_trip_eff + (wear_pence or 0.0)
 
 
-def peak_export_skip_reason(slots_held: bool, soc: float | None) -> str | None:
-    """Why the 16:00 peak export is skipped (logged as its decision), or None to plan it."""
+def peak_export_skip_reason(slots_held: bool, soc: float | None, outage_active: bool = False) -> str | None:
+    """Why the 16:00 peak export is skipped (logged as its decision), or None to plan it.
+
+    ``outage_active`` (phase 127) is checked first so a grid outage still writes the skip record
+    every other early exit writes, instead of leaving the day's peak_export silently empty.
+    """
+    if outage_active:
+        return "skipped_outage"
     if slots_held:
         return "skipped_slots_held"
     if soc is None:
@@ -171,6 +178,8 @@ def peak_export_plan(
     margin_soc: int = PEAK_EXPORT_MARGIN_SOC,
     wear_pence: float | None = None,
     peak_need_soc: float = 0.0,
+    min_target_soc: int = 0,
+    min_target_label: str | None = None,
 ) -> dict[str, Any]:
     """16:00 decision: export the SOC above reserve + peak need + margin at the peak rate.
 
@@ -180,9 +189,15 @@ def peak_export_plan(
     reduce tomorrow's off-peak charge, so it is worth it only if the peak
     export price beats the off-peak replacement cost after round-trip losses.
     `decision` is export / no_surplus / not_worth_it / no_price; gain is export
-    income minus replacement cost.
+    income minus replacement cost. `min_target_soc`/`min_target_label` (phase 127,
+    from `peak_export_floor_soc`) never let the target sell below the user's Peak
+    minimum SOC or today's peak-cover requirement; `floor_applied` names which, if either did.
     """
     target = min(100, math.ceil(reserve_soc + peak_need_soc + margin_soc))
+    floor_applied = None
+    if min_target_soc > target:
+        target = min(100, math.ceil(min_target_soc))
+        floor_applied = min_target_label
     surplus_kwh = max(0.0, soc - target) / 100 * battery_capacity_kwh
     worth = arbitrage_worth_it(offpeak_pence, export_pence, wear_pence=wear_pence)
     if worth is None:
@@ -205,6 +220,7 @@ def peak_export_plan(
         "export_gbp": round_or_none(export_gbp),
         "gain_gbp": round_or_none(gain_gbp),
         "wear_cost_p": wear_pence,
+        "floor_applied": floor_applied,
     }
 
 
@@ -225,6 +241,8 @@ def peak_export_recheck(
     export_pence: float | None,
     offpeak_pence: float | None,
     wear_pence: float | None = None,
+    min_target_soc: int = 0,
+    min_target_label: str | None = None,
 ) -> dict[str, Any]:
     """17:00/18:00 re-check of the peak export target from the load seen since 16:00 (phase 66).
 
@@ -234,11 +252,12 @@ def peak_export_recheck(
     is proposed only when it moves the target by >= PEAK_RECHECK_MIN_KWH versus
     the 16:00 target: lower (sell more) when the load is lighter than assumed,
     higher (stop selling) only if the 16:00 plan was actually pushed. Missing
-    soc or observed load is None, never 0.
+    soc or observed load is None, never 0. `min_target_soc`/`min_target_label`
+    (phase 127) apply the same floor as the 16:00 plan.
     """
     base: dict[str, Any] = {
         "decision": None, "action": None, "target_soc": None, "prior_target_soc": prior_target_soc,
-        "move_kwh": None, "export_kwh": 0.0, "gain_gbp": None,
+        "move_kwh": None, "export_kwh": 0.0, "gain_gbp": None, "floor_applied": None,
         "observed_peak_kwh": observed_peak_kwh, "remaining_load_kwh": None,
     }
     if soc is None:
@@ -250,6 +269,7 @@ def peak_export_recheck(
     plan = peak_export_plan(
         soc, reserve_soc, battery_capacity_kwh, export_pence, offpeak_pence,
         wear_pence=wear_pence, peak_need_soc=need,
+        min_target_soc=min_target_soc, min_target_label=min_target_label,
     )
     target = plan["target_soc"]
     move = None if prior_target_soc is None else round((prior_target_soc - target) / 100.0 * battery_capacity_kwh, 2)
@@ -260,7 +280,7 @@ def peak_export_recheck(
         action = "raise"
     return {
         **base, "decision": plan["decision"], "action": action, "target_soc": target, "move_kwh": move,
-        "export_kwh": plan["export_kwh"], "gain_gbp": plan["gain_gbp"],
+        "export_kwh": plan["export_kwh"], "gain_gbp": plan["gain_gbp"], "floor_applied": plan["floor_applied"],
         "remaining_load_kwh": round(remaining_kwh, 2),
     }
 
@@ -432,3 +452,34 @@ def peak_cover_startup_retry_due(minutes: int, soc, outage_active: bool, attempt
     outage is still flagged, and at most PEAK_COVER_STARTUP_RETRIES times."""
     in_window = PEAK_COVER_HOLD_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES
     return in_window and (soc is None or outage_active) and attempts < PEAK_COVER_STARTUP_RETRIES
+
+
+# ---- Review fixes (21/11/2026, phase 127) ----------------------------------------------------------
+
+PEAK_COVER_PUSH_RETRIES = 3  # a transient API failure retries this many times before giving up for the day
+
+
+def peak_cover_retry_due(api_ok: bool | None, minutes: int, attempts: int) -> bool:
+    """True when a failed, live, actionable peak-cover push should retry on the next 30-min check.
+
+    api_ok is None (not live/not actionable) or True (pushed, or nothing to push) never retries.
+    A failure retries until PEAK_COVER_PUSH_RETRIES attempts or PEAK_COVER_LAST_LOG_MINUTES,
+    whichever comes first, so a failing day still gets its final decision logged once (phase 127).
+    """
+    if api_ok is not False:
+        return False
+    return attempts < PEAK_COVER_PUSH_RETRIES and minutes < PEAK_COVER_LAST_LOG_MINUTES
+
+
+def peak_export_floor_soc(peak_min_soc: int | None, peak_cover_required_soc: float | None) -> tuple[int, str | None]:
+    """The higher of the user's Peak minimum SOC and today's peak-cover requirement (phase 127
+    user decision), as a floor for the 16:00 peak export target, so the export never sells below
+    what peak cover just topped up to. Returns (floor, which one — None if neither is set); the
+    caller applies it only when it exceeds the target the plan would otherwise pick.
+    """
+    floors: list[tuple[int, str | None]] = [(0, None)]
+    if _is_number(peak_min_soc) and peak_min_soc > 0:
+        floors.append((math.ceil(peak_min_soc), "peak_min_soc"))
+    if _is_number(peak_cover_required_soc):
+        floors.append((math.ceil(peak_cover_required_soc), "peak_cover_required_soc"))
+    return max(floors, key=lambda f: f[0])

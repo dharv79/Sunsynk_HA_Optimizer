@@ -59,7 +59,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 - Notification titles: `🔋 Sunsynk: <sentence case>`; failed push → "⚠️ Sunsynk: … NOT applied".
 - Machine-readable JSON lines go to `CONF_DATA_REPORT_TARGET` (debug stream, Slack `#sunsynkdebug`); human text to `CONF_NOTIFY_TARGET`.
 - Blocking file I/O via `hass.async_add_executor_job`.
-- Transient per-window state (`_peak_window_start`, `_shadow_export_stats`) is unpersisted by design.
+- Transient per-window state (`_shadow_export_stats`, `pending_full_trim_cancel`) is unpersisted by design.
 - Version lives in `manifest.json`; release = push `release/<version>` branch (tag containing `bN` → prerelease), via `.github/workflows/release.yml`.
 
 ## Run / test

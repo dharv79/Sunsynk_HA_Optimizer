@@ -29,6 +29,7 @@ from .core import (
     _percentile,
     band_key_at,
     hhmm_to_minutes,
+    minutes_to_hhmm,
     price_at,
 )
 
@@ -1164,3 +1165,62 @@ def apply_user_override(
     if isinstance(wanted, (int, float)) and not isinstance(wanted, bool):
         return max(BATTERY_BOTTOM_SOC, min(100, int(round(wanted)))), "set"
     return target_soc, None
+
+
+# ---- Review fixes (21/11/2026, phase 127) ----------------------------------------------------------
+
+EXPORT_PAUSE_MIN_HOLD_MINUTES = 30  # a kettle-length spike must not flip-flop the pushed slot
+
+
+def export_pause_restore_due(elapsed_minutes: float | None, in_peak_window: bool) -> bool:
+    """True once a cleared export pause should be actively restored (phase 127 user decision).
+
+    Outside 16:00-19:00 the overnight plan or the peak-cover 16:00 restore already own Flux 2, so
+    this only matters inside the window. ``elapsed_minutes`` is the time since the pause actually
+    took effect on the inverter; None (no recorded start, e.g. upgrading mid-pause) restores
+    immediately rather than blocking the slot indefinitely. Otherwise it waits for
+    EXPORT_PAUSE_MIN_HOLD_MINUTES so a brief trigger clear doesn't flip-flop the push.
+    """
+    return in_peak_window and (elapsed_minutes is None or elapsed_minutes >= EXPORT_PAUSE_MIN_HOLD_MINUTES)
+
+
+def export_pause_clear_slot(peak_export_target_soc: int | None, now_minutes: int) -> dict[str, Any]:
+    """Flux 2 slot to push once a cleared export pause is restored (phase 127).
+
+    A live peak export (16:00-19:00) keeps its own, usually lower, target instead of being
+    overwritten by the default 85% slot — correcting the phase 124 wording ("returns to 85%
+    when export re-enables"), which no code actually did.
+    """
+    if peak_export_target_soc is not None:
+        return {"startTime": minutes_to_hhmm(now_minutes), "endTime": "19:00", "targetSoc": peak_export_target_soc}
+    return dict(DEFAULT_FLUX2_SLOT)
+
+
+def flux2_push_still_active(last_action: dict[str, Any] | None, now_minutes: int) -> bool:
+    """True while a previously pushed Flux 2 slot (trim, peak export) is still in its window.
+
+    Read from the last push's own payload endTime; a missing or unparseable end means no — the
+    no-trigger branch is then free to show "No action" as usual.
+    """
+    payload = (last_action or {}).get("payload") or {}
+    end = hhmm_to_minutes((payload.get("flux_2") or {}).get("endTime"))
+    return end is not None and now_minutes < end
+
+
+def trim_full_day_active(plan_date: str | None, plan_is_full_day: Any, today: str, weekday_is_full_day: bool) -> bool:
+    """Whether today counts as a full-charge day for gating the normal >85% trim (phase 127).
+
+    Tonight's plan already applied the phase 68 full-charge skip (`full_charge_skip_live`), so it
+    is preferred whenever it is today's; the weekday comparison is the fallback when the plan is
+    missing or stale. The 99.5% hold-and-trim branch keeps using the weekday comparison directly
+    (phase 68 says only that branch is unchanged).
+    """
+    if plan_date == today and isinstance(plan_is_full_day, bool):
+        return plan_is_full_day
+    return weekday_is_full_day
+
+
+def trim_slot_end_minutes(now_minutes: int, duration_minutes: int) -> int:
+    """End minute of a trim sell slot, clamped to 19:00 (phase 127): selling past the peak window
+    loses money (`trim_target_soc` already refuses a trim from 19:00, so the start is always before it)."""
+    return min(now_minutes + duration_minutes, PEAK_END_MINUTES)

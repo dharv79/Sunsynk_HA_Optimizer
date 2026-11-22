@@ -61,6 +61,7 @@ from .planning import (
     reserve_hold_cost,
     no_battery_baseline,
     no_system_baseline,
+    peak_window_usage_from_snapshots,
     ledger_add,
     ledger_totals,
     capacity_estimate_pending,
@@ -180,6 +181,8 @@ class CaptureMixin:
         if time == "05:00":
             await self._guarded(self._async_overnight_load_check, "Overnight baseload check")
             await self._guarded(self.async_run_charge_outcome, "Charge outcome")
+        if time == "19:00":
+            await self._guarded(self._async_log_peak_window_usage, "Peak-window usage")
         # Until a first estimate exists, re-measure after each sample-closing snapshot.
         if time == "05:00" and capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
             await self._guarded(lambda: self.async_run_capacity_estimate(notify=False), "Battery capacity estimate")
@@ -239,6 +242,20 @@ class CaptureMixin:
             soc=round_or_none(soc, 1),
             soc_from_cache=soc_cached,
         )
+
+    async def _async_log_peak_window_usage(self) -> None:
+        """19:00: log the 16:00-19:00 load/grid-import/grid-export delta from the exact meter
+        snapshots (phase 127), replacing the old 30-minute-tick tracker — which could capture a
+        partial window after a restart in 16:00-19:00, or otherwise a window shifted by up to 29
+        minutes (the tick is anchored to setup time, not the clock)."""
+        now = dt_util.now()
+        today = now.date().isoformat()
+        snapshots = await self.data_logger.async_load_meter_snapshots(today)
+        usage = peak_window_usage_from_snapshots(snapshots)
+        if usage is None:
+            return  # an unavailable meter would log a wrong/partial delta
+        await self.data_logger.async_log_peak_window_usage(date=today, **usage)
+        self.coordinator.update_state(touch=False, last_peak_window_usage={"type": "peak_window_usage", "date": today, **usage})
 
     async def _async_capture_day_kpis(self, date: str) -> dict[str, Any]:
         """22:00: close the day's snapshots and log the efficiency KPIs (phase 14)."""
@@ -533,7 +550,11 @@ class CaptureMixin:
         day_grid_export_kwh = self._essential_state(self.day_grid_export_entity)
         now = dt_util.now()
         date = now.date().isoformat()
-        evening_export_disabled = self.coordinator.state.evening_export_disabled
+        # Phase 127: the live flag is almost always False by 22:00 (the Flux 2 check clears it on
+        # its first no-trigger tick after 19:00), so a pause earlier today would otherwise log as
+        # False. export_paused_date is stamped once, on the pause's first successful push, and
+        # outlives the flag clearing — this is what actually happened today, not the live state.
+        evening_export_disabled = self.coordinator.state.export_paused_date == date
         clipped = self._clipped if self._clipped.get("date") == date else {}
         clipped_kwh = clipped.get("kwh") if clipped.get("periods") else (0.0 if clipped else None)
         too_high = overnight_target_too_high(clipped_kwh, clipped.get("first_full_hour"))
