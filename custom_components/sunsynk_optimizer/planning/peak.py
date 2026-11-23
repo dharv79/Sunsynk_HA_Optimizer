@@ -296,12 +296,15 @@ PEAK_COVER_LEAD_MINUTES = 45  # start this long before the charge needs to begin
 PEAK_COVER_HOLD_FROM_MINUTES = 9 * 60  # a hold (not a top-up) may start this early (phase 59)
 
 
+PEAK_COVER_TOPUP_BUFFER_KWH = 1.5  # phase 132: fixed allowance over a typical evening (cooking, guests)
+
+
 def peak_need_soc(
     peak_load_kwh: float, capacity_kwh: float,
-    margin: float = PEAK_COVER_MARGIN, efficiency: float = DISCHARGE_EFFICIENCY,
+    margin: float = PEAK_COVER_MARGIN, efficiency: float = DISCHARGE_EFFICIENCY, buffer_kwh: float = 0.0,
 ) -> float:
-    """SOC points the 16:00-19:00 house load takes out of the battery, with margin and discharge losses."""
-    return peak_load_kwh * margin / efficiency / capacity_kwh * 100.0
+    """SOC points the 16:00-19:00 house load (times margin, plus buffer_kwh) takes out of the battery after discharge losses."""
+    return (peak_load_kwh * margin + buffer_kwh) / efficiency / capacity_kwh * 100.0
 
 
 def peak_cover_worth_it(
@@ -329,6 +332,7 @@ def peak_cover_plan(
     margin: float = PEAK_COVER_MARGIN,
     wear_pence: float | None = None,
     min_soc: float | None = None,
+    buffer_kwh: float = 0.0,
 ) -> dict[str, Any]:
     """Will the battery reach 16:00 with enough to run the peak window? If not, how to top up.
 
@@ -347,7 +351,9 @@ def peak_cover_plan(
     hours = max(0.0, minutes_to_peak / 60.0)
     projected = soc + (solar_kwh - load_kw * hours) / capacity_kwh * 100.0
     projected_soc = round(min(100.0, max(float(floor_soc), projected)), 1)
-    required_soc = peak_required_soc(floor_soc + peak_need_soc(peak_load_kwh, capacity_kwh, margin), min_soc)
+    required_soc = peak_required_soc(
+        floor_soc + peak_need_soc(peak_load_kwh, capacity_kwh, margin, buffer_kwh=buffer_kwh), min_soc
+    )
     shortfall_soc = max(0.0, required_soc - projected_soc)
     worth = peak_cover_worth_it(day_pence, peak_pence, wear_pence=wear_pence)
     # Phase 59: still at or above the required SOC but heading below it by 16:00. Holding the
@@ -394,6 +400,47 @@ def peak_cover_plan(
         "gain_vs_topup_gbp": gain_vs_topup_gbp,
         "peak_min_soc": int(min_soc) if _is_number(min_soc) and min_soc > 0 else None,
     }
+
+
+def peak_cover_plan_split(
+    soc: float,
+    capacity_kwh: float,
+    minutes_to_peak: float,
+    solar_kwh: float,
+    load_kw: float,
+    peak_load_kwh: float,
+    typical_load_kwh: float | None,
+    charge_rate_kw: float,
+    day_pence: float | None,
+    peak_pence: float | None,
+    margin: float = PEAK_COVER_MARGIN,
+    buffer_kwh: float = PEAK_COVER_TOPUP_BUFFER_KWH,
+    wear_pence: float | None = None,
+    min_soc: float | None = None,
+    floor_soc: int = PEAK_COVER_FLOOR_SOC,
+) -> dict[str, Any]:
+    """Peak cover with a generous hold and a lean top-up (phase 132).
+
+    A hold against the cautious estimate (`peak_load_kwh` x `margin`) costs nothing: the charge
+    left at 19:00 is used afterwards at the same day rate. A top-up buys charge through the
+    charge loss, so anything short of an `ok` or `hold` is re-planned on the typical evening
+    (`typical_load_kwh`, no margin) plus a fixed `buffer_kwh`. That re-plan may itself hold
+    (at the lean requirement) or top up. `typical_load_kwh` None keeps the cautious plan.
+    `required_soc_hold` is the cautious requirement; `required_basis` says which one was used.
+    """
+    args = (soc, capacity_kwh, minutes_to_peak, solar_kwh, load_kw)
+    plan = peak_cover_plan(
+        *args, peak_load_kwh, charge_rate_kw, day_pence, peak_pence,
+        floor_soc=floor_soc, margin=margin, wear_pence=wear_pence, min_soc=min_soc,
+    )
+    out, basis = plan, "hold"
+    if plan["decision"] not in ("ok", "hold") and _is_number(typical_load_kwh):
+        out = peak_cover_plan(
+            *args, typical_load_kwh, charge_rate_kw, day_pence, peak_pence,
+            floor_soc=floor_soc, margin=1.0, wear_pence=wear_pence, min_soc=min_soc, buffer_kwh=buffer_kwh,
+        )
+        basis = "typical"
+    return {**out, "required_soc_hold": plan["required_soc"], "required_basis": basis}
 
 
 def peak_required_soc(estimated_soc: float, min_soc: float | None = None) -> int:
