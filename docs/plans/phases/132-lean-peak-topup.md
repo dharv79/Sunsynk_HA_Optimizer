@@ -1,6 +1,6 @@
 # Phase 132: Lean peak-cover top-ups, generous holds
 
-Status: Planned, not built
+Status: Done, merged (256da468af4ceda3d9d381b75b300dfea463a5a1, PR #253)
 
 ## Why
 
