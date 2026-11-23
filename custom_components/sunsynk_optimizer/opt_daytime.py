@@ -78,6 +78,7 @@ from .planning import (
     PEAK_COVER_HOLD_FROM_MINUTES,
     PEAK_COVER_LAST_LOG_MINUTES,
     PEAK_COVER_PEAK_START_MINUTES,
+    PEAK_COVER_TOPUP_BUFFER_KWH,
     daytime_load_kw,
     evening_reserve_soc,
     exclude_away_days,
@@ -86,7 +87,7 @@ from .planning import (
     flux2_branch,
     flux2_push_still_active,
     flux2_trim_due,
-    peak_cover_plan,
+    peak_cover_plan_split,
     peak_cover_retry_due,
     peak_cover_startup_retry_due,
     peak_export_floor_soc,
@@ -96,6 +97,7 @@ from .planning import (
     peak_load_estimate_kwh,
     peak_load_estimate_split,
     peak_load_recent_high,
+    peak_load_typical,
     peak_need_soc,
     over_limit_import_step,
     intraday_forecast_scale,
@@ -1073,6 +1075,9 @@ class DaytimeMixin:
         )
         if recent_source:
             peak_load_source = recent_source
+        # Phase 132: a top-up buys only the typical evening plus a fixed buffer; a hold keeps the
+        # cautious estimate above, since unused held charge is spent after 19:00 at the same day rate.
+        typical_kwh, typical_source = peak_load_typical(peak_days, 3.0 * load_kw)
         # Pessimistic solar, like the low-solar decisions: the raw (uncorrected) forecast.
         hourly = self._hourly_or_synthetic_forecast(cfg, now)
         solar_kwh = solar_until_kwh(hourly, now.hour + now.minute / 60.0)
@@ -1087,8 +1092,8 @@ class DaytimeMixin:
         scaled_kwh = scaled_solar_kwh(solar_kwh, intraday_scale)
         if solar_kwh is None:
             solar_kwh = 0.0  # no forecast: assume none rather than guess
-        plan = peak_cover_plan(
-            soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, solar_kwh, load_kw, peak_load_kwh,
+        plan = peak_cover_plan_split(
+            soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, solar_kwh, load_kw, peak_load_kwh, typical_kwh,
             charge_rate_kw, prices["day"], prices["peak"], margin=peak_margin, wear_pence=self._wear_pence(),
             min_soc=self.coordinator.state.peak_min_soc,
         )
@@ -1133,7 +1138,8 @@ class DaytimeMixin:
             "intraday_scale": intraday_scale,
             "solar_kwh_to_16_scaled": scaled_kwh,
             "intraday_decision": self._intraday_cover_decision(
-                scaled_kwh, solar_kwh, soc, capacity, minutes, load_kw, peak_load_kwh, charge_rate_kw, prices, peak_margin
+                scaled_kwh, solar_kwh, soc, capacity, minutes, load_kw, peak_load_kwh, typical_kwh, charge_rate_kw,
+                prices, peak_margin,
             ),
             "load_kw": load_kw,
             "load_source": load_source,
@@ -1144,6 +1150,9 @@ class DaytimeMixin:
             "peak_load_kwh_base": base_load_kwh,
             "peak_load_source_base": base_load_source,
             "peak_margin_base": base_margin,
+            "peak_load_kwh_typical": typical_kwh,
+            "peak_load_source_typical": typical_source,
+            "peak_buffer_kwh": PEAK_COVER_TOPUP_BUFFER_KWH,
             "wear_cost_p": self._wear_pence(),
             "day_pence": prices["day"],
             "peak_pence": prices["peak"],
@@ -1160,14 +1169,15 @@ class DaytimeMixin:
         await self.data_logger.async_log_peak_cover(**record)
 
     def _intraday_cover_decision(
-        self, scaled_kwh, raw_kwh, soc, capacity, minutes, load_kw, peak_load_kwh, charge_rate_kw, prices, margin
+        self, scaled_kwh, raw_kwh, soc, capacity, minutes, load_kw, peak_load_kwh, typical_kwh, charge_rate_kw,
+        prices, margin,
     ) -> str | None:
         """What peak cover would decide on min(raw, scaled) solar (phase 56 shadow); None without a scale."""
         if scaled_kwh is None or raw_kwh is None or scaled_kwh == raw_kwh:
             return None
-        return peak_cover_plan(
+        return peak_cover_plan_split(
             soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, min(raw_kwh, scaled_kwh), load_kw, peak_load_kwh,
-            charge_rate_kw, prices["day"], prices["peak"], margin=margin, wear_pence=self._wear_pence(),
+            typical_kwh, charge_rate_kw, prices["day"], prices["peak"], margin=margin, wear_pence=self._wear_pence(),
             min_soc=self.coordinator.state.peak_min_soc,
         )["decision"]
 

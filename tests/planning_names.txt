@@ -684,3 +684,6 @@ exclude_away_days
 _AUDIT_REDACT_KEYS
 _is_redacted_key
 redact_settings_changes
+PEAK_COVER_TOPUP_BUFFER_KWH
+peak_cover_plan_split
+peak_load_typical

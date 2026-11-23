@@ -392,3 +392,11 @@ phase 127 regression tests that pinned the old inline conditions
 (`test_no_trigger_branch_keeps_the_action_while_a_push_still_holds_flux2`,
 `test_normal_trim_gate_uses_the_plans_full_day_flag` in `tests/test_daytime_review_fixes.py`)
 were updated to pin the new call sites instead. See `docs/plans/phases/131-review-refactor.md`.
+
+## Lean peak-cover top-ups, generous holds (23/11/2026, phase 132)
+
+**Root cause.** 23/11 the 12:27 check held 96%: the 22/11 evening used 7.1 kWh, lifting the phase 123 p75 recent high to ~5.9 kWh, then × 1.1 cold margin ÷ 0.92 discharge on a 25% floor.
+
+**Design.** Holds and top-ups have different costs of being wrong. Held charge the peak does not use is spent after 19:00 instead of grid at the same day rate (~0p/kWh), while a shortfall costs peak − day (~11p/kWh), so holds keep the cautious estimate. A top-up buys charge through the charge loss and wear, so `planning.peak_cover_plan_split` re-plans anything short of `ok`/`hold` on `peak_load_typical` (median of the last 7 logged windows, any day type, no margin) plus `PEAK_COVER_TOPUP_BUFFER_KWH` (1.5 kWh). That re-plan can hold at the lean requirement when SOC sits between the two, or top up to it. The Peak minimum SOC floors both; peak export's floor follows the `required_soc` actually used. The `peak_cover` record adds `required_soc_hold`, `required_basis` (`hold`/`typical`), `peak_load_kwh_typical`, `peak_load_source_typical`, `peak_buffer_kwh`.
+
+**Verification.** `tests/test_peak_cover_split.py`. Live: a top-up day logs `required_basis: typical` with `required_soc` below `required_soc_hold`.

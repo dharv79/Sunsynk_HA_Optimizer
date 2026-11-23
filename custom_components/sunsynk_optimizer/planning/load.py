@@ -236,6 +236,24 @@ def peak_load_recent_high(
     return high, "recent_high_cold" if cold else "recent_high", high_margin
 
 
+def peak_load_typical(samples: list[tuple[str, float]], default_kwh: float) -> tuple[float, str]:
+    """Typical 16:00-19:00 load for a peak-cover top-up (phase 132): the median of the last
+    PEAK_COVER_RECENT_DAYS logged windows (any day type), else `default_kwh` with fewer than
+    PEAK_COVER_MIN_PEAK_DAYS. One heavy evening barely moves it."""
+    dated = []
+    for day, value in samples:
+        try:
+            date.fromisoformat(str(day))
+        except ValueError:
+            continue
+        if _is_number(value) and value >= 0:
+            dated.append((str(day), float(value)))
+    recent = [v for _, v in sorted(dated)[-PEAK_COVER_RECENT_DAYS:]]
+    if len(recent) < PEAK_COVER_MIN_PEAK_DAYS:
+        return default_kwh, "default"
+    return round(median(recent), 2), "recent_median"
+
+
 def exclude_away_days(
     samples: list[tuple[str, float]], away_dates: set[str] | frozenset[str]
 ) -> list[tuple[str, float]]:
