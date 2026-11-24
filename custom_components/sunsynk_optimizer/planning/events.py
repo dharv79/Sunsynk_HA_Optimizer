@@ -171,6 +171,26 @@ def free_event_timer_plan(
 FREE_EVENT_ESTIMATE_KEYS = ("sell_start", "sell_end", "skip_sell", "expected_export_kwh")
 
 
+FREE_EVENT_FINISHED_PHASES = ("done", "cancelled")
+
+
+def free_event_notice_shown(event: dict | None) -> bool:
+    """Phase 133: the dashboard notice shows while an event is live, and once it ends until dismissed."""
+    event = event or {}
+    phase = event.get("phase")
+    if phase in ("scheduled", "selling", "charging"):
+        return True
+    return phase in FREE_EVENT_FINISHED_PHASES and not event.get("dismissed")
+
+
+def free_event_dismiss_due(event: dict | None, end_date: date | None, today: date) -> bool:
+    """Phase 133: a finished event's notice hides once the day it ended is over (no end date: at once)."""
+    event = event or {}
+    if event.get("phase") not in FREE_EVENT_FINISHED_PHASES or event.get("dismissed"):
+        return False
+    return end_date is None or end_date < today
+
+
 def free_event_sold(event: dict) -> bool:
     """True once the sell start has run (it always records ``soc_at_sell_start``)."""
     return "soc_at_sell_start" in event

@@ -216,3 +216,15 @@ appears for most sensors.
 Verification: `tests/test_refactor_review_fixes.py::test_sensor_registration_and_unit_lookup_share_one_table`
 and `::test_sensor_specs_cover_every_registered_sensor_with_a_name`; the full `test_dashboard.py`
 suite stayed green. See `docs/plans/phases/131-review-refactor.md`.
+
+## Clear notices (24/11/2026, phase 133)
+
+**Root cause.** `last_error` was only cleared by a successful overnight plan, so a one-off glitch (24/11: the SolarSynk grid power sensor briefly unavailable, "Flux 2 check skipped") stayed on the overview all day. The free-event alert showed `done` until the next event.
+
+**Design.**
+- `button.clear_notices` (Clear notices) → `async_clear_notices`: clears `last_error` and marks a done/cancelled `free_event` `dismissed`. State only, so it works in monitor mode; the event record is kept because the 22:00 capture and the overnight plan still read it.
+- Auto-clear: `_guarded` clears an error its own label raised (`"<label> failed"`) when that callback next succeeds; the 30-minute Flux 2 check clears its own "skipped — unavailable" error once both inputs read again (`planning.error_resolved`).
+- `binary_sensor.free_event_notice` (`planning.free_event_notice_shown`): on while an event is scheduled/selling/charging, and after it finishes until dismissed. A 00:05 listener dismisses a finished event once its day is over (`free_event_dismiss_due`). A new event starts a fresh record, so the flag never hides it.
+- Overview: the free-event alert is gated on that binary sensor; a full-width **Clear notices** tile shows only while Last error or the free-event notice is showing. Press **Update dashboard** after upgrading.
+
+**Verification.** `tests/test_clear_notices.py`. Live: press Clear notices with both cards showing; both disappear, `sensor.free_event` keeps its phase and attributes.

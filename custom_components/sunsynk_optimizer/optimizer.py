@@ -60,6 +60,7 @@ from .flux_helpers import (
 )
 from .planning import (
     carry_plan_flux1,
+    error_resolved,
     reset_refusal,
     setting_text,
     delivery,
@@ -248,6 +249,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
             (6, 5, self._async_spare_solar_morning),
             (6, 10, self._async_tariff_price_check),
             (6, 20, self._async_data_audit),  # phase 45
+            (0, 5, self._async_free_event_notice_midnight),  # phase 133
             (22, 0, self._async_capture_day_actuals),  # also takes the 22:00 meter snapshot
             # Phase 14 KPI snapshots at the Flux band edges.
             (2, 0, self._async_meter_snapshot),
@@ -575,12 +577,19 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         resilient while still being able to use a step's return value.
         """
         try:
-            return await coro_factory()
+            result = await coro_factory()
         except Exception as exc:  # pragma: no cover
             _LOGGER.exception("%s failed", label)
             self._guarded_errors[label] = self._guarded_errors.get(label, 0) + 1
             self.coordinator.update_state(last_error=f"{label} failed: {exc}")
             return None
+        self._clear_resolved_error(f"{label} failed")
+        return result
+
+    def _clear_resolved_error(self, prefix: str) -> None:
+        """Clear last_error once the check that raised it succeeds (phase 133)."""
+        if error_resolved(self.coordinator.state.last_error, prefix):
+            self.coordinator.update_state(last_error=None)
 
     async def _async_initial_refresh(self, _now) -> None:
         """Populate initial state soon after startup.
