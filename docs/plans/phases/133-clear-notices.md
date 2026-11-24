@@ -1,6 +1,6 @@
 # Phase 133: Clear notices: button and auto-clear for Last error and finished free events
 
-Status: Planned, not built
+Status: Done, merged (f019ed34ba10b9a56e80360ddbec4aefd24b1a9a, PR #255)
 
 ## Why
 
