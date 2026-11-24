@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .entity import optimizer_device_info, pin_entity_id
 from .const import DOMAIN
+from .planning import free_event_notice_shown
 
 
 async def async_setup_entry(
@@ -44,6 +45,10 @@ async def async_setup_entry(
             SunsynkOptimizerBinarySensor(
                 coordinator, entry, "monitor_only", "Monitor only mode",
                 icon="mdi:eye-outline",
+            ),
+            SunsynkOptimizerBinarySensor(
+                coordinator, entry, "free_event_notice", "Free event notice",
+                icon="mdi:gift-outline", entity_id="binary_sensor.free_event_notice",
             ),
         ]
     )
@@ -84,6 +89,8 @@ class SunsynkOptimizerBinarySensor(CoordinatorEntity, BinarySensorEntity):
             return bool((state.inverter_events or {}).get("fault"))
         if self._key == "monitor_only":
             return state.operation_mode == "monitor"
+        if self._key == "free_event_notice":
+            return free_event_notice_shown(state.free_event)
         return False
 
     @property

@@ -165,6 +165,11 @@ def net_cost_gbp(import_cost: float | None, export_income: float | None, gas_cos
     return round(import_cost - export_income + gas_cost, 2)
 
 
+def error_resolved(last_error: str | None, prefix: str) -> bool:
+    """True when last_error came from the check `prefix` names, so that check succeeding clears it (phase 133)."""
+    return bool(last_error) and bool(prefix) and str(last_error).startswith(prefix)
+
+
 def round_or_none(value: float | None, digits: int = 2) -> float | None:
     return round(value, digits) if value is not None else None
 

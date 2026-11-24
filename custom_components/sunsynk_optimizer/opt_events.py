@@ -35,8 +35,10 @@ from .planning import (
     next_plan_date,
     manual_free_event_error,
     free_event_push_retry_due,
+    free_event_dismiss_due,
     free_event_result,
     free_event_schedule_error,
+    FREE_EVENT_FINISHED_PHASES,
     plan_free_event,
     FREE_EVENT_PUSH_RETRY_MINUTES,
     FREE_EVENT_WATCH_MINUTES,
@@ -399,6 +401,30 @@ class EventsMixin:
             payload["flux_1"] = plan["payload"]["flux_1"]
         # Undoes the event's own slots, so it runs in monitor mode too (like the gentle-current restore).
         return await self.async_push_flux_override(payload, allow_in_monitor=True)
+
+    async def async_clear_notices(self) -> None:
+        """Clear Last error and hide a finished free event's notice (the dashboard 'Clear notices' button, phase 133).
+
+        State only, so it also works in monitor mode; the event record itself is kept for the 22:00 report.
+        """
+        updates: dict[str, Any] = {"last_error": None}
+        event = dict(self.coordinator.state.free_event)
+        if event.get("phase") in FREE_EVENT_FINISHED_PHASES and not event.get("dismissed"):
+            event["dismissed"] = True
+            updates["free_event"] = event
+        self.coordinator.update_state(touch=False, **updates)
+
+    async def _async_free_event_notice_midnight(self, _now) -> None:
+        await self._guarded(self.async_dismiss_finished_free_event, "Free event notice")
+
+    async def async_dismiss_finished_free_event(self) -> None:
+        """00:05: hide a done or cancelled event's dashboard notice once its day is over (phase 133)."""
+        event = dict(self.coordinator.state.free_event)
+        end = dt_util.parse_datetime(event.get("free_end") or "")
+        end_date = dt_util.as_local(end).date() if end else None
+        if free_event_dismiss_due(event, end_date, dt_util.now().date()):
+            event["dismissed"] = True
+            self.coordinator.update_state(touch=False, free_event=event)
 
     async def async_cancel_free_event(self) -> None:
         """Cancel a scheduled or in-progress free event (the dashboard 'Cancel free event' button)."""

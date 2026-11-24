@@ -687,3 +687,7 @@ redact_settings_changes
 PEAK_COVER_TOPUP_BUFFER_KWH
 peak_cover_plan_split
 peak_load_typical
+error_resolved
+FREE_EVENT_FINISHED_PHASES
+free_event_dismiss_due
+free_event_notice_shown

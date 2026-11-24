@@ -55,7 +55,7 @@ def test_guarded_returns_the_wrapped_call_result_not_always_none():
     that both needs guarding and returns a value (e.g. the day KPIs record) can use either,
     instead of every guarded call being forced to discard its result."""
     src = _function_source(PKG / "optimizer.py", "_guarded")
-    assert "return await coro_factory()" in src
+    assert "result = await coro_factory()" in src and "return result" in src
     assert "return None" in src
 
 

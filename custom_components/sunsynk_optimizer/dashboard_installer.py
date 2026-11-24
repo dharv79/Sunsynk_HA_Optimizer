@@ -338,7 +338,18 @@ def _overview(s, forecast_sensor: str) -> dict[str, Any]:
             "{{ when('sensor.free_event', 'free_start') }} → {{ when('sensor.free_event', 'free_end', '%H:%M') }}"
             " · sell {{ a('sensor.free_event', 'sell_status') }}</ha-alert>"
         ),
-        "visibility": [{"condition": "state", "entity": "sensor.free_event", "state_not": "none"}],
+        "visibility": _on("binary_sensor.free_event_notice"),
+    })
+    alerts.append({
+        **_tile("button.clear_notices", "Clear notices", "mdi:notification-clear-all", "grey",
+                columns=12, action=_press("button.clear_notices")),
+        "visibility": [{"condition": "or", "conditions": [
+            {"condition": "and", "conditions": [
+                {"condition": "state", "entity": "sensor.last_error", "state_not": "OK"},
+                {"condition": "state", "entity": "sensor.last_error", "state_not": "unavailable"},
+            ]},
+            *_on("binary_sensor.free_event_notice"),
+        ]}],
     })
 
     live = _section(

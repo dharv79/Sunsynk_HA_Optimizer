@@ -118,6 +118,8 @@ from .opt_common import (
 
 _LOGGER = logging.getLogger(__name__)
 
+FLUX2_SKIPPED_ERROR = "Flux 2 check skipped — unavailable: "
+
 class DaytimeMixin:
     """SOC listener, Flux 2 check, trim, peak cover, peak export and re-checks (methods of SunsynkOptimizer)."""
 
@@ -162,7 +164,7 @@ class DaytimeMixin:
                 for entity, value in ((self.battery_soc_entity, soc), (self.grid_pac_entity, grid_pac))
                 if value is None
             ]
-            msg = f"Flux 2 check skipped — unavailable: {', '.join(missing)}"
+            msg = f"{FLUX2_SKIPPED_ERROR}{', '.join(missing)}"
             _LOGGER.warning(msg)
             self.coordinator.update_state(
                 last_error=msg,
@@ -175,6 +177,7 @@ class DaytimeMixin:
                 },
             )
             return
+        self._clear_resolved_error(FLUX2_SKIPPED_ERROR)  # phase 133: inputs are back
 
         cfg = self.cfg
         now_local = dt_util.now()
