@@ -1,6 +1,6 @@
 # Phase 134: Daily health ignores a small taper shortfall
 
-Status: Planned, not built
+Status: Done, merged (03eb8643d123b2a9b54f457ec0922e0a134cef37, PR #257)
 
 ## Why
 
