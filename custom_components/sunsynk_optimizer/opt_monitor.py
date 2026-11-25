@@ -173,6 +173,7 @@ class MonitorMixin:
                 version=INTEGRATION_VERSION,
                 api_ok=api.get("ok") if "ok" in api else None,
                 charge_shortfall_pct=outcome.get("shortfall_pct"),
+                charge_shortfall_cause=outcome.get("likely_cause"),
                 records_written=written,
                 records_expected=expected,
                 guarded_errors=dict(self._guarded_errors),

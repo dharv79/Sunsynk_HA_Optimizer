@@ -691,3 +691,5 @@ error_resolved
 FREE_EVENT_FINISHED_PHASES
 free_event_dismiss_due
 free_event_notice_shown
+HEALTH_TAPER_TOLERANCE_PCT
+charge_shortfall_flagged

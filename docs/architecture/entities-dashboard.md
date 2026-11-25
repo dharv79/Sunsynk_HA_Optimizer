@@ -228,3 +228,11 @@ suite stayed green. See `docs/plans/phases/131-review-refactor.md`.
 - Overview: the free-event alert is gated on that binary sensor; a full-width **Clear notices** tile shows only while Last error or the free-event notice is showing. Press **Update dashboard** after upgrading.
 
 **Verification.** `tests/test_clear_notices.py`. Live: press Clear notices with both cards showing; both disappear, `sensor.free_event` keeps its phase and attributes.
+
+## Daily health ignores a small taper shortfall (25/11/2026, phase 134)
+
+**Root cause.** In cold weather the overnight charge tapers near full and ends 5–6% below a 100% target. Every such night set `daily_health` to Check ("charge 6% short"), so the status no longer pointed at real faults.
+
+**Design.** `planning.charge_shortfall_flagged(shortfall, cause)`: a shortfall above `OUTCOME_ALERT_PCT` (5%) is a Check unless `charge_outcome` labelled it `taper` and it is at most `HEALTH_TAPER_TOLERANCE_PCT` (6%). Cold derate, stopped early, an unknown cause or a bigger gap still Check. The record keeps `charge_shortfall_pct` and adds `charge_shortfall_cause`. The 05:00 "overnight charge stopped short" notification is unchanged.
+
+**Verification.** `tests/test_daily_health.py`. Live: a 94%-of-100% taper night logs `daily_health` OK with `charge_shortfall_pct: 6.0`, `charge_shortfall_cause: "taper"`.
