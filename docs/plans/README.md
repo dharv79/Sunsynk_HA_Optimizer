@@ -141,7 +141,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 131. Refactor: Flux 2 decision and free-event timer helpers, split the import plan, shared helpers | Done, merged (d5d0b01aec5f5836c40994dbf956cf00aaeca89b, PR #251), released in 2.3.8 | M, ~60-90k |
 | 132. Lean peak-cover top-ups, generous holds (user request 23/11/2026) | Done, merged (256da468af4ceda3d9d381b75b300dfea463a5a1, PR #253), released in 2.3.9 | XS-S, ~20-35k |
 | 133. Clear notices: button and auto-clear for Last error and finished free events (user request 24/11/2026) | Done, merged (f019ed34ba10b9a56e80360ddbec4aefd24b1a9a, PR #255), released in 2.3.10 | XS-S, ~20-35k |
-| 134. Daily health ignores a small taper shortfall (user request 25/11/2026) | Planned, not built | XS, ~15-25k |
+| 134. Daily health ignores a small taper shortfall (user request 25/11/2026) | Done, merged (03eb8643d123b2a9b54f457ec0922e0a134cef37, PR #257), released in 2.3.11 | XS, ~15-25k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
