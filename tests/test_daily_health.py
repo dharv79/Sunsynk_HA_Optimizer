@@ -76,3 +76,22 @@ def test_record_type_registry_covers_every_written_type():
     assert written <= registry
     dedup = set(re.search(r"_DEDUP_TYPES = \((.*?)\)", src, re.S).group(1).replace('"', "").replace(",", " ").split())
     assert dedup <= registry
+
+
+def test_small_taper_shortfall_is_not_a_check(planning):
+    # Phase 134: 25/11/2026 target 100%, reached 94% (taper) flagged Check every night.
+    out = planning.daily_health(**{**CLEAN, "charge_shortfall_pct": 6.0, "charge_shortfall_cause": "taper"})
+    assert out["status"] == "OK" and out["charge_shortfall_cause"] == "taper" and out["charge_shortfall_pct"] == 6.0
+
+
+def test_bigger_or_other_shortfalls_still_check(planning):
+    for pct, cause in ((7.0, "taper"), (6.0, "cold_derate"), (6.0, "stopped_early"), (6.0, None)):
+        out = planning.daily_health(**{**CLEAN, "charge_shortfall_pct": pct, "charge_shortfall_cause": cause})
+        assert out["status"] == "Check" and out["reasons"] == [f"charge {pct:g}% short"], (pct, cause)
+
+
+def test_charge_shortfall_flagged(planning):
+    assert not planning.charge_shortfall_flagged(None, "taper")
+    assert not planning.charge_shortfall_flagged(5.0, None)
+    assert not planning.charge_shortfall_flagged(planning.HEALTH_TAPER_TOLERANCE_PCT, "taper")
+    assert planning.charge_shortfall_flagged(planning.HEALTH_TAPER_TOLERANCE_PCT + 0.5, "taper")

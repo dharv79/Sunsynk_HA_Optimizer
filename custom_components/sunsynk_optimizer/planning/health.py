@@ -19,6 +19,7 @@ from .overnight import OUTCOME_ALERT_PCT
 
 HEALTH_SOC_STALE_CHECK_H = 2.0    # no SOC update for this long: Check
 HEALTH_SOC_STALE_PROBLEM_H = 6.0  # ...and this long: Problem
+HEALTH_TAPER_TOLERANCE_PCT = 6.0  # phase 134: a taper gap this small is the battery, not a fault
 
 
 def records_today(
@@ -27,6 +28,14 @@ def records_today(
     """(daily record types written for `date`, types expected) from the JSONL records."""
     seen = {r.get("type") for r in records if r.get("date") == date}
     return sum(1 for t in daily_types if t in seen), len(daily_types)
+
+
+def charge_shortfall_flagged(shortfall_pct: float | None, cause: str | None) -> bool:
+    """Phase 134: a missed charge target is a health Check unless it is a small taper gap."""
+    shortfall = _num(shortfall_pct)
+    if shortfall is None or shortfall <= OUTCOME_ALERT_PCT:
+        return False
+    return not (cause == "taper" and shortfall <= HEALTH_TAPER_TOLERANCE_PCT)
 
 
 def daily_health(
@@ -42,11 +51,12 @@ def daily_health(
     shadow_features: list[str] | None,
     settings_flag_count: int | None = None,
     monitor: bool = False,
+    charge_shortfall_cause: str | None = None,
 ) -> dict[str, Any]:
     """One-line health verdict for the 22:00 bundle and `sensor.health`. Pure.
 
     status is "Problem" (last push failed, or no SOC update for 6 h), "Check" (any
-    guarded error or API failure, a missed charge target, a missing daily record, or
+    guarded error or API failure, a missed charge target (not a small taper gap), a missing daily record, or
     a SOC update older than 2 h), "OK" only when every core input is known and clean,
     else None. A missing input is never read as healthy. In monitor mode nothing is pushed,
     so the push result is neither checked nor needed for "OK".
@@ -67,7 +77,7 @@ def daily_health(
         checks.append(f"{error_count} scheduled error(s)")
     if api_failures:
         checks.append(f"{api_failures} API failure(s)")
-    if shortfall is not None and shortfall > OUTCOME_ALERT_PCT:
+    if charge_shortfall_flagged(shortfall, charge_shortfall_cause):
         checks.append(f"charge {shortfall:g}% short")
     if settings_flag_count:
         checks.append(f"{settings_flag_count} inverter setting flag(s)")
@@ -87,6 +97,7 @@ def daily_health(
         "version": version,
         "plan_pushed": None if monitor else api_ok,
         "charge_shortfall_pct": shortfall,
+        "charge_shortfall_cause": charge_shortfall_cause,
         "records_written": records_written,
         "records_expected": records_expected,
         "guarded_errors": errors,

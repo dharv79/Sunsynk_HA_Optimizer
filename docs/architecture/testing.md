@@ -72,7 +72,7 @@ python3 -m py_compile custom_components/sunsynk_optimizer/*.py
 | `tests/test_round_trip.py` | Phase 103 intervals, SOC correction, warm/cold groups, AC conversion, decision shadow, scorecard line |
 | `tests/test_weekly_digest.py` | Phase 104 import causes by week, charge shortfalls, forecast error, verdict changes, weekly KPI sensors; phase 129: free-event kWh priced at 0 and excluded from the paid-kWh average |
 | `tests/test_api_health.py` | Phase 101 API counters, failure classes, history, 3-day alert, weekly totals; phase 121 per-route failures, masked detail, read-back stop; phase 122 unsupported (404/405) route |
-| `tests/test_daily_health.py` | Phase 100 health verdict, records-today count, deploy changes, record-type registry |
+| `tests/test_daily_health.py` | Phase 100 health verdict, records-today count, deploy changes, record-type registry; phase 134 taper tolerance (`charge_shortfall_flagged`) |
 | `tests/test_data_audit.py` | Phase 45 audit rules, summary, config redaction |
 | `tests/test_kpi_sensors.py` | Phase 47 KPI sensor values (None, never 0) |
 | `tests/test_grid_outage.py` | Phase 48 grid voltage parser, runtime, outage record |
