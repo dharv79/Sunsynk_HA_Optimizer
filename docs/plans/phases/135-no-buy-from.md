@@ -1,6 +1,6 @@
 # Phase 135: No-buy from: start the no-buy window earlier on demand
 
-Status: Planned, not built
+Status: Done, merged (14307b4a09255af8e61318b2cbd2dbefa993109f, PR #259)
 
 ## Why
 
