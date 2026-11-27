@@ -19,11 +19,12 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 | `__init__.py` | Entry setup: builds coordinator → optimizer, forwards platforms |
 | `coordinator.py` | `OptimizerState` (single source of truth), `Store` persistence, `update_state`, 13-month log pruning |
 | `optimizer.py` + `opt_*.py` | `SunsynkOptimizer`: `optimizer.py` holds construction, config cache, notify and push helpers; behaviour lives in mixins `opt_overnight`, `opt_daytime`, `opt_capture`, `opt_reports`, `opt_monitor`, `opt_events`, `opt_shadow` (shared helpers in `opt_common`; a mixin imports only `opt_common`). Business logic + HA listeners (00:05 free-event notice, 01:55, 02:20, 06:00, 06:05 spare solar, 06:10 tariff check, 06:20 data audit, 18:00 full-charge day (Sun: + weekly summary, scorecard, AI insight) + monthly reports, 22:00, 22:05 Agile shadow, 19:01 no-buy expiry, 02/05/16/19:00 meter snapshots, 16:00 peak export + 17/18:00 re-check, 30-min (incl. daytime import alert), 2-h drift check, SOC change, grid voltage change) |
-| `planning/` | HA-free planning maths, a package re-exporting every name from `planning/__init__.py`: `core` (shared maths/cost), `overnight` (target SOC, charge rate, Flux 1, full-charge day), `forecast`, `load`, `peak`, `events`, `kpis`, `reports`, `battery`, `shadow`, `redact` |
+| `planning/` | HA-free planning maths, a package re-exporting every name from `planning/__init__.py`: `core` (shared maths/cost), `overnight` (target SOC, charge rate, Flux 1, full-charge day), `forecast`, `load`, `peak`, `events`, `kpis`, `reports`, `battery`, `shadow`, `solar`, `redact` |
 | `data_logger.py` | Monthly JSONL logging, pairing, adaptive `compute_*` corrections |
 | `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST, inverter settings read/write |
 | `flux_helpers.py` | `fluxProducts` payload, `merge_entry_data`, peak-price helper |
 | `octopus_public.py` | Octopus public API (no key): historic Agile rates for the tariff comparison |
+| `open_meteo.py` | Open-Meteo forecast API (no key): hourly panel sunlight for the shadow solar forecast (phase 136) |
 | `sensor.py` / `binary_sensor.py` / `button.py` / `switch.py` / `datetime.py` / `number.py` | Entities (event-driven, no polling) |
 | `dashboard_installer.py` | Generates Lovelace YAML |
 | `card_resource.py` / `www/*.js` | Serves and registers the bundled flow card and day chart (ApexCharts still comes from HACS) |

@@ -385,3 +385,12 @@ Verification: `tests/test_refactor_review_fixes.py` confirms the split (AST sour
 function bodies no longer in each other); the full `tests/test_overnight_review_fixes.py` and
 `tests/test_planning.py` suites, unaffected by the split, stayed green throughout. See
 `docs/plans/phases/131-review-refactor.md`.
+
+## Open-Meteo solar forecast, shadow (27/11/2026, phase 136)
+
+**Design.** At 01:55 `opt_shadow._async_open_meteo_shadow` fetches Open-Meteo's hourly global tilted irradiance for each panel string (`pv_tilt`/`pv_azimuth`, optional second string, `pv_kwp`) and turns it into reference kWh (`planning.om_reference_hours`, GTI/1000 × kWp; a value stamped T covers the hour before T). `om_learn` fits two factors from the logged `om_forecast` records joined with `hourly_profile.pv_kwh`: a shade factor per sun-position bin (15° azimuth × 5° elevation, from clear hours) and a weather ratio per cloud bucket. `om_predict` gives the day's kWh and hourly profile; `om_solar_start` the time forecast solar first covers the house load. The plan line carries `om_forecast_kwh`, `om_basis`, `om_solar_start`, `om_days` and `om_cloud_pct`; nothing feeds the target until phase 137.
+
+**Root cause it addresses.** Forecast.Solar's mean daily error was 4.16 kWh (15–21/11), and the phase 82 cloud bins had no data because Met.no's daily forecast carries no `cloud_coverage`; `_async_today_cloud_cover` now falls back to the hourly forecast's daylight mean.
+
+**Verification.** `tests/test_open_meteo_forecast.py`; the scorecard's `open_meteo` row compares its error with the live corrected forecast.
+

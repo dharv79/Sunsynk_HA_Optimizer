@@ -30,6 +30,13 @@ from .const import (
     CONF_OCTOPUS_IMPORT_RATES_ENTITY,
     CONF_OCTOPUS_EXPORT_RATES_ENTITY,
     CONF_TOMORROW_FORECAST_SENSOR,
+    CONF_PV_KWP,
+    CONF_PV_TILT,
+    CONF_PV_AZIMUTH,
+    CONF_PV2_TILT,
+    CONF_PV2_AZIMUTH,
+    CONF_PV2_SHARE_PCT,
+    DEFAULT_PV2_SHARE_PCT,
     DEFAULT_AVG_CONSUMPTION_KW,
     DEFAULT_CHARGE_RATE,
     DEFAULT_TOMORROW_FORECAST_SENSOR,
@@ -40,6 +47,7 @@ from .flux_helpers import (
     tariff_prices_pence,
 )
 from .octopus_public import async_fetch_agile_rates
+from .open_meteo import async_fetch_tilted
 from .planning import (
     flux_bands_from_charges,
     merge_tariff_rates,
@@ -73,6 +81,15 @@ from .planning import (
     newsvendor_quantile,
     newsvendor_target,
     quantile_correction,
+    OM_HISTORY_DAYS,
+    compass_to_open_meteo,
+    om_cloud_hours,
+    om_learn,
+    om_predict,
+    om_reference_hours,
+    om_solar_start,
+    om_strings,
+    om_training_hours,
 )
 
 class ShadowMixin:
@@ -282,6 +299,62 @@ class ShadowMixin:
         }
         await self.data_logger.async_log_dynamic_tariff(**record)
         self.coordinator.update_state(touch=False, dynamic_tariff=record)
+
+    async def _async_open_meteo_shadow(self, now, load_kw: float | None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Phase 136 (shadow): today's Open-Meteo solar forecast through the learned sun and shading
+        model. Returns (plan fields, om_forecast record fields). No panel config = ({}, None); a failed
+        fetch = fields with om_basis "unavailable". Read-only: it never feeds the target."""
+        cfg = self.cfg
+        strings = om_strings(
+            cfg.get(CONF_PV_KWP), cfg.get(CONF_PV_TILT), cfg.get(CONF_PV_AZIMUTH), cfg.get(CONF_PV2_TILT),
+            cfg.get(CONF_PV2_AZIMUTH), cfg.get(CONF_PV2_SHARE_PCT, DEFAULT_PV2_SHARE_PCT),
+        )
+        lat, lon = self.hass.config.latitude, self.hass.config.longitude
+        if not strings or lat is None or lon is None:
+            return {}, None
+        unavailable = {
+            "om_forecast_kwh": None, "om_basis": "unavailable", "om_solar_start": None, "om_days": None,
+            "om_cloud_pct": None,
+        }
+        session = async_get_clientsession(self.hass)
+        responses = []
+        for i, (tilt, azimuth, _kwp) in enumerate(strings):
+            response = await async_fetch_tilted(session, lat, lon, tilt, compass_to_open_meteo(azimuth), cloud=i == 0)
+            if response is None or (i and response["time"] != responses[0]["time"]):
+                return unavailable, None
+            responses.append(response)
+        tz, day = dt_util.DEFAULT_TIME_ZONE, now.date()
+        times = responses[0]["time"]
+        ref = om_reference_hours(times, [r["gti"] for r in responses], [s[2] for s in strings], day, tz)
+        if not ref:
+            return unavailable, None
+        cloud = om_cloud_hours(times, responses[0].get("cloud") or [], day, tz)
+        records = await self.data_logger.async_load_records(OM_HISTORY_DAYS + 1)
+        hours = om_training_hours(
+            [r for r in records if r.get("type") == "om_forecast"],
+            [r for r in records if r.get("type") == "hourly_profile"], lat, lon, tz, day,
+        )
+        model = om_learn(hours)
+        pred = om_predict(ref, cloud, model, lat, lon, day, tz)
+        daylight = [cloud[h] for h in ref if ref[h] > 0 and h in cloud]
+        fields = {
+            "om_forecast_kwh": pred["kwh"], "om_basis": pred["basis"],
+            "om_solar_start": om_solar_start(pred["hourly"], load_kw), "om_days": model["days"],
+            "om_cloud_pct": round(sum(daylight) / len(daylight), 1) if daylight else None,
+        }
+        record = {
+            "date": day.isoformat(), "kwh": pred["kwh"], "basis": pred["basis"],
+            "strings": [{"tilt": t, "azimuth": a, "kwp": k} for t, a, k in strings],
+            "hours": [
+                {"hour": h, "ref_kwh": ref[h], "cloud_pct": cloud.get(h), "kwh": pred["hourly"].get(h)}
+                for h in sorted(ref) if ref[h] > 0
+            ],
+            "model": {
+                "ratio_all": model["ratio_all"], "ratios": model["ratios"], "shade_bins": len(model["shade"]),
+                "days": model["days"], "hours": model["hours"],
+            },
+        }
+        return fields, record
 
     def _newsvendor_shadow(
         self, decision, forecast_fallback: bool, paired_days: list[dict[str, Any]], today, band: str,

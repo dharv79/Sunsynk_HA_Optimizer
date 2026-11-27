@@ -90,3 +90,7 @@ Options `notify_min_level` (default report = send everything), `notify_quiet_sta
 **Dashboard cards.** `sunsynk-optimizer-heatmap.js` defined its custom element immediately at script-parse time, which can lose the race with HA's scoped custom-element registry and show "Configuration error" (the same race phase 80 fixed in the day chart); now deferred behind the same `customElements.whenDefined("home-assistant")` pattern. It also disconnected its `ResizeObserver` on `disconnectedCallback`, which is never recreated on an SPA reattach (detach/reattach reuses the element), so resize stopped redrawing after one tab switch; the observer is no longer disconnected there. `sunsynk-optimizer-day-chart.js`'s `resample()` bucketed by elapsed milliseconds from local midnight, which drifts off true wall-clock time on a 23- or 25-hour clock-change day; it now bins by the sample's local hour/minute instead.
 
 **Verification.** `tests/test_config_entities_review_fixes.py`, `tests/test_flux_helpers_merge.py`, `tests/test_security.py`, `tests/test_settings_audit.py`.
+
+## Panel orientation options (27/11/2026, phase 136)
+
+`pv_tilt`, `pv_azimuth` (compass degrees, 180 = south) and the optional second string `pv2_tilt`, `pv2_azimuth`, `pv2_share_pct` (share of `pv_kwp`, default 50) switch on the Open-Meteo shadow forecast (import-plan.md). Blank tilt, direction or `pv_kwp` = off. The HA home location is sent to Open-Meteo rounded to 2 decimal places.

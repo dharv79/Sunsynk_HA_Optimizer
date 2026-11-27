@@ -61,7 +61,7 @@ RECORD_TYPES = (
     "grid_notice",
     "half_hourly_export",
     "half_hourly_import",
-    "hourly_profile",
+    "hourly_profile", "om_forecast",
     "import_causes",
     "import_plan",
     "inverter_drift",
@@ -143,6 +143,11 @@ _IMPORT_PLAN_FIELDS = (
     "rate_source",
     "bms_shadow_window_end",
     "user_override",
+    "om_forecast_kwh",
+    "om_basis",
+    "om_solar_start",
+    "om_days",
+    "om_cloud_pct",
 )
 
 
@@ -355,6 +360,10 @@ class DataLogger:
     async def async_log_hourly_profile(self, **fields: Any) -> None:
         """Log the day's hourly soc / grid import / load profile (phase 86): one per date (deduped)."""
         await self._async_append(_record("hourly_profile", **fields))
+
+    async def async_log_om_forecast(self, **fields: Any) -> None:
+        """Log the 01:55 Open-Meteo hourly forecast (phase 136, shadow): one per date (deduped)."""
+        await self._async_append(_record("om_forecast", **fields))
 
     async def async_log_battery_floor(self, **fields: Any) -> None:
         """Log the inverter low-battery SOC review (phase 84): one per date (deduped)."""
@@ -1043,6 +1052,7 @@ class DataLogger:
         "meter_snapshot", "day_kpis", "peak_export", "peak_cover", "overnight_load", "import_causes",
         "half_hourly_import", "half_hourly_export", "capacity_estimate", "pv_strings",
         "meter_reconciliation_import", "meter_reconciliation_export", "battery_health", "round_trip_measured", "dynamic_tariff", "tou_shadow", "flex_event", "battery_floor", "hourly_profile",
+        "om_forecast",
     )
 
     async def _async_append(self, record: dict[str, Any]) -> None:

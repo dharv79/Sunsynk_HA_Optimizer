@@ -167,6 +167,8 @@ class MonitorMixin:
         shadows = [n for n in ("mpc_plan", "dynamic_tariff", "tou_shadow", "flex_event") if getattr(state, n)]
         if self.cfg.get(CONF_COST_AWARE_EXPORT_SHADOW_MODE, DEFAULT_COST_AWARE_EXPORT_SHADOW_MODE):  # rule 15
             shadows.append("export_cost_trigger")
+        if (state.nightly_import_plan or {}).get("om_basis") not in (None, "unavailable"):
+            shadows.append("open_meteo")  # phase 136: tonight's plan carried an Open-Meteo forecast
         rec = {
             "date": date,
             **daily_health(
