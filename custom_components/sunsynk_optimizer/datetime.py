@@ -6,7 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Datetime entities for Sunsynk Optimizer (manual free-event entry)."""
+"""Datetime entities for Sunsynk Optimizer (manual free-event entry, no-buy start)."""
 
 from __future__ import annotations
 
@@ -28,12 +28,13 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Register the manual free-electricity-event start/end entities."""
+    """Register the manual free-event start/end and the no-buy start entities."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
             FreeEventTimeEntity(coordinator, entry, "start", "Free event start"),
             FreeEventTimeEntity(coordinator, entry, "end", "Free event end"),
+            NoBuyFromEntity(coordinator, entry),
         ]
     )
 
@@ -69,3 +70,29 @@ class FreeEventTimeEntity(CoordinatorEntity, DateTimeEntity):
         self.coordinator.update_state(**{self._state_field: value.isoformat()})
         await self.coordinator.optimizer.async_try_schedule_manual_free_event(self._which)
 
+
+
+class NoBuyFromEntity(CoordinatorEntity, DateTimeEntity):
+    """Phase 135: start today's no-buy window earlier than 16:00 (e.g. a 15:00 saving session).
+
+    Applies on its own date only; peak-cover buying ends at that time and its target covers the extra
+    hours. Cleared at 19:01.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:cart-off"
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_name = "No-buy from"
+        self._attr_unique_id = f"{entry.entry_id}_no_buy_from"
+        pin_entity_id(self, "datetime", "No-buy from", "datetime.no_buy_from")
+        self._attr_device_info = optimizer_device_info(entry)
+
+    @property
+    def native_value(self) -> datetime | None:
+        raw = self.coordinator.state.no_buy_from
+        return dt_util.parse_datetime(raw) if raw else None
+
+    async def async_set_value(self, value: datetime) -> None:
+        await self.coordinator.optimizer.async_set_no_buy_from(value)

@@ -178,6 +178,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         # is re-allowed, harmless — the slot is idempotent).
         self._peak_cover: dict[str, Any] | None = None
         self._peak_cover_startup_attempts = 0
+        self._no_buy_unsub: Any = None  # phase 135: one-off timer at an earlier no-buy start
         # Phase 100: today's scheduled-callback errors by label, read and reset by the 22:00 health line. Unpersisted: a restart only thins the day's count.
         self._guarded_errors: dict[str, int] = {}
         # Phase 90: one Flux 2 decide-and-push at a time (never held across a notification).
@@ -250,6 +251,7 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
             (6, 10, self._async_tariff_price_check),
             (6, 20, self._async_data_audit),  # phase 45
             (0, 5, self._async_free_event_notice_midnight),  # phase 133
+            (19, 1, self._async_no_buy_expire),  # phase 135
             (22, 0, self._async_capture_day_actuals),  # also takes the 22:00 meter snapshot
             # Phase 14 KPI snapshots at the Flux band edges.
             (2, 0, self._async_meter_snapshot),
@@ -310,12 +312,16 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
             self._arm_free_event_timers(self.coordinator.state.free_event)
         if self.coordinator.state.gentle_charge.get("phase") == "applied":
             self._arm_gentle_restore()
+        self._arm_no_buy_timer()
 
     async def async_shutdown(self) -> None:
         for unsub in self.unsubs:
             unsub()
         self.unsubs.clear()
         self._clear_free_event_timers()
+        if self._no_buy_unsub:
+            self._no_buy_unsub()
+            self._no_buy_unsub = None
         if self._gentle_restore_unsub:
             self._gentle_restore_unsub()
             self._gentle_restore_unsub = None

@@ -15,7 +15,7 @@ from datetime import (
 )
 from typing import Any
 from homeassistant.core import Event
-from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.event import async_call_later, async_track_point_in_time
 from homeassistant.util import dt as dt_util
 from .const import (
     CONF_EXPORT_LIMIT_W,
@@ -76,7 +76,6 @@ from .planning import (
     expected_spare_solar,
     PEAK_COVER_FROM_MINUTES,
     PEAK_COVER_HOLD_FROM_MINUTES,
-    PEAK_COVER_LAST_LOG_MINUTES,
     PEAK_COVER_PEAK_START_MINUTES,
     PEAK_COVER_TOPUP_BUFFER_KWH,
     daytime_load_kw,
@@ -88,7 +87,10 @@ from .planning import (
     flux2_push_still_active,
     flux2_trim_due,
     peak_cover_plan_split,
+    peak_cover_last_log_minutes,
     peak_cover_retry_due,
+    no_buy_extra_load_kwh,
+    no_buy_start_minutes,
     peak_cover_startup_retry_due,
     peak_export_floor_soc,
     peak_export_plan,
@@ -462,7 +464,7 @@ class DaytimeMixin:
         now = dt_util.now()
         if peak_cover_startup_retry_due(
             now.hour * 60 + now.minute, self._essential_state(self.battery_soc_entity),
-            self._outage_active(), self._peak_cover_startup_attempts,
+            self._outage_active(), self._peak_cover_startup_attempts, self._no_buy_start(now),
         ):
             self._peak_cover_startup_attempts += 1
             _LOGGER.info("Peak cover after restart deferred — SOC unavailable or outage flagged")
@@ -841,12 +843,58 @@ class DaytimeMixin:
             and 16 <= now_local.hour < 19
         )
 
+    def _no_buy_start(self, now_local: datetime) -> int:
+        """Phase 135: today's no-buy start in minutes (16:00 unless the user set an earlier one for today)."""
+        raw = self.coordinator.state.no_buy_from
+        parsed = dt_util.parse_datetime(raw) if raw else None
+        return no_buy_start_minutes(dt_util.as_local(parsed) if parsed else None, now_local.date())
+
+    async def async_set_no_buy_from(self, value: datetime | None) -> None:
+        """Phase 135 (the dashboard 'No-buy from' picker): store it and end pre-peak buying at that time."""
+        self.coordinator.update_state(no_buy_from=value.isoformat() if value else None)
+        self._arm_no_buy_timer()
+
+    def _arm_no_buy_timer(self) -> None:
+        """End any peak-cover top-up or hold at an earlier no-buy start (now, if it has already passed)."""
+        if self._no_buy_unsub:
+            self._no_buy_unsub()
+            self._no_buy_unsub = None
+        now = dt_util.now()
+        start = self._no_buy_start(now)
+        if start >= PEAK_COVER_PEAK_START_MINUTES:
+            return
+        at = now.replace(hour=start // 60, minute=start % 60, second=0, microsecond=0)
+        if at > now:
+            self._no_buy_unsub = async_track_point_in_time(self.hass, self._async_no_buy_start_reached, at)
+        elif now.hour * 60 + now.minute < PEAK_COVER_PEAK_START_MINUTES:
+            self.hass.async_create_task(self._async_no_buy_start_reached(now))
+
+    async def _async_no_buy_start_reached(self, _now) -> None:
+        self._no_buy_unsub = None
+        await self._guarded(self._async_end_cover_for_no_buy, "No-buy start")
+
+    async def _async_end_cover_for_no_buy(self) -> None:
+        if self._slots_held() or self._outage_active():  # as at 16:00
+            return
+        async with self._flux2_lock:
+            await self._async_peak_cover_end()
+
+    async def _async_no_buy_expire(self, _now) -> None:
+        await self._guarded(self.async_expire_no_buy_from, "No-buy expiry")
+
+    async def async_expire_no_buy_from(self) -> None:
+        """19:01: today's no-buy start has done its job; clear it (phase 135)."""
+        raw = self.coordinator.state.no_buy_from
+        parsed = dt_util.parse_datetime(raw) if raw else None
+        if parsed is not None and dt_util.as_local(parsed).date() <= dt_util.now().date():
+            self.coordinator.update_state(no_buy_from=None)
+
     def _cover_hold_slot(self, now_local: datetime) -> dict[str, Any] | None:
         """Today's live peak-cover Flux 1 hold while it is in force (pushed, before 16:00), else None."""
         state = self._peak_cover or {}
         if not state.get("pushed") or state.get("date") != now_local.date().isoformat():
             return None
-        if now_local.hour * 60 + now_local.minute >= PEAK_COVER_PEAK_START_MINUTES:
+        if now_local.hour * 60 + now_local.minute >= self._no_buy_start(now_local):
             return None
         return state.get("slot")
 
@@ -1044,7 +1092,8 @@ class DaytimeMixin:
         """
         now = dt_util.now()
         minutes = now.hour * 60 + now.minute
-        if not PEAK_COVER_HOLD_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES or self._slots_held() or self._outage_active():
+        start = self._no_buy_start(now)  # phase 135: 16:00, or the user's earlier no-buy start today
+        if not PEAK_COVER_HOLD_FROM_MINUTES <= minutes < start or self._slots_held() or self._outage_active():
             return
         today = now.date().isoformat()
         if (self._peak_cover or {}).get("date") != today:
@@ -1081,6 +1130,10 @@ class DaytimeMixin:
         # Phase 132: a top-up buys only the typical evening plus a fixed buffer; a hold keeps the
         # cautious estimate above, since unused held charge is spent after 19:00 at the same day rate.
         typical_kwh, typical_source = peak_load_typical(peak_days, 3.0 * load_kw)
+        # Phase 135: an earlier no-buy start means the battery also carries the house until 16:00.
+        no_buy_extra_kwh = no_buy_extra_load_kwh(start, load_kw)
+        peak_load_kwh = round(peak_load_kwh + no_buy_extra_kwh, 2)
+        typical_kwh = round(typical_kwh + no_buy_extra_kwh, 2)
         # Pessimistic solar, like the low-solar decisions: the raw (uncorrected) forecast.
         hourly = self._hourly_or_synthetic_forecast(cfg, now)
         solar_kwh = solar_until_kwh(hourly, now.hour + now.minute / 60.0)
@@ -1096,20 +1149,21 @@ class DaytimeMixin:
         if solar_kwh is None:
             solar_kwh = 0.0  # no forecast: assume none rather than guess
         plan = peak_cover_plan_split(
-            soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, solar_kwh, load_kw, peak_load_kwh, typical_kwh,
+            soc, capacity, start - minutes, solar_kwh, load_kw, peak_load_kwh, typical_kwh,
             charge_rate_kw, prices["day"], prices["peak"], margin=peak_margin, wear_pence=self._wear_pence(),
             min_soc=self.coordinator.state.peak_min_soc,
         )
         actionable = plan["decision"] in ("top_up", "hold") and plan["push_now"]
         if minutes < PEAK_COVER_FROM_MINUTES and plan["decision"] != "hold":
             return  # 09:00-12:00 is for catching a falling SOC with a hold only
-        if not actionable and minutes < PEAK_COVER_LAST_LOG_MINUTES:
+        last_log = peak_cover_last_log_minutes(start)
+        if not actionable and minutes < last_log:
             return
         live = bool(cfg.get(CONF_PEAK_COVER_LIVE, DEFAULT_PEAK_COVER_LIVE)) and self.operation_mode != "monitor"
         api_ok = None
         hold_floor = await self._async_hold_floor_decide(plan, soc, minutes, actionable)
         if live and actionable:
-            slot = {"startTime": now.strftime("%H:%M"), "endTime": "16:00", "targetSoc": plan["target_soc"]}
+            slot = {"startTime": now.strftime("%H:%M"), "endTime": minutes_to_hhmm(start), "targetSoc": plan["target_soc"]}
             native = hold_floor["live"] and await self._async_apply_hold_floor(state, hold_floor)
             api_ok = True if native else await self.async_push_flux_override({"flux_1": slot})
             state["pushed"] = api_ok is True
@@ -1127,7 +1181,7 @@ class DaytimeMixin:
             )
             if api_ok is False:
                 state["attempts"] = state.get("attempts", 0) + 1
-                if peak_cover_retry_due(api_ok, minutes, state["attempts"]):
+                if peak_cover_retry_due(api_ok, minutes, state["attempts"], last_log):
                     # Phase 127: a transient failure retries on the next 30-minute check instead
                     # of leaving the day uncovered — nothing is logged yet.
                     return
@@ -1141,8 +1195,8 @@ class DaytimeMixin:
             "intraday_scale": intraday_scale,
             "solar_kwh_to_16_scaled": scaled_kwh,
             "intraday_decision": self._intraday_cover_decision(
-                scaled_kwh, solar_kwh, soc, capacity, minutes, load_kw, peak_load_kwh, typical_kwh, charge_rate_kw,
-                prices, peak_margin,
+                scaled_kwh, solar_kwh, soc, capacity, start - minutes, load_kw, peak_load_kwh, typical_kwh,
+                charge_rate_kw, prices, peak_margin,
             ),
             "load_kw": load_kw,
             "load_source": load_source,
@@ -1156,6 +1210,8 @@ class DaytimeMixin:
             "peak_load_kwh_typical": typical_kwh,
             "peak_load_source_typical": typical_source,
             "peak_buffer_kwh": PEAK_COVER_TOPUP_BUFFER_KWH,
+            "no_buy_start": minutes_to_hhmm(start),
+            "no_buy_extra_kwh": no_buy_extra_kwh,
             "wear_cost_p": self._wear_pence(),
             "day_pence": prices["day"],
             "peak_pence": prices["peak"],
@@ -1172,14 +1228,14 @@ class DaytimeMixin:
         await self.data_logger.async_log_peak_cover(**record)
 
     def _intraday_cover_decision(
-        self, scaled_kwh, raw_kwh, soc, capacity, minutes, load_kw, peak_load_kwh, typical_kwh, charge_rate_kw,
+        self, scaled_kwh, raw_kwh, soc, capacity, minutes_to_peak, load_kw, peak_load_kwh, typical_kwh, charge_rate_kw,
         prices, margin,
     ) -> str | None:
         """What peak cover would decide on min(raw, scaled) solar (phase 56 shadow); None without a scale."""
         if scaled_kwh is None or raw_kwh is None or scaled_kwh == raw_kwh:
             return None
         return peak_cover_plan_split(
-            soc, capacity, PEAK_COVER_PEAK_START_MINUTES - minutes, min(raw_kwh, scaled_kwh), load_kw, peak_load_kwh,
+            soc, capacity, minutes_to_peak, min(raw_kwh, scaled_kwh), load_kw, peak_load_kwh,
             typical_kwh, charge_rate_kw, prices["day"], prices["peak"], margin=margin, wear_pence=self._wear_pence(),
             min_soc=self.coordinator.state.peak_min_soc,
         )["decision"]
