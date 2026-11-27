@@ -1,6 +1,6 @@
 # Phase 136: Open-Meteo solar forecast with a learned sun and shading model (shadow)
 
-Status: In progress
+Status: Done, merged (6ea9f0a, PR #261)
 
 ## Why
 

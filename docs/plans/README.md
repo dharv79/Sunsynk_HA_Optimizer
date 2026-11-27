@@ -143,7 +143,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 133. Clear notices: button and auto-clear for Last error and finished free events (user request 24/11/2026) | Done, merged (f019ed34ba10b9a56e80360ddbec4aefd24b1a9a, PR #255), released in 2.3.10 | XS-S, ~20-35k |
 | 134. Daily health ignores a small taper shortfall (user request 25/11/2026) | Done, merged (03eb8643d123b2a9b54f457ec0922e0a134cef37, PR #257), released in 2.3.11 | XS, ~15-25k |
 | 135. No-buy from: start the no-buy window earlier on demand (saving sessions, user request 27/11/2026) | Done, merged (14307b4a09255af8e61318b2cbd2dbefa993109f, PR #259), released in 2.3.12 | S, ~30-50k |
-| 136. Open-Meteo solar forecast with a learned sun and shading model, shadow (user request 27/11/2026) | In progress | M, ~60-90k |
+| 136. Open-Meteo solar forecast with a learned sun and shading model, shadow (user request 27/11/2026) | Done, merged (6ea9f0a, PR #261) | M, ~60-90k |
 | 137. Use the Open-Meteo forecast live once it wins (user request 27/11/2026) | Planned, not built | S, ~30-50k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
