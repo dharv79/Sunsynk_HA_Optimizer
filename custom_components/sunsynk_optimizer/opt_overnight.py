@@ -64,7 +64,9 @@ from .planning import (
     FORECAST_QUANTILE_HISTORY_DAYS,
     FLOOR_CANDIDATE_SOC,
     battery_floor_soc,
+    CLOUD_DAYLIGHT_HOURS,
     cloud_bucket,
+    daylight_cloud_cover,
     floor_saving_gbp,
     forecast_quantiles,
     forecast_ratio_samples,
@@ -176,10 +178,10 @@ class OvernightMixin:
             ),
         )
 
-    async def _async_weather_forecast(self, entity: str) -> list[dict[str, Any]]:
-        """Daily forecast items of a weather entity ([] when the response has none); raises if the service call fails."""
+    async def _async_weather_forecast(self, entity: str, kind: str = "daily") -> list[dict[str, Any]]:
+        """Daily (or hourly) forecast items of a weather entity ([] when the response has none); raises if the service call fails."""
         response = await self.hass.services.async_call(
-            "weather", "get_forecasts", {"entity_id": entity, "type": "daily"},
+            "weather", "get_forecasts", {"entity_id": entity, "type": kind},
             blocking=True, return_response=True,
         )
         data = response.get(entity) if isinstance(response, dict) else None
@@ -218,19 +220,33 @@ class OvernightMixin:
         return scores
 
     async def _async_today_cloud_cover(self) -> float | None:
-        """Today's cloud cover % from the daily weather forecast (phase 82); None when unavailable."""
+        """Today's cloud cover % from the daily weather forecast (phase 82); None when unavailable.
+
+        Phase 136: Met.no gives no cloud_coverage in its daily items, so when the daily forecast
+        has none the mean over today's daylight hours of the hourly forecast is used instead.
+        """
         entity = self._cfg_str(CONF_WEATHER_ENTITY) or DEFAULT_WEATHER_ENTITY
         try:
             items = await self._async_weather_forecast(entity)
         except Exception:  # noqa: BLE001 - optional input, degrade to None
-            return None
+            items = []
         today = dt_util.now().date()
         for item in items:
             when = dt_util.parse_datetime(str(item.get("datetime") or ""))
             value = item.get("cloud_coverage")
             if when is not None and dt_util.as_local(when).date() == today:
-                return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-        return None
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    return float(value)
+                break
+        try:
+            hourly = await self._async_weather_forecast(entity, "hourly")
+        except Exception:  # noqa: BLE001 - optional input, degrade to None
+            return None
+        sun = self._sun_times()
+        first, last = CLOUD_DAYLIGHT_HOURS
+        if sun is not None and sun[0] is not None and sun[1] is not None:
+            first, last = dt_util.as_local(sun[0]).hour, dt_util.as_local(sun[1]).hour
+        return daylight_cloud_cover(hourly, today, dt_util.DEFAULT_TIME_ZONE, first, last)
 
     async def async_recheck_full_charge_day(self) -> None:
         """Daily 18:00: move this week's full-charge day to tomorrow when
@@ -659,6 +675,12 @@ class OvernightMixin:
             decision, forecast_fallback, paired_days, now.date(), band, avg_consumption_kw, battery_capacity_kwh,
             overnight_drain_adjustment, feedback_adj if feedback_live else soc_adjustment, raw_forecast_kwh, now.month,
         )
+        # Phase 136 (shadow): Open-Meteo forecast through the learned sun and shading model.
+        try:
+            om_fields, om_record = await self._async_open_meteo_shadow(now, avg_consumption_kw)
+        except Exception as exc:  # noqa: BLE001 - shadow only, must never stop the plan
+            _LOGGER.warning("Open-Meteo shadow forecast failed: %s", exc)
+            om_fields, om_record = {"om_basis": "unavailable"}, None
         # A free event later today should start at its floor: buy only that plus the load until then.
         uncapped_target_soc = target_soc
         free_event = self.coordinator.state.free_event
@@ -710,6 +732,7 @@ class OvernightMixin:
             "forecast_correction_weighted": weighted_correction,
             "forecast_correction_weighted_basis": weighted_basis,
             **shadow_forecast_fields,
+            **om_fields,
             "outdoor_temp_c": self._outside_temp_now(),
             "days_since_full": since_full,
             "full_charge_due": full_due,
@@ -767,6 +790,8 @@ class OvernightMixin:
         is_tonights_plan = should_log_import_plan(source, now)
         if is_tonights_plan:
             await self.data_logger.async_log_import_plan(plan_state)
+            if om_record:
+                await self._guarded(lambda: self.data_logger.async_log_om_forecast(**om_record), "Open-Meteo forecast log")
             # A startup/grid_restored re-plan only becomes "tonight's plan" inside the same
             # 01:55-05:00 window as the log (phase 126): outside it, that night's charge already
             # ran on whatever was pushed before, so this is tomorrow's setup, not tonight's.

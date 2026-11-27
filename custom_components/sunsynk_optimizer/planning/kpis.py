@@ -562,6 +562,20 @@ def shadow_scorecard(
         cloud_dates.append(p["date"])
     score = _score(len(cloud_dates), 0, None, cloud_dates, "mean absolute P50 error, cloud bins vs band x season")
     out["weather_bins"] = _apply_error_ratio_verdict(score, len(cloud_dates), cloud_err, base_err)
+    # 136 Open-Meteo: mean absolute error of its learned forecast vs the live corrected forecast.
+    om_err: list[float] = []
+    om_live_err: list[float] = []
+    om_dates: list[str] = []
+    for p in plans:
+        actual = (actuals.get(p["date"]) or {}).get("actual_solar_kwh")
+        om, live = p.get("om_forecast_kwh"), p.get("solar_forecast_kwh")
+        if None in (actual, om, live):
+            continue
+        om_err.append(abs(om - actual))
+        om_live_err.append(abs(live - actual))
+        om_dates.append(p["date"])
+    score = _score(len(om_dates), 0, None, om_dates, "mean absolute error vs the live corrected forecast")
+    out["open_meteo"] = _apply_error_ratio_verdict(score, len(om_dates), om_err, om_live_err)
     # 86 reserve hold: days that bought day-rate import with charge still in the battery (shadow, no £ counterfactual).
     holds = win("hourly_profile")
     flagged = [r for r in holds if (r.get("above_floor_day_import_kwh") or 0) >= RESERVE_HOLD_MIN_KWH]

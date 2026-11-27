@@ -49,6 +49,11 @@ from .const import (
     CONF_BATTERY_LIFETIME_KWH,
     CONF_UPGRADE_PRICE_PER_KWH,
     CONF_PV_KWP,
+    CONF_PV_TILT,
+    CONF_PV_AZIMUTH,
+    CONF_PV2_TILT,
+    CONF_PV2_AZIMUTH,
+    CONF_PV2_SHARE_PCT,
     CONF_PV_UPGRADE_PRICE_PER_KWP,
     CONF_SPARE_SOLAR_NOTIFY_KWH,
     CONF_FLEX_EVENT_ENTITY,
@@ -307,6 +312,36 @@ def _base_schema(values: dict[str, Any] | None = None, include_credentials: bool
                 description={"suggested_value": values.get(CONF_PV_KWP)},
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=100, step=0.1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="kWp")
+            ),
+            vol.Optional(
+                CONF_PV_TILT,
+                description={"suggested_value": values.get(CONF_PV_TILT)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=90, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="°")
+            ),
+            vol.Optional(
+                CONF_PV_AZIMUTH,
+                description={"suggested_value": values.get(CONF_PV_AZIMUTH)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=359, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="°")
+            ),
+            vol.Optional(
+                CONF_PV2_TILT,
+                description={"suggested_value": values.get(CONF_PV2_TILT)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=90, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="°")
+            ),
+            vol.Optional(
+                CONF_PV2_AZIMUTH,
+                description={"suggested_value": values.get(CONF_PV2_AZIMUTH)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=359, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="°")
+            ),
+            vol.Optional(
+                CONF_PV2_SHARE_PCT,
+                description={"suggested_value": values.get(CONF_PV2_SHARE_PCT)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=99, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_PV_UPGRADE_PRICE_PER_KWP,

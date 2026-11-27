@@ -172,7 +172,7 @@ class CaptureMixin:
         return by_date
 
     def _sample_hourly(self) -> None:
-        """Add a timed sample of SOC and the daily import/load meters to today's buffer (phase 86)."""
+        """Add a timed sample of SOC and the daily import/load/PV meters to today's buffer (phase 86)."""
         now = dt_util.now()
         today = now.date().isoformat()
         if self._hourly.get("date") != today:
@@ -182,6 +182,7 @@ class CaptureMixin:
                 "minute": now.hour * 60 + now.minute, "soc": self._essential_state(self.battery_soc_entity),
                 "grid_import_kwh": self._essential_state(self.day_grid_import_entity),
                 "load_kwh": self._essential_state(self.day_load_entity),
+                "pv_kwh": self._essential_state(self.day_pv_energy_entity),  # phase 136: Open-Meteo learning
             })
 
     async def _async_log_hourly_profile(self, date: str) -> dict[str, Any]:

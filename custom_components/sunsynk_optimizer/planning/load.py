@@ -26,6 +26,7 @@ from .core import (
     median,
     percentile,
 )
+from .solar import hourly_counter_kwh
 
 
 # Phase 12: overnight load rate learned from the 06:00 morning_state reading
@@ -367,18 +368,23 @@ def auto_away(
 
 
 def hourly_profile(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Per-hour {hour, soc, grid_import_kwh, load_kwh} from timed samples of daily meters.
+    """Per-hour {hour, soc, grid_import_kwh, load_kwh, pv_kwh} from timed samples of daily meters.
 
     ``samples`` are {minute, soc, grid_import_kwh, load_kwh} (the two kWh values are
     cumulative day counters). The change between consecutive samples belongs to the earlier
     sample's hour; a missing value or a counter reset (negative step) contributes nothing, and an
     hour with no usable step reports None, never 0 (rule 11). soc is the hour's first reading.
+    pv_kwh (phase 136) is the solar counter interpolated to the hour boundaries
+    (solar.hourly_counter_kwh), so it lines up with Open-Meteo's clock hours.
     """
     ordered = sorted((s for s in samples if _is_number(s.get("minute"))), key=lambda s: s["minute"])
+    pv = hourly_counter_kwh(ordered, "pv_kwh")  # phase 136: interpolated to the hour boundaries
     hours: dict[int, dict[str, Any]] = {}
     for i, cur in enumerate(ordered):
         hour = int(cur["minute"]) // 60
-        row = hours.setdefault(hour, {"hour": hour, "soc": cur.get("soc"), "grid_import_kwh": None, "load_kwh": None})
+        row = hours.setdefault(
+            hour, {"hour": hour, "soc": cur.get("soc"), "grid_import_kwh": None, "load_kwh": None, "pv_kwh": pv.get(hour)}
+        )
         if row["soc"] is None:
             row["soc"] = cur.get("soc")
         if i + 1 == len(ordered):

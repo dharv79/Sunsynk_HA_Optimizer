@@ -171,6 +171,14 @@ CONF_BATTERY_LIFETIME_KWH = "battery_lifetime_kwh"
 # Upgrade advisor (phase 50): optional prices for the payback line and the installed PV size.
 CONF_UPGRADE_PRICE_PER_KWH = "upgrade_price_per_kwh"
 CONF_PV_KWP = "pv_kwp"
+# Open-Meteo solar forecast (phase 136, shadow): panel tilt (° from flat) and compass direction
+# (180 = south) per string; string 2 is optional and takes this % of pv_kwp. Blank tilt = off.
+CONF_PV_TILT = "pv_tilt"
+CONF_PV_AZIMUTH = "pv_azimuth"
+CONF_PV2_TILT = "pv2_tilt"
+CONF_PV2_AZIMUTH = "pv2_azimuth"
+CONF_PV2_SHARE_PCT = "pv2_share_pct"
+DEFAULT_PV2_SHARE_PCT = 50
 CONF_PV_UPGRADE_PRICE_PER_KWP = "pv_upgrade_price_per_kwp"
 CONF_SPARE_SOLAR_NOTIFY_KWH = "spare_solar_notify_kwh"  # blank = no morning notification
 # Flexibility-market export events (phase 77, shadow): an on/off or calendar entity and the p/kWh it pays.
