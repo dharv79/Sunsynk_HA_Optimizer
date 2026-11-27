@@ -693,3 +693,6 @@ free_event_dismiss_due
 free_event_notice_shown
 HEALTH_TAPER_TOLERANCE_PCT
 charge_shortfall_flagged
+peak_cover_last_log_minutes
+no_buy_extra_load_kwh
+no_buy_start_minutes

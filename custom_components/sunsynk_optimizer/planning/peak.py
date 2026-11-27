@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+from datetime import date, datetime
 from typing import Any
 
 from .core import (
@@ -492,12 +493,14 @@ def reserve_hold_cost(
 PEAK_COVER_STARTUP_RETRIES = 5  # 60 s apart, like the initial plan's wait for the first sensor poll
 
 
-def peak_cover_startup_retry_due(minutes: int, soc, outage_active: bool, attempts: int) -> bool:
+def peak_cover_startup_retry_due(
+    minutes: int, soc, outage_active: bool, attempts: int, peak_start: int = PEAK_COVER_PEAK_START_MINUTES,
+) -> bool:
     """Re-try peak cover a minute later after a restart (the startup plan wiped its Flux 1 slot).
 
-    Only inside the peak-cover window (09:00-16:00), only while SOC is not yet readable or a grid
-    outage is still flagged, and at most PEAK_COVER_STARTUP_RETRIES times."""
-    in_window = PEAK_COVER_HOLD_FROM_MINUTES <= minutes < PEAK_COVER_PEAK_START_MINUTES
+    Only inside the peak-cover window (09:00 to the no-buy start, normally 16:00), only while SOC is not
+    yet readable or a grid outage is still flagged, and at most PEAK_COVER_STARTUP_RETRIES times."""
+    in_window = PEAK_COVER_HOLD_FROM_MINUTES <= minutes < peak_start
     return in_window and (soc is None or outage_active) and attempts < PEAK_COVER_STARTUP_RETRIES
 
 
@@ -506,7 +509,9 @@ def peak_cover_startup_retry_due(minutes: int, soc, outage_active: bool, attempt
 PEAK_COVER_PUSH_RETRIES = 3  # a transient API failure retries this many times before giving up for the day
 
 
-def peak_cover_retry_due(api_ok: bool | None, minutes: int, attempts: int) -> bool:
+def peak_cover_retry_due(
+    api_ok: bool | None, minutes: int, attempts: int, last_log: int = PEAK_COVER_LAST_LOG_MINUTES,
+) -> bool:
     """True when a failed, live, actionable peak-cover push should retry on the next 30-min check.
 
     api_ok is None (not live/not actionable) or True (pushed, or nothing to push) never retries.
@@ -515,7 +520,29 @@ def peak_cover_retry_due(api_ok: bool | None, minutes: int, attempts: int) -> bo
     """
     if api_ok is not False:
         return False
-    return attempts < PEAK_COVER_PUSH_RETRIES and minutes < PEAK_COVER_LAST_LOG_MINUTES
+    return attempts < PEAK_COVER_PUSH_RETRIES and minutes < last_log
+
+
+# ---- Phase 135: an earlier no-buy start on demand (e.g. a saving session before the peak) ---------------
+
+
+def no_buy_start_minutes(no_buy_from: datetime | None, today: date) -> int:
+    """The day's no-buy start (minutes past midnight): the user's earlier start on its own day, else 16:00."""
+    if no_buy_from is None or no_buy_from.date() != today:
+        return PEAK_COVER_PEAK_START_MINUTES
+    minutes = no_buy_from.hour * 60 + no_buy_from.minute
+    return minutes if minutes < PEAK_COVER_PEAK_START_MINUTES else PEAK_COVER_PEAK_START_MINUTES
+
+
+def no_buy_extra_load_kwh(start_minutes: int, load_kw: float | None) -> float:
+    """House load from an earlier no-buy start to 16:00, which the battery must now carry as well."""
+    hours = max(0, PEAK_COVER_PEAK_START_MINUTES - start_minutes) / 60.0
+    return round(hours * max(0.0, load_kw or 0.0), 2)
+
+
+def peak_cover_last_log_minutes(start_minutes: int) -> int:
+    """The last-check log time moves with the no-buy start (normally 15:30 for 16:00)."""
+    return start_minutes - (PEAK_COVER_PEAK_START_MINUTES - PEAK_COVER_LAST_LOG_MINUTES)
 
 
 def peak_export_floor_soc(peak_min_soc: int | None, peak_cover_required_soc: float | None) -> tuple[int, str | None]:

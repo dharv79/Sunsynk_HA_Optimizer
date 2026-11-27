@@ -96,6 +96,8 @@ class OptimizerState:
     # value. Cleared once the event finishes or is cancelled.
     free_event_manual_start: str | None = None
     free_event_manual_end: str | None = None
+    # Phase 135: an earlier start for today's no-buy window (ISO), e.g. a saving session at 15:00.
+    no_buy_from: str | None = None
     # Gentler charging (phase 23) live write: phase applied / restored,
     # current_a, restore_current_a, restore_at. Persisted so a restart before
     # 05:00 still restores the inverter's normal grid-charge current.

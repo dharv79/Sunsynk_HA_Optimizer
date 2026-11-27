@@ -409,6 +409,8 @@ def _overview(s, forecast_sensor: str) -> dict[str, Any]:
               action=_press("button.test_plan")),
         _tile("number.peak_minimum_soc", "Peak minimum SOC", "mdi:battery-arrow-up-outline", "teal",
               action={"action": "more-info"}),
+        _tile("datetime.no_buy_from", "No-buy from", "mdi:cart-off", "red",
+              action={"action": "more-info"}),
         _tile("sensor.current_soc_target", "Charge to 100%", "mdi:battery-charging-100", "green",
               action=_service("sunsynk_optimizer.set_tonight_target",
                               "Charge to 100% tonight? Applies at the 01:55 plan, one night only.", {"soc": 100})),

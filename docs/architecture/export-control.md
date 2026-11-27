@@ -400,3 +400,16 @@ were updated to pin the new call sites instead. See `docs/plans/phases/131-revie
 **Design.** Holds and top-ups have different costs of being wrong. Held charge the peak does not use is spent after 19:00 instead of grid at the same day rate (~0p/kWh), while a shortfall costs peak − day (~11p/kWh), so holds keep the cautious estimate. A top-up buys charge through the charge loss and wear, so `planning.peak_cover_plan_split` re-plans anything short of `ok`/`hold` on `peak_load_typical` (median of the last 7 logged windows, any day type, no margin) plus `PEAK_COVER_TOPUP_BUFFER_KWH` (1.5 kWh). That re-plan can hold at the lean requirement when SOC sits between the two, or top up to it. The Peak minimum SOC floors both; peak export's floor follows the `required_soc` actually used. The `peak_cover` record adds `required_soc_hold`, `required_basis` (`hold`/`typical`), `peak_load_kwh_typical`, `peak_load_source_typical`, `peak_buffer_kwh`.
 
 **Verification.** `tests/test_peak_cover_split.py`. Live: a top-up day logs `required_basis: typical` with `required_soc` below `required_soc_hold`.
+
+## No-buy from: an earlier no-buy start on demand (27/11/2026, phase 135)
+
+**Why.** A saving session at 15:00–16:00 rewards importing less than usual, but peak cover tops up or holds (the grid runs the house) until 16:00.
+
+**Design.**
+- `datetime.no_buy_from` ("No-buy from", Quick actions) stores `state.no_buy_from`. It applies on its own date only and never later than 16:00 (`planning.no_buy_start_minutes`); 19:01 clears it.
+- Peak cover uses that start instead of 16:00: the checks stop at it, a top-up/hold slot ends at it, `minutes_to_peak` runs to it, the last-check log moves with it (`peak_cover_last_log_minutes`), and the startup and push retries stop at it.
+- The 16:00 requirement also carries the house from the start to 16:00: `no_buy_extra_load_kwh` (observed daytime load × hours) is added to both the cautious and the typical peak load. `peak_cover` logs `no_buy_start` and `no_buy_extra_kwh`; `projected_soc_16` is then the projection at the start.
+- `_arm_no_buy_timer` (on set and at startup) ends any live cover at the start (`_async_peak_cover_end` under `_flux2_lock`, as at 16:00), so a slot pushed before the time was set, or a native hold floor, stops buying then. Set after the start (before 16:00) ends it at once.
+- Unchanged: the window still ends at 19:00; peak export still decides at 16:00, floored at that day's `required_soc` (which includes the extra hour, so it is cautious on such days); the overnight plan is not resized.
+
+**Verification.** `tests/test_no_buy_window.py`. Live: set No-buy from to 15:00 today; the `peak_cover` line shows `no_buy_start: "15:00"`, a slot `endTime` of 15:00, and no grid import from 15:00 while SOC is above the floor.
