@@ -726,3 +726,4 @@ band_calibration
 om_ensemble_band
 OM_ENSEMBLE_MIN_MEMBERS
 om_backfill_missing
+deploy_announced

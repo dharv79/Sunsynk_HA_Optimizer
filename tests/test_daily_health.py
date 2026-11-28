@@ -95,3 +95,16 @@ def test_charge_shortfall_flagged(planning):
     assert not planning.charge_shortfall_flagged(5.0, None)
     assert not planning.charge_shortfall_flagged(planning.HEALTH_TAPER_TOLERANCE_PCT, "taper")
     assert planning.charge_shortfall_flagged(planning.HEALTH_TAPER_TOLERANCE_PCT + 0.5, "taper")
+
+
+def test_deploy_announced(planning):
+    """28/11/2026: the deploy check saves the version only once its message actually went out."""
+    # Debug target set: only the `deployed` record decides.
+    assert planning.deploy_announced(True, True, True, False) is True
+    assert planning.deploy_announced(True, False, True, True) is False
+    assert planning.deploy_announced(True, False, False, False) is False
+    # No debug target: the "Updated to" message decides when a previous version was known.
+    assert planning.deploy_announced(False, False, True, True) is True
+    assert planning.deploy_announced(False, False, True, False) is False
+    # First install, no debug target: nothing to send, so save.
+    assert planning.deploy_announced(False, False, False, False) is True
