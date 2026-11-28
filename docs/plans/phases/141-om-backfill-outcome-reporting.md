@@ -1,6 +1,6 @@
 # Phase 141: Report every Open-Meteo backfill outcome to the debug stream
 
-Status: In progress
+Status: Done, merged (7b1d9d6d8654fa81b4701be4194f6b965c7fb9b4, PR #267)
 
 ## Why
 
