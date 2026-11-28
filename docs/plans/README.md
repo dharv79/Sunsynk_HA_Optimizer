@@ -145,6 +145,9 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 135. No-buy from: start the no-buy window earlier on demand (saving sessions, user request 27/11/2026) | Done, merged (14307b4a09255af8e61318b2cbd2dbefa993109f, PR #259), released in 2.3.12 | S, ~30-50k |
 | 136. Open-Meteo solar forecast with a learned sun and shading model, shadow (user request 27/11/2026) | Done, merged (6ea9f0ab01f44a0f96e9e330c141b3909888d75f, PR #261), released in 2.3.13 | M, ~60-90k |
 | 137. Use the Open-Meteo forecast live once it wins (user request 27/11/2026) | Planned, not built | S, ~30-50k |
+| 138. Backfill the Open-Meteo model from past forecasts (user request 28/11/2026) | Planned, not built | M, ~50-80k |
+| 139. Use Solcast's low and high estimates, shadow (user request 28/11/2026) | Planned, not built | XS-S, ~20-35k |
+| 140. Forecast confidence from the Open-Meteo ensemble, shadow (user request 28/11/2026) | Planned, not built | S, ~30-50k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
@@ -169,6 +172,8 @@ Phases 112–115 come from the efficiency review of 15/11/2026 (inverter datashe
 Phases 125–131 come from the code review of 21/11/2026 (user request: review for bugs and improvements, refactor if required, interview where needed). 11 reviewers covered the package by subsystem plus two cross-cutting audits (do-not-break rules; time, DST and async); each finding was then checked by an adversarial verifier (101 confirmed, 30 plausible, 2 refuted; about 95 distinct after de-duplication). User decisions (21/11/2026): free-event fixes ship after the 22/11 live event; Reset baseline is refused in monitor mode and while a free event holds the slots; an export pause that clears before 19:00 restores the normal slot once it has held 30 minutes; the full-charge day with 7–14 kWh forecast bridges like a normal day (never below the bare bridge); the full-charge day stays at 100% until 16:00 (trim guard kept); peak export is floored at the higher of Peak minimum SOC and today's peak-cover required SOC; the settings audit ignores the Flux slot keys; bug fixes first, then targeted refactors (131). **Build order: 125 → 126 → 127 → 128 → 129 → 130 (after 22/11) → 131**, then 10 → 74. Nothing is released until after the 22/11 free event.
 
 Phase 116 comes from the user's question on the battery's upper limit (15/11/2026). Decision: no upper SOC cap in winter and keep the weekly 100% charge, because the `soc_cap_shadow` log shows an 85% cap costs about £0.13 on each low-solar night and the battery is full for only a few hours. Review after summer 2027 with phase 116's data. 116 is independent and can be built at any point; building it before spring gives a full summer of data.
+
+Phases 138–140 come from the data-sources review of 28/11/2026 (user request: other sources to improve accuracy and efficiency). All three are free and need no key; Open-Meteo gets the location rounded to 2 dp, as in phase 136. 138 and 140 start with a feasibility check of the Open-Meteo archive and ensemble APIs and go On hold if it fails. 139 only helps Solcast users (this install uses Forecast.Solar, which has no P10/P90). **Suggested build order: 138 → 137 → 140 → 139**, then 10 → 74. 138 first because its backtest can make 137's go-live decision in days instead of weeks.
 
 Token actuals were not metered before this index existed; record them from phase 8 on.
 
