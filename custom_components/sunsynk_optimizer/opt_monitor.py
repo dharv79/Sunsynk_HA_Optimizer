@@ -66,6 +66,7 @@ from .planning import (
     read_back_should_stop,
     CLIPPED_SOC_PCT,
     daily_health,
+    deploy_announced,
     deploy_changes,
     records_today,
     DRIFT_CHECK_AFTER_PUSH_MINUTES,
@@ -215,16 +216,22 @@ class MonitorMixin:
             "new_record_types": new_types,
             "recorded_at": dt_util.utcnow().isoformat(),
         }
-        self.coordinator.update_state(
-            touch=False, deployed_version=INTEGRATION_VERSION, known_record_types=list(RECORD_TYPES)
-        )
         target = self._cfg_str(CONF_DATA_REPORT_TARGET)
-        if target:
-            await self.async_notify_debug("Sunsynk Deployed", json.dumps(rec), target=target)
-        if old:
+        await self._async_wait_for_notify_service()
+        debug_sent = bool(target) and await self.async_notify_debug(
+            "Sunsynk Deployed", json.dumps(rec), target=target
+        )
+        notify_sent = False
+        # A failed debug record leaves the version unsaved, so the next start resends both
+        # messages; skipping the phone one here avoids sending it twice.
+        if old and (debug_sent or not target):
             added = f" New record types: {', '.join(new_types)}." if new_types else ""
-            await self.async_notify(
+            notify_sent = await self.async_notify(
                 f"🔋 Sunsynk: Updated to {INTEGRATION_VERSION}", f"Was {old}.{added}"
+            )
+        if deploy_announced(bool(target), debug_sent, bool(old), notify_sent):
+            self.coordinator.update_state(
+                touch=False, deployed_version=INTEGRATION_VERSION, known_record_types=list(RECORD_TYPES)
             )
 
     async def _async_settings_dump_startup(self, _now) -> None:
@@ -234,8 +241,8 @@ class MonitorMixin:
         """Once per installed version: send every inverter setting name and value to the debug stream (phase 119).
 
         Read-only (no writes, so also in monitor mode). Identifiers are redacted. It exists to confirm
-        the real key names, such as the per-slot power limits phase 115 needs. A failed read tries again
-        at the next start.
+        the real key names, such as the per-slot power limits phase 115 needs. A failed read or send
+        tries again at the next start.
         """
         state = self.coordinator.state
         target = self._cfg_str(CONF_DATA_REPORT_TARGET)
@@ -249,12 +256,13 @@ class MonitorMixin:
         values = settings_dump(settings, (self.inverter_serial, self.plant_id))
         if not values:
             return
-        await self.async_notify_debug(
+        await self._async_wait_for_notify_service()
+        if await self.async_notify_debug(
             "Sunsynk Settings Dump",
             json.dumps({"type": "settings_dump", "version": INTEGRATION_VERSION, "count": len(values), "values": values}),
             target=target,
-        )
-        self.coordinator.update_state(touch=False, settings_dump_version=INTEGRATION_VERSION)
+        ):
+            self.coordinator.update_state(touch=False, settings_dump_version=INTEGRATION_VERSION)
 
     async def _async_data_audit(self, _now) -> None:
         await self._guarded(self.async_run_data_audit, "Data audit")

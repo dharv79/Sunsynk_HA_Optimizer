@@ -170,3 +170,24 @@ def test_settings_reads_all_go_through_the_shared_guarded_read():
         assert "self._async_api_read(" in src, name
         assert "async_read_settings(self.inverter_serial)" not in src, name
         assert "except Exception" not in src, name
+
+
+def test_startup_messages_wait_for_notify_and_save_only_after_sending():
+    """28/11/2026: the 2.3.15 `deployed` record was lost — notify.<service> wasn't registered at the
+    45 s deploy check, and the version had already been saved, so it never retried. Both startup
+    senders now wait for the service and save only after the send succeeds."""
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "custom_components" / "sunsynk_optimizer" / "opt_monitor.py").read_text()
+    fns = {
+        n.name: ast.unparse(n) for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.AsyncFunctionDef)
+    }
+    deploy = fns["async_run_deploy_check"]
+    assert deploy.index("_async_wait_for_notify_service()") < deploy.index("async_notify_debug(")
+    assert deploy.index("async_notify_debug(") < deploy.index("deployed_version=INTEGRATION_VERSION")
+    assert "if deploy_announced(" in deploy
+    dump = fns["async_run_settings_dump"]
+    assert dump.index("_async_wait_for_notify_service()") < dump.index("async_notify_debug(")
+    assert "if await self.async_notify_debug(" in dump

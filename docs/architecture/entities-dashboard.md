@@ -236,3 +236,11 @@ suite stayed green. See `docs/plans/phases/131-review-refactor.md`.
 **Design.** `planning.charge_shortfall_flagged(shortfall, cause)`: a shortfall above `OUTCOME_ALERT_PCT` (5%) is a Check unless `charge_outcome` labelled it `taper` and it is at most `HEALTH_TAPER_TOLERANCE_PCT` (6%). Cold derate, stopped early, an unknown cause or a bigger gap still Check. The record keeps `charge_shortfall_pct` and adds `charge_shortfall_cause`. The 05:00 "overnight charge stopped short" notification is unchanged.
 
 **Verification.** `tests/test_daily_health.py`. Live: a 94%-of-100% taper night logs `daily_health` OK with `charge_shortfall_pct: 6.0`, `charge_shortfall_cause: "taper"`.
+
+### Startup messages wait for notify (28/11/2026)
+
+**Root cause.** After the 2.3.15 update no `deployed` record arrived and Last error read "Notification failed: Action notify.… not found". The notify integration registered its service after the 45 s deploy check. The check had already saved `deployed_version`, so it never retried. The 100 s settings dump got through because the service was there by then.
+
+**Design.** `_async_wait_for_notify_service` (`optimizer.py`) checks every 5 s for up to 120 s before the deploy check and the settings dump send. `async_notify_debug` and `async_notify` now return whether the message went out (held or dropped by quiet hours counts as out). `planning.deploy_announced` decides when the version is saved: once the `deployed` record is sent when a debug target is set, otherwise once "Updated to" is sent when a previous version was known. If the debug record fails, the phone message is skipped so the next start sends both once. The settings dump saves `settings_dump_version` only after it sends.
+
+**Verification.** `tests/test_daily_health.py::test_deploy_announced` and `tests/test_monitor_guards.py` (ordering pin). Live: after the next update the `deployed` record appears in `#sunsynkdebug` even when the notify service loads late.

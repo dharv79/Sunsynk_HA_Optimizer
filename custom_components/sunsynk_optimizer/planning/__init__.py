@@ -398,6 +398,7 @@ from .health import (
     HEALTH_TAPER_TOLERANCE_PCT,
     charge_shortfall_flagged,
     daily_health,
+    deploy_announced,
     deploy_changes,
     records_today,
 )
@@ -1185,6 +1186,7 @@ __all__ = [
     "days_since_full",
     "daytime_import_anomaly",
     "daytime_load_kw",
+    "deploy_announced",
     "deploy_changes",
     "digest_text",
     "HEATMAP_KINDS",

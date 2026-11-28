@@ -405,19 +405,39 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         """Record the current time as the last trim timestamp for cooldown tracking."""
         self.last_trim_ts = dt_util.utcnow().timestamp()
 
-    async def async_notify_debug(self, title: str, message: str, target: str | None = None) -> None:
-        """Debug-stream send: whole JSON lines only, split across messages when long (phase 89)."""
+    async def async_notify_debug(self, title: str, message: str, target: str | None = None) -> bool:
+        """Debug-stream send: whole JSON lines only, split across messages when long (phase 89).
+
+        True only when every part went out."""
         packs = pack_lines(message.split("\n"))
+        sent = True
         for i, pack in enumerate(packs, 1):
             suffix = f" ({i}/{len(packs)})" if len(packs) > 1 else ""
-            await self._async_deliver(title + suffix, "\n".join(pack), target=target)
+            sent = await self._async_deliver(title + suffix, "\n".join(pack), target=target) and sent
+        return sent
 
-    async def async_notify(self, title: str, message: str, target: str | None = None) -> None:
+    async def _async_wait_for_notify_service(self, timeout_s: int = 120) -> bool:
+        """Startup sends: True once the notify service is registered, checking every 5 s.
+
+        A notify integration can register its service after our 45 s deploy check (28/11/2026:
+        "Action notify.… not found"), so the startup messages wait for it instead of failing."""
+        service_string = self._cfg_str(CONF_NOTIFY_SERVICE)
+        if "." not in service_string:
+            return False
+        domain, service = service_string.split(".", 1)
+        for _ in range(timeout_s // 5):
+            if self.hass.services.has_service(domain, service):
+                return True
+            await asyncio.sleep(5)
+        return self.hass.services.has_service(domain, service)
+
+    async def async_notify(self, title: str, message: str, target: str | None = None) -> bool:
         """Send a human notification, or hold it per the priority options (phase 108).
 
         Action-needed messages always send. Anything below the configured minimum level, or any
         non-action message inside quiet hours, is held for the morning brief when a release time
-        is set, else dropped. An explicit ``target`` (the debug stream) is never held.
+        is set, else dropped. An explicit ``target`` (the debug stream) is never held. True when
+        sent, held or deliberately dropped; False only when a send failed.
         """
         if target is None:
             cfg = self.cfg
@@ -434,8 +454,8 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
                             self.coordinator.state.held_notifications, title, message, now.strftime("%H:%M")
                         ),
                     )
-                return
-        await self._async_deliver(title, message, target=target)
+                return True
+        return await self._async_deliver(title, message, target=target)
 
     async def _async_release_held(self, _now) -> None:
         """Time-change callback at the brief time: one message with the plan, forecast and what was held."""

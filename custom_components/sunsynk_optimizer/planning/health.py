@@ -113,3 +113,17 @@ def deploy_changes(previous_types: list[str] | None, current_types: list[str]) -
     if not previous_types:
         return None
     return sorted(set(current_types) - set(previous_types))
+
+
+def deploy_announced(has_debug_target: bool, debug_sent: bool, had_previous: bool, notify_sent: bool) -> bool:
+    """Whether the startup deploy check may record this version as seen (28/11/2026 fix).
+
+    Saving before the send meant a failed send (notify service not yet registered at startup) was
+    never retried. With a debug target, only its `deployed` record counts; without one, the
+    "Updated to" message does when a previous version was known; otherwise nothing is owed.
+    """
+    if has_debug_target:
+        return debug_sent
+    if had_previous:
+        return notify_sent
+    return True
