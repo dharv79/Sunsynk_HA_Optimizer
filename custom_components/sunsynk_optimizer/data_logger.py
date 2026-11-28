@@ -149,6 +149,8 @@ _IMPORT_PLAN_FIELDS = (
     "om_solar_start",
     "om_days",
     "om_cloud_pct",
+    "solcast_p10_kwh",
+    "solcast_p90_kwh",
 )
 
 

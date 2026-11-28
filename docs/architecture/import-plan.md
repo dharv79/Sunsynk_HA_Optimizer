@@ -406,3 +406,11 @@ The live 01:55 forecast learns from them through `om_split_backfill`. Dates the 
 
 **Verification.** `tests/test_open_meteo_backfill.py`. Live: press the button (or restart). An `om_backfill` record appears and the scorecard shows `open_meteo_backtest`.
 
+
+## Solcast low and high estimates, shadow (28/11/2026, phase 139)
+
+**Design.** `opt_overnight._solcast_band_fields` (called from `_async_shadow_forecast_fields`) logs `solcast_p10_kwh` and `solcast_p90_kwh` on the 01:55 plan. `planning.solcast_band` reads the daily sensor's `estimate10`/`estimate90` attributes (kWh) first. Failing that, it sums the detailed forecast's `pv_estimate10`/`pv_estimate90` over today and applies them as ratios to the raw forecast, so the list's units do not matter. Forecast.Solar has no band, so both fields are None there. The low-solar rule keeps `min(raw, corrected)` (do-not-break 8).
+
+**Scoring.** The `solcast_band` scorecard row (`kpis._band_row`, shared with phase 140) compares the calibration from `planning.band_calibration` (share below P10, inside, above P90; `miss` = how far each tail is from 10%) with the phase 70 learned band, on the same days. It is `ready` when Solcast's `miss` is at least 0.05 lower. `daily_health.shadow_features` lists `solcast_band` when tonight's plan carried the band.
+
+**Verification.** `tests/test_solcast_band.py`. Live (Solcast only): the 01:55 plan line carries both fields.

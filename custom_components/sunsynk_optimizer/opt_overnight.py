@@ -56,6 +56,7 @@ from .const import (
     GENTLE_CHARGE_SETTING,
 )
 from .planning import (
+    solcast_band,
     apply_user_override,
     parse_naive_hourly_forecast,
     achievable_max_soc,
@@ -398,8 +399,22 @@ class OvernightMixin:
         )
         return {
             **nv, "forecast_quantiles": solar_quantiles, "forecast_quantiles_cloud": cloud_quantiles,
-            "cloud_cover_pct": cloud_cover_pct,
+            "cloud_cover_pct": cloud_cover_pct, **self._solcast_band_fields(today, raw_forecast_kwh),
         }
+
+    def _solcast_band_fields(self, today, raw_forecast_kwh: float) -> dict[str, Any]:
+        """Phase 139 (shadow): Solcast's own P10/P90 for today; both None without Solcast
+        (Forecast.Solar has no band). Logged only; the low-solar rule is unchanged."""
+        cfg = self.cfg
+        daily = self._available_state(self._cfg_str(CONF_SOLAR_FORECAST_SENSOR, cfg) or "")
+        hourly_id = self._cfg_str(CONF_HOURLY_FORECAST_SENSOR, cfg)
+        hourly = self._available_state(hourly_id) if hourly_id else None
+        attr_name = str(cfg.get(CONF_HOURLY_FORECAST_ATTRIBUTE, DEFAULT_HOURLY_FORECAST_ATTRIBUTE)).strip()
+        items = hourly.attributes.get(attr_name) if hourly is not None else None
+        return solcast_band(
+            dict(daily.attributes) if daily is not None else None, items, today, dt_util.DEFAULT_TIME_ZONE,
+            raw_forecast_kwh,
+        )
 
     async def _async_rate_and_window(
         self, cfg: dict[str, Any], paired_days: list[dict[str, Any]], battery_capacity_kwh: float,
