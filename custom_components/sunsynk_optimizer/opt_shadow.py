@@ -98,6 +98,7 @@ from .planning import (
     om_reference_hours,
     om_solar_start,
     om_strings,
+    om_backfill_missing,
     om_training_hours,
 )
 
@@ -394,15 +395,48 @@ class ShadowMixin:
         long-term statistics for the PV day counter; without them only the daily backtest runs."""
         if self.coordinator.state.om_backfilled and not force:
             return
+        today = dt_util.now().date()
+        try:
+            await self._async_om_backfill_run(today)
+        except Exception as err:  # phase 141: report it, then let _guarded set Last error
+            try:
+                await self._async_om_backfill_outcome(
+                    {"date": today.isoformat(), "status": "error", "reason": str(err) or type(err).__name__},
+                )
+            except Exception:  # pragma: no cover - the original error matters more
+                pass
+            raise
+
+    async def _async_om_backfill_outcome(self, summary: dict[str, Any], log: bool = True) -> None:
+        """Phase 141: every backfill outcome goes to the debug stream and (with ``log``) the log file;
+        the latest final status is kept in state for the diagnostics download."""
+        if log:
+            await self.data_logger.async_log_om_backfill(**summary)
+        if summary.get("status") != "started":
+            self.coordinator.update_state(touch=False, om_backfill_status={
+                k: summary.get(k) for k in ("date", "status", "reason") if summary.get(k) is not None
+            })
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify_debug(
+                "Sunsynk Open-Meteo backfill (shadow)", json.dumps({"type": "om_backfill", **summary}),
+                target=data_report_target,
+            )
+
+    async def _async_om_backfill_run(self, today) -> None:
         cfg = self.cfg
-        strings = om_strings(
+        lat, lon = self.hass.config.latitude, self.hass.config.longitude
+        missing = om_backfill_missing(cfg.get(CONF_PV_KWP), cfg.get(CONF_PV_TILT), cfg.get(CONF_PV_AZIMUTH), lat, lon)
+        strings = [] if missing else om_strings(
             cfg.get(CONF_PV_KWP), cfg.get(CONF_PV_TILT), cfg.get(CONF_PV_AZIMUTH), cfg.get(CONF_PV2_TILT),
             cfg.get(CONF_PV2_AZIMUTH), cfg.get(CONF_PV2_SHARE_PCT, DEFAULT_PV2_SHARE_PCT),
         )
-        lat, lon = self.hass.config.latitude, self.hass.config.longitude
-        if not strings or lat is None or lon is None:
+        if missing or not strings:
+            await self._async_om_backfill_outcome(
+                {"date": today.isoformat(), "status": "not_configured", "reason": f"missing {missing or 'panel strings'}"},
+            )
             return
-        tz, today = dt_util.DEFAULT_TIME_ZONE, dt_util.now().date()
+        tz = dt_util.DEFAULT_TIME_ZONE
         records = await self.data_logger.async_load_records(OM_BACKFILL_DAYS + 1)
         actuals = {
             r["date"]: r["actual_solar_kwh"] for r in records
@@ -414,6 +448,9 @@ class ShadowMixin:
         }
         start = max(today - timedelta(days=OM_BACKFILL_DAYS), OM_ARCHIVE_START)
         end = today - timedelta(days=1)
+        await self._async_om_backfill_outcome(
+            {"date": today.isoformat(), "status": "started", "from": start.isoformat(), "to": end.isoformat()}, log=False,
+        )
         pv = await self._async_pv_hourly_stats(start, end, tz)
         for d, hours in pv.items():
             if d not in actuals and len(hours) >= 20:  # a whole day of statistics stands in for day_actuals
@@ -450,7 +487,10 @@ class ShadowMixin:
             "archive_days": len(days), "hourly_solar_days": len(pv),
         }
         if not days:
-            await self.data_logger.async_log_om_backfill(**summary, days=0, status="unavailable")
+            await self._async_om_backfill_outcome({
+                **summary, "days": 0, "status": "unavailable", "tried": [a[0] for a in ARCHIVES],
+                "reason": "no archive returned data",
+            })
             return
         hours = om_archive_training_hours(days, pv, lat, lon, tz)
         result = await self.hass.async_add_executor_job(om_backtest, days, hours, actuals, live, lat, lon, tz)
@@ -458,14 +498,8 @@ class ShadowMixin:
             "date": today.isoformat(), "archive": archive[0], "lead_days": archive[3], "hours": hours,
         })
         summary.update(result, status="ok", training_hours=len(hours), hourly=bool(hours))
-        await self.data_logger.async_log_om_backfill(**summary)
-        self.coordinator.update_state(touch=False, om_backfilled=today.isoformat())
-        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
-        if data_report_target:
-            await self.async_notify_debug(
-                "Sunsynk Open-Meteo backfill (shadow)", json.dumps({"type": "om_backfill", **summary}),
-                target=data_report_target,
-            )
+        self.coordinator.update_state(touch=False, om_backfilled=today.isoformat())  # only ok marks it done
+        await self._async_om_backfill_outcome(summary)
 
     async def _async_pv_hourly_stats(self, start, end, tz) -> dict[str, dict[int, float]]:
         """{date: {hour: kWh}} for the PV day counter from HA long-term statistics; {} when the

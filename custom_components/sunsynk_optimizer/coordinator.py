@@ -166,6 +166,8 @@ class OptimizerState:
     savings_backfilled: str | None = None
     # Phase 138: date the Open-Meteo model was backfilled from the forecast archive (None = not yet).
     om_backfilled: str | None = None
+    # Phase 141: latest backfill outcome {date, status, reason} (shown in the diagnostics download).
+    om_backfill_status: dict[str, Any] = field(default_factory=dict)
     # Phase 119: savings before tracking began (user-entered £), counted towards the payback.
     payback_opening_gbp: float = 0.0
     # Phase 122: user's minimum SOC at 16:00 for the peak top-up/hold (0 = off, the load estimate alone).

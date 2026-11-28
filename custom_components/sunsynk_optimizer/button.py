@@ -69,4 +69,5 @@ class SunsynkOptimizerButton(CoordinatorEntity, ButtonEntity):
         elif self._key == "clear_notices":
             await self.coordinator.optimizer.async_clear_notices()
         elif self._key == "backfill_solar_history":
-            await self.coordinator.optimizer.async_run_om_backfill(force=True)
+            optimizer = self.coordinator.optimizer
+            await optimizer._guarded(lambda: optimizer.async_run_om_backfill(force=True), "Open-Meteo backfill")
