@@ -713,3 +713,11 @@ daylight_cloud_cover
 hourly_counter_kwh
 om_strings
 CLOUD_DAYLIGHT_HOURS
+om_archive_days
+stats_hourly_kwh
+om_archive_training_hours
+om_split_backfill
+om_backtest
+OM_BACKFILL_DAYS
+OM_BACKFILL_MIN_DAYS
+OM_ARCHIVE_START

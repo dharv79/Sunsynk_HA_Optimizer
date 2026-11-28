@@ -34,6 +34,7 @@ from .planning import (
 
 _LOGGER = logging.getLogger(__name__)
 
+OM_BACKFILL_FILE = "om_backfill.json"  # phase 138: not a .jsonl file, so log pruning leaves it alone
 # Phase 91: record types written to their own monthly file ("<prefix>YYYY-MM.jsonl").
 # mpc_plan is two-thirds of all lines and is never read back, so it stays out of the main log.
 _SIDE_FILE_PREFIX = {"mpc_plan": "mpc-"}
@@ -61,7 +62,7 @@ RECORD_TYPES = (
     "grid_notice",
     "half_hourly_export",
     "half_hourly_import",
-    "hourly_profile", "om_forecast",
+    "hourly_profile", "om_forecast", "om_backfill",
     "import_causes",
     "import_plan",
     "inverter_drift",
@@ -364,6 +365,34 @@ class DataLogger:
     async def async_log_om_forecast(self, **fields: Any) -> None:
         """Log the 01:55 Open-Meteo hourly forecast (phase 136, shadow): one per date (deduped)."""
         await self._async_append(_record("om_forecast", **fields))
+
+    async def async_log_om_backfill(self, **fields: Any) -> None:
+        """Log the Open-Meteo archive backfill and walk-forward backtest summary (phase 138)."""
+        await self._async_append(_record("om_backfill", **fields))
+
+    async def async_save_om_backfill(self, data: dict[str, Any]) -> None:
+        """Store the backfilled Open-Meteo training hours (phase 138) in their own JSON file."""
+        await self.hass.async_add_executor_job(self._write_json, OM_BACKFILL_FILE, data)
+
+    async def async_load_om_backfill(self) -> dict[str, Any]:
+        """The stored phase 138 backfill ({} when none or unreadable)."""
+        return await self.hass.async_add_executor_job(self._read_json, OM_BACKFILL_FILE)
+
+    def _write_json(self, name: str, data: dict[str, Any]) -> None:
+        os.makedirs(self._data_dir, exist_ok=True)
+        path = os.path.join(self._data_dir, name)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, path)
+
+    def _read_json(self, name: str) -> dict[str, Any]:
+        try:
+            with open(os.path.join(self._data_dir, name), encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
 
     async def async_log_battery_floor(self, **fields: Any) -> None:
         """Log the inverter low-battery SOC review (phase 84): one per date (deduped)."""

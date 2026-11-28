@@ -576,6 +576,19 @@ def shadow_scorecard(
         om_dates.append(p["date"])
     score = _score(len(om_dates), 0, None, om_dates, "mean absolute error vs the live corrected forecast")
     out["open_meteo"] = _apply_error_ratio_verdict(score, len(om_dates), om_err, om_live_err)
+    # 138 Open-Meteo backtest: the latest archive backfill's walk-forward error vs the live forecast.
+    # Shown apart from the live row (decision 28/11/2026); one-off, so not limited to the window.
+    backfills = sorted(
+        (r for r in records if r.get("type") == "om_backfill" and r.get("status") == "ok"),
+        key=lambda r: str(r.get("recorded_at") or r.get("date") or ""),
+    )
+    if backfills:
+        bf = backfills[-1]
+        paired = int(bf.get("paired_days") or 0)
+        score = _score(paired, 0, None, [], f"walk-forward backtest over {bf.get('days')} archive days ({bf.get('archive')})")
+        out["open_meteo_backtest"] = _apply_error_ratio_verdict(
+            score, paired, [bf.get("om_err_sum") or 0.0], [bf.get("live_err_sum") or 0.0],
+        )
     # 86 reserve hold: days that bought day-rate import with charge still in the battery (shadow, no £ counterfactual).
     holds = win("hourly_profile")
     flagged = [r for r in holds if (r.get("above_floor_day_import_kwh") or 0) >= RESERVE_HOLD_MIN_KWH]

@@ -24,7 +24,7 @@ Home Assistant custom integration (HACS) that optimises a Sunsynk inverter's ove
 | `api.py` | Sunsynk cloud API: RSA login, token refresh, income POST, inverter settings read/write |
 | `flux_helpers.py` | `fluxProducts` payload, `merge_entry_data`, peak-price helper |
 | `octopus_public.py` | Octopus public API (no key): historic Agile rates for the tariff comparison |
-| `open_meteo.py` | Open-Meteo forecast API (no key): hourly panel sunlight for the shadow solar forecast (phase 136) |
+| `open_meteo.py` | Open-Meteo forecast API (no key): hourly panel sunlight for the shadow solar forecast (phase 136); archived forecasts for the backfill (phase 138) |
 | `sensor.py` / `binary_sensor.py` / `button.py` / `switch.py` / `datetime.py` / `number.py` | Entities (event-driven, no polling) |
 | `dashboard_installer.py` | Generates Lovelace YAML |
 | `card_resource.py` / `www/*.js` | Serves and registers the bundled flow card and day chart (ApexCharts still comes from HACS) |

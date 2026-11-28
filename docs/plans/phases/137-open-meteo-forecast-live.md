@@ -17,6 +17,7 @@ User decision (27/11/2026): one "Open-Meteo forecast live" option; Forecast.Sola
 
 ## What
 
+- Gate (decision 28/11/2026, phase 138): the phase 138 backtest row is shown separately and does not count; at least 7 live scored days are needed.
 - `CONF_OPEN_METEO_LIVE` (off by default).
 - Use `om_forecast_kwh` / the hourly forecast where those decisions read Forecast.Solar today, with Forecast.Solar as the fallback when Open-Meteo is unavailable.
 

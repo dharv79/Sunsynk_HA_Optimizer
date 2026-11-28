@@ -394,3 +394,15 @@ function bodies no longer in each other); the full `tests/test_overnight_review_
 
 **Verification.** `tests/test_open_meteo_forecast.py`; the scorecard's `open_meteo` row compares its error with the live corrected forecast.
 
+## Open-Meteo archive backfill (28/11/2026, phase 138)
+
+**Design.** `opt_shadow.async_run_om_backfill` runs once, 3 minutes after startup while `om_backfilled` is unset, and again on the **Backfill solar forecast history** button. It is read-only. For up to 365 days (and not before 2024-01-02), it fetches archived hourly GTI per string in 31-day chunks (`open_meteo.async_fetch_tilted_archive`). It prefers the Previous Runs API's `global_tilted_irradiance_previous_day1`, the forecast made a day ahead, which is close to what the 01:55 plan sees; the Historical Forecast API is the fallback. Hourly solar comes from HA's long-term statistics for the PV day counter (`statistics_during_period`, hourly `change`, through `planning.stats_hourly_kwh`). `planning.om_archive_training_hours` joins the two. The hours are stored in `<data dir>/om_backfill.json`, a file that log pruning does not touch.
+
+The live 01:55 forecast learns from them through `om_split_backfill`. Dates the live log covers are dropped. Hours inside the 120-day window feed the shading and the weather ratios; older hours feed the shading only (`om_learn(hours, shade_hours)`). `planning.om_backtest` replays every archive day walk-forward, each day predicted only from earlier days, against `day_actuals`. It logs an `om_backfill` record (archive, lead time, day counts, MAE, error sums vs the live corrected forecast) and sends it to the debug stream.
+
+**Root cause it addresses.** Phase 136 learned only from nights logged since 2.3.13, so phase 137's go-live decision needed weeks of scorecard data.
+
+**Decisions (28/11/2026).** The backtest is a separate scorecard row (`open_meteo_backtest`, the latest `ok` backfill, not window-limited), not part of the live `open_meteo` row; phase 137 still needs at least 7 live days. It goes back up to a year. Without PV statistics only the daily score runs, with the default ratio and nothing trained.
+
+**Verification.** `tests/test_open_meteo_backfill.py`. Live: press the button (or restart). An `om_backfill` record appears and the scorecard shows `open_meteo_backtest`.
+

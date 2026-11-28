@@ -37,6 +37,7 @@ async def async_setup_entry(
             SunsynkOptimizerButton(coordinator, entry, "install_dashboard", "Update dashboard", "button.install_dashboard"),
             SunsynkOptimizerButton(coordinator, entry, "cancel_free_event", "Cancel free event"),
             SunsynkOptimizerButton(coordinator, entry, "clear_notices", "Clear notices", "button.clear_notices"),
+            SunsynkOptimizerButton(coordinator, entry, "backfill_solar_history", "Backfill solar forecast history"),
         ]
     )
 
@@ -67,3 +68,5 @@ class SunsynkOptimizerButton(CoordinatorEntity, ButtonEntity):
             await self.coordinator.optimizer.async_cancel_free_event()
         elif self._key == "clear_notices":
             await self.coordinator.optimizer.async_clear_notices()
+        elif self._key == "backfill_solar_history":
+            await self.coordinator.optimizer.async_run_om_backfill(force=True)
