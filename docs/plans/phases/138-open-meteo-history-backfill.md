@@ -1,6 +1,6 @@
 # Phase 138: Backfill the Open-Meteo model from past forecasts
 
-Status: Done, merged (8c211c77441746d38bd830e6d1bcf913e63548b3, PR #263)
+Status: Done, merged (8c211c77441746d38bd830e6d1bcf913e63548b3, PR #263), released in 2.3.14
 
 ## Why
 

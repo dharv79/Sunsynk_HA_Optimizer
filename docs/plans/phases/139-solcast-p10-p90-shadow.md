@@ -1,6 +1,6 @@
 # Phase 139: Use Solcast's low and high estimates (shadow)
 
-Status: Done, merged (53e232996cb3178510fda6b55c2f3dc87b93efd8, PR #264)
+Status: Done, merged (53e232996cb3178510fda6b55c2f3dc87b93efd8, PR #264), released in 2.3.14
 
 ## Why
 
