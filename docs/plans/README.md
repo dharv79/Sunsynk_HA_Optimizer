@@ -145,7 +145,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 135. No-buy from: start the no-buy window earlier on demand (saving sessions, user request 27/11/2026) | Done, merged (14307b4a09255af8e61318b2cbd2dbefa993109f, PR #259), released in 2.3.12 | S, ~30-50k |
 | 136. Open-Meteo solar forecast with a learned sun and shading model, shadow (user request 27/11/2026) | Done, merged (6ea9f0ab01f44a0f96e9e330c141b3909888d75f, PR #261), released in 2.3.13 | M, ~60-90k |
 | 137. Use the Open-Meteo forecast live once it wins (user request 27/11/2026) | Planned, not built | S, ~30-50k |
-| 138. Backfill the Open-Meteo model from past forecasts (user request 28/11/2026) | Planned, not built | M, ~50-80k |
+| 138. Backfill the Open-Meteo model from past forecasts (user request 28/11/2026) | Done, merged (8c211c77441746d38bd830e6d1bcf913e63548b3, PR #263) | M, ~60k actual |
 | 139. Use Solcast's low and high estimates, shadow (user request 28/11/2026) | Planned, not built | XS-S, ~20-35k |
 | 140. Forecast confidence from the Open-Meteo ensemble, shadow (user request 28/11/2026) | Planned, not built | S, ~30-50k |
 
