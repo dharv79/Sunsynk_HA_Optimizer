@@ -171,6 +171,8 @@ class MonitorMixin:
             shadows.append("open_meteo")  # phase 136: tonight's plan carried an Open-Meteo forecast
         if (state.nightly_import_plan or {}).get("solcast_p10_kwh") is not None:
             shadows.append("solcast_band")  # phase 139: tonight's plan carried Solcast's band
+        if (state.nightly_import_plan or {}).get("om_p10_kwh") is not None:
+            shadows.append("om_ensemble")  # phase 140: tonight's plan carried the ensemble band
         rec = {
             "date": date,
             **daily_health(

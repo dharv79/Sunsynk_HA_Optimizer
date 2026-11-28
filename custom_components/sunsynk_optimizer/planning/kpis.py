@@ -607,6 +607,8 @@ def shadow_scorecard(
     out["open_meteo"] = _apply_error_ratio_verdict(score, len(om_dates), om_err, om_live_err)
     # 139 Solcast band: calibration of Solcast's own P10/P90 vs our phase 70 band, same days.
     out["solcast_band"] = _band_row(plans, actuals, "solcast_p10_kwh", "solcast_p90_kwh", "Solcast")
+    # 140 Open-Meteo ensemble band: calibration vs our phase 70 band, same days.
+    out["om_ensemble"] = _band_row(plans, actuals, "om_p10_kwh", "om_p90_kwh", "Open-Meteo ensemble")
     # 138 Open-Meteo backtest: the latest archive backfill's walk-forward error vs the live forecast.
     # Shown apart from the live row (decision 28/11/2026); one-off, so not limited to the window.
     backfills = sorted(
