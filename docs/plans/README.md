@@ -145,9 +145,9 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 135. No-buy from: start the no-buy window earlier on demand (saving sessions, user request 27/11/2026) | Done, merged (14307b4a09255af8e61318b2cbd2dbefa993109f, PR #259), released in 2.3.12 | S, ~30-50k |
 | 136. Open-Meteo solar forecast with a learned sun and shading model, shadow (user request 27/11/2026) | Done, merged (6ea9f0ab01f44a0f96e9e330c141b3909888d75f, PR #261), released in 2.3.13 | M, ~60-90k |
 | 137. Use the Open-Meteo forecast live once it wins (user request 27/11/2026) | Planned, not built | S, ~30-50k |
-| 138. Backfill the Open-Meteo model from past forecasts (user request 28/11/2026) | Done, merged (8c211c77441746d38bd830e6d1bcf913e63548b3, PR #263) | M, ~60k actual |
-| 139. Use Solcast's low and high estimates, shadow (user request 28/11/2026) | Done, merged (53e232996cb3178510fda6b55c2f3dc87b93efd8, PR #264) | XS-S, ~20k actual |
-| 140. Forecast confidence from the Open-Meteo ensemble, shadow (user request 28/11/2026) | Planned, not built | S, ~30-50k |
+| 138. Backfill the Open-Meteo model from past forecasts (user request 28/11/2026) | Done, merged (8c211c77441746d38bd830e6d1bcf913e63548b3, PR #263), released in 2.3.14 | M, ~60k actual |
+| 139. Use Solcast's low and high estimates, shadow (user request 28/11/2026) | Done, merged (53e232996cb3178510fda6b55c2f3dc87b93efd8, PR #264), released in 2.3.14 | XS-S, ~20k actual |
+| 140. Forecast confidence from the Open-Meteo ensemble, shadow (user request 28/11/2026) | Done, merged (222966bbca79c0e2f83433c1ffca9efde9561a1a, PR #265), released in 2.3.14 | S, ~25k actual |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 

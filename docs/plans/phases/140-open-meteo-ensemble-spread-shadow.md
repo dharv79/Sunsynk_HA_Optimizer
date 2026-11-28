@@ -1,6 +1,6 @@
 # Phase 140: Forecast confidence from the Open-Meteo ensemble (shadow)
 
-Status: Planned, not built
+Status: Done, merged (222966bbca79c0e2f83433c1ffca9efde9561a1a, PR #265), released in 2.3.14
 
 ## Why
 
