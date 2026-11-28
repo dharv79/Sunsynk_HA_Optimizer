@@ -424,3 +424,18 @@ The live 01:55 forecast learns from them through `om_split_backfill`. Dates the 
 **Scoring.** The `om_ensemble` scorecard row uses the shared `kpis._band_row` (as phase 139) against the phase 70 learned band. `daily_health.shadow_features` lists `om_ensemble`. Whether a tight spread may shrink the hold margin is a later decision.
 
 **Verification.** `tests/test_open_meteo_ensemble.py`. Live: with the Open-Meteo options set, the 01:55 plan line carries the band fields.
+
+## Open-Meteo backfill outcome reporting (28/11/2026, phase 141)
+
+**Design.** `opt_shadow.async_run_om_backfill` wraps `_async_om_backfill_run`. Every outcome goes through `_async_om_backfill_outcome`, which writes the `om_backfill` record, keeps `{date, status, reason}` in `state.om_backfill_status` (so it shows in the diagnostics download), and posts an `om_backfill` line to `CONF_DATA_REPORT_TARGET`. The statuses are:
+- `started`, with `from` and `to` (posted only, not logged);
+- `not_configured`: `reason` names the blank options or the missing location, from `planning.om_backfill_missing`;
+- `unavailable`: `tried` lists the archives;
+- `ok`;
+- `error`: `reason` is the exception text, and the exception is then raised again.
+
+The button runs it through `_guarded` too, so a failure sets **Last error**. Only `ok` sets `om_backfilled`, so a failed startup run is retried at the next restart. Training, the backtest and the once-only behaviour are unchanged.
+
+**Root cause it addresses.** After the 2.3.14 deploy nothing reached `#sunsynkdebug`, because only `ok` was posted. Blank options returned silently, `unavailable` went to the file only, and an exception set only Last error.
+
+**Verification.** `tests/test_open_meteo_backfill.py`. Live: press **Backfill solar forecast history**. A `started` line, then one outcome line, appears in `#sunsynkdebug`.

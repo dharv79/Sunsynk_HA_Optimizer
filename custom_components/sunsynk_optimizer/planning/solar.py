@@ -72,6 +72,22 @@ def om_strings(
     return [(t1, a1, round(total * (1 - part), 3)), (t2, a2, round(total * part, 3))]
 
 
+def om_backfill_missing(kwp: Any, tilt: Any, azimuth: Any, lat: Any, lon: Any) -> str | None:
+    """Phase 141: why the Open-Meteo backfill cannot run ("pv_kwp, pv_tilt", "location", ...),
+    or None when the options and HA's location are all set."""
+    missing = []
+    total = _num(kwp)
+    if total is None or total <= 0:
+        missing.append("pv_kwp")
+    if _num(tilt) is None:
+        missing.append("pv_tilt")
+    if _num(azimuth) is None:
+        missing.append("pv_azimuth")
+    if _num(lat) is None or _num(lon) is None:
+        missing.append("location")
+    return ", ".join(missing) or None
+
+
 def sun_position(lat: float, lon: float, when: datetime) -> tuple[float, float]:
     """(elevation °, compass azimuth °) of the sun at an aware ``when`` (NOAA approximation, ±1°)."""
     utc = when.astimezone(timezone.utc)

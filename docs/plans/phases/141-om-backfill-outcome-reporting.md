@@ -1,6 +1,6 @@
 # Phase 141: Report every Open-Meteo backfill outcome to the debug stream
 
-Status: Planned, not built
+Status: In progress
 
 ## Why
 

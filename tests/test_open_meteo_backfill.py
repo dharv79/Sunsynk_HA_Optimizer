@@ -149,3 +149,46 @@ def test_backfill_runs_once_at_startup_and_on_the_button():
 def test_live_forecast_learns_from_the_backfill():
     src = _function_source(PKG / "opt_shadow.py", "_async_open_meteo_shadow")
     assert "async_load_om_backfill" in src and "om_split_backfill" in src
+
+
+def test_backfill_missing_names_each_blank_option(planning):
+    assert planning.om_backfill_missing(4.2, 35, 180, LAT, LON) is None
+    assert planning.om_backfill_missing(None, 35, 180, LAT, LON) == "pv_kwp"
+    assert planning.om_backfill_missing(0, "", None, LAT, LON) == "pv_kwp, pv_tilt, pv_azimuth"
+    assert planning.om_backfill_missing(4.2, 35, 180, None, LON) == "location"
+    # Agrees with om_strings: whenever it names nothing, the strings exist.
+    assert planning.om_strings(4.2, 35, 180) and not planning.om_strings(None, 35, 180)
+
+
+def test_every_backfill_outcome_is_reported():
+    run = _function_source(PKG / "opt_shadow.py", "_async_om_backfill_run")
+    for status in ("'not_configured'", "'started'", "'unavailable'", "status='ok'"):
+        assert status in run, status
+    # Each exit reports through the one helper, which posts to the debug stream.
+    assert run.count("_async_om_backfill_outcome") == 4
+    assert "async_notify_debug" not in run and "async_log_om_backfill" not in run
+    outcome = _function_source(PKG / "opt_shadow.py", "_async_om_backfill_outcome")
+    assert "async_notify_debug" in outcome and "CONF_DATA_REPORT_TARGET" in outcome
+    assert "async_log_om_backfill" in outcome and "om_backfill_status" in outcome
+    # The started line is posted only, not logged.
+    assert "log=False" in run
+
+
+def test_only_ok_marks_the_backfill_done():
+    run = _function_source(PKG / "opt_shadow.py", "_async_om_backfill_run")
+    assert run.count("om_backfilled=") == 1
+    ok_at = run.index("status='ok'")
+    assert run.index("om_backfilled=") > ok_at > run.index("'unavailable'") > run.index("'not_configured'")
+
+
+def test_an_exception_is_reported_then_reaches_guarded():
+    run = _function_source(PKG / "opt_shadow.py", "async_run_om_backfill")
+    assert "except Exception" in run and "'error'" in run and "_async_om_backfill_outcome" in run
+    assert run.rstrip().endswith("raise")
+    assert "_guarded" in (PKG / "button.py").read_text().split("backfill_solar_history")[-1]
+
+
+def test_backfill_status_is_in_the_diagnostics_state():
+    text = (PKG / "coordinator.py").read_text()
+    assert "om_backfill_status: dict[str, Any]" in text
+    assert "coordinator.state.__dict__" in (PKG / "diagnostics.py").read_text()
