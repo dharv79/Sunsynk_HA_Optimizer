@@ -48,7 +48,7 @@ from .flux_helpers import (
     tariff_prices_pence,
 )
 from .octopus_public import async_fetch_agile_rates
-from .open_meteo import ARCHIVES, async_fetch_tilted, async_fetch_tilted_archive
+from .open_meteo import ARCHIVES, async_fetch_ensemble, async_fetch_tilted, async_fetch_tilted_archive
 from .planning import (
     flux_bands_from_charges,
     merge_tariff_rates,
@@ -89,6 +89,7 @@ from .planning import (
     om_archive_days,
     om_archive_training_hours,
     om_backtest,
+    om_ensemble_band,
     om_split_backfill,
     stats_hourly_kwh,
     om_cloud_hours,
@@ -355,6 +356,7 @@ class ShadowMixin:
             "om_solar_start": om_solar_start(pred["hourly"], load_kw), "om_days": model["days"],
             "om_cloud_pct": round(sum(daylight) / len(daylight), 1) if daylight else None,
         }
+        fields.update(await self._async_om_ensemble(session, strings, lat, lon, day, tz, pred["kwh"]))  # phase 140
         record = {
             "date": day.isoformat(), "kwh": pred["kwh"], "basis": pred["basis"],
             "strings": [{"tilt": t, "azimuth": a, "kwp": k} for t, a, k in strings],
@@ -368,6 +370,20 @@ class ShadowMixin:
             },
         }
         return fields, record
+
+    async def _async_om_ensemble(self, session, strings, lat, lon, day, tz, om_kwh) -> dict[str, Any]:
+        """Phase 140 (shadow): the ensemble band fields; all None when the fetch fails or the
+        runs do not line up across strings. Never feeds the target."""
+        members, times = [], None
+        if om_kwh is not None:
+            for tilt, azimuth, _kwp in strings:
+                r = await async_fetch_ensemble(session, lat, lon, tilt, compass_to_open_meteo(azimuth))
+                if r is None or (times is not None and r["time"] != times):
+                    members = []
+                    break
+                times = r["time"]
+                members.append(r["members"])
+        return om_ensemble_band(times or [], members, [s[2] for s in strings], day, tz, om_kwh)
 
     async def _async_om_backfill_startup(self, _now) -> None:
         await self._guarded(self.async_run_om_backfill, "Open-Meteo backfill")

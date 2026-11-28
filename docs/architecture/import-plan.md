@@ -414,3 +414,13 @@ The live 01:55 forecast learns from them through `om_split_backfill`. Dates the 
 **Scoring.** The `solcast_band` scorecard row (`kpis._band_row`, shared with phase 140) compares the calibration from `planning.band_calibration` (share below P10, inside, above P90; `miss` = how far each tail is from 10%) with the phase 70 learned band, on the same days. It is `ready` when Solcast's `miss` is at least 0.05 lower. `daily_health.shadow_features` lists `solcast_band` when tonight's plan carried the band.
 
 **Verification.** `tests/test_solcast_band.py`. Live (Solcast only): the 01:55 plan line carries both fields.
+
+## Open-Meteo ensemble band, shadow (28/11/2026, phase 140)
+
+**Design.** In `_async_open_meteo_shadow`, after the learned forecast, `opt_shadow._async_om_ensemble` fetches the ECMWF IFS ensemble (`open_meteo.async_fetch_ensemble`: hourly GTI for a control run plus 50 members, one request per string, location rounded to 2 dp). `planning.om_ensemble_band` takes each run's daylight total as a ratio to the runs' mean and scales `om_forecast_kwh` by the ratios' P10/P50/P90, so the shading model still applies. It needs at least `OM_ENSEMBLE_MIN_MEMBERS` (10) runs. The plan logs `om_p10_kwh`, `om_p50_kwh`, `om_p90_kwh`, `om_spread` (P90−P10 as % of P50) and `om_members`. A failed fetch gives None fields; the target and the low-solar rule are unchanged.
+
+**Feasibility (28/11/2026).** The ensemble API returns `global_tilted_irradiance` and `_member01`..`_member50` with tilt and azimuth. A live London response gave 51 runs and a band of 2.03 / 2.89 / 4.17 kWh around a 3 kWh forecast.
+
+**Scoring.** The `om_ensemble` scorecard row uses the shared `kpis._band_row` (as phase 139) against the phase 70 learned band. `daily_health.shadow_features` lists `om_ensemble`. Whether a tight spread may shrink the hold margin is a later decision.
+
+**Verification.** `tests/test_open_meteo_ensemble.py`. Live: with the Open-Meteo options set, the 01:55 plan line carries the band fields.

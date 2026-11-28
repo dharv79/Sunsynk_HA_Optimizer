@@ -14,6 +14,8 @@ User request (28/11/2026), from the data-sources review:
 - The overnight target and the low-solar rule are unchanged.
 - Whether a tight spread may shrink the hold margin is decided from the scorecard, in a later phase.
 
+Feasibility check (28/11/2026), passed: the ensemble API returns `global_tilted_irradiance` plus `_member01`..`_member50` (ECMWF IFS 0.25) with tilt and azimuth, so the shortwave fallback was not needed.
+
 ## What
 
 - **Feasibility check first.** Confirm whether the ensemble API returns `global_tilted_irradiance` with our tilt and azimuth for this location. If it doesn't, use `shortwave_radiation`. Candidate models are ECMWF IFS (51 members) and ICON-EU-EPS. Go On hold if neither works.

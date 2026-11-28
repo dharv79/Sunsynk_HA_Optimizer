@@ -28,7 +28,7 @@ from datetime import date, datetime, timedelta, timezone, tzinfo
 from math import atan2, cos, degrees, pi, radians, sin, sqrt
 from typing import Any
 
-from .core import _num, minutes_to_hhmm, round_or_none
+from .core import _num, minutes_to_hhmm, percentile, round_or_none
 from .forecast import cloud_bucket
 
 OM_DEFAULT_RATIO = 0.8  # performance ratio before anything is learned
@@ -480,4 +480,39 @@ def band_calibration(rows: list[tuple[float, float, float]]) -> dict[str, Any]:
     return {
         "days": n, "below_p10": round(b, 2), "inside": round(1 - b - ab, 2), "above_p90": round(ab, 2),
         "miss": round(abs(b - 0.1) + abs(ab - 0.1), 3),
+    }
+
+
+OM_ENSEMBLE_MIN_MEMBERS = 10  # fewer usable runs than this is no spread at all
+
+
+def om_ensemble_band(
+    times_utc: list[str], members_by_string: list[list[list[Any]]], kwp_by_string: list[float], day: date,
+    tz: tzinfo, om_kwh: float | None,
+) -> dict[str, Any]:
+    """Phase 140 (shadow): P10/P50/P90 of today's solar from the ensemble's spread.
+
+    Each run's daylight total is taken as a ratio to the runs' mean, and the P10/P50/P90 of
+    those ratios scale ``om_kwh`` (the phase 136 learned forecast), so the shading model still
+    applies. ``members_by_string[s][m]`` is run m's hourly GTI for string s. All None without
+    OM_ENSEMBLE_MIN_MEMBERS usable runs or a forecast to scale.
+    """
+    empty = {"om_p10_kwh": None, "om_p50_kwh": None, "om_p90_kwh": None, "om_spread": None, "om_members": None}
+    base = _num(om_kwh)
+    if base is None or not members_by_string:
+        return empty
+    runs = min(len(m) for m in members_by_string)
+    totals: list[float] = []
+    for m in range(runs):
+        ref = om_reference_hours(times_utc, [s[m] for s in members_by_string], kwp_by_string, day, tz)
+        if ref:
+            totals.append(sum(ref.values()))
+    mean = sum(totals) / len(totals) if totals else 0.0
+    if len(totals) < OM_ENSEMBLE_MIN_MEMBERS or mean <= 0:
+        return {**empty, "om_members": len(totals) or None}
+    ratios = [t / mean for t in totals]
+    p10, p50, p90 = (round(base * percentile(ratios, q), 2) for q in (10, 50, 90))
+    return {
+        "om_p10_kwh": p10, "om_p50_kwh": p50, "om_p90_kwh": p90,
+        "om_spread": round((p90 - p10) / p50 * 100, 1) if p50 > 0 else None, "om_members": len(totals),
     }

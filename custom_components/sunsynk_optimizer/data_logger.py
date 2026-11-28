@@ -151,6 +151,11 @@ _IMPORT_PLAN_FIELDS = (
     "om_cloud_pct",
     "solcast_p10_kwh",
     "solcast_p90_kwh",
+    "om_p10_kwh",
+    "om_p50_kwh",
+    "om_p90_kwh",
+    "om_spread",
+    "om_members",
 )
 
 

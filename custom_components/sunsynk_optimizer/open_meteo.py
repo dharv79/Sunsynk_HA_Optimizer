@@ -102,3 +102,36 @@ async def async_fetch_tilted_archive(
     except Exception as exc:  # network, HTTP or JSON shape
         _LOGGER.warning("Open-Meteo archive fetch failed: %s", exc)
         return None
+
+
+# Phase 140: the ensemble forecast (ECMWF IFS, a control run plus 50 members) for a confidence band.
+ENSEMBLE_API = "https://ensemble-api.open-meteo.com/v1/ensemble"
+ENSEMBLE_MODEL = "ecmwf_ifs025"
+
+
+async def async_fetch_ensemble(
+    session: aiohttp.ClientSession, lat: float, lon: float, tilt: float, azimuth: float,
+) -> dict[str, Any] | None:
+    """{"time", "members": [hourly GTI list per run]} (control first) for one panel orientation;
+    same rounding and azimuth convention as ``async_fetch_tilted``; None on any failure."""
+    params = {
+        "latitude": round(float(lat), 2), "longitude": round(float(lon), 2), "hourly": "global_tilted_irradiance",
+        "tilt": float(tilt), "azimuth": float(azimuth), "models": ENSEMBLE_MODEL, "timezone": "GMT",
+        "past_days": 1, "forecast_days": 2,
+    }
+    try:
+        async with session.get(ENSEMBLE_API, params=params, timeout=_TIMEOUT) as response:
+            response.raise_for_status()
+            data = await response.json()
+        block = data.get("hourly") or {}
+        times = block.get("time")
+        if not isinstance(times, list):
+            raise ValueError("unexpected hourly shape")
+        keys = sorted(k for k in block if k.startswith("global_tilted_irradiance"))
+        members = [block[k] for k in keys if isinstance(block[k], list) and len(block[k]) == len(times)]
+        if len(members) < 2:
+            raise ValueError("no ensemble members")
+        return {"time": times, "members": members}
+    except Exception as exc:  # network, HTTP or JSON shape
+        _LOGGER.warning("Open-Meteo ensemble fetch failed: %s", exc)
+        return None
