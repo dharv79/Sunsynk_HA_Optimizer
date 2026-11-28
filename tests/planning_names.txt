@@ -721,3 +721,5 @@ om_backtest
 OM_BACKFILL_DAYS
 OM_BACKFILL_MIN_DAYS
 OM_ARCHIVE_START
+solcast_band
+band_calibration

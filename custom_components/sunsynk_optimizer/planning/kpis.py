@@ -15,6 +15,7 @@ import math
 from datetime import date, timedelta
 from typing import Any
 
+from .solar import band_calibration
 from .core import (
     BATTERY_LOW_SOC,
     KPI_RESERVE_SOC,
@@ -484,6 +485,34 @@ def _apply_error_ratio_verdict(
     return score
 
 
+def _band_row(
+    plans: list[dict[str, Any]], actuals: dict[str, dict[str, Any]], p10_key: str, p90_key: str, name: str,
+) -> dict[str, Any]:
+    """Phases 139/140: a shadow P10/P90 band's calibration against the phase 70 learned band on the
+    days both exist. ready = its tails sit at least SCORECARD_ERROR_GAIN closer to 10% each than ours;
+    harmful = that much further. Informational: no decision reads it yet."""
+    challenger: list[tuple[float, float, float]] = []
+    own: list[tuple[float, float, float]] = []
+    dates: list[str] = []
+    for p in plans:
+        actual = (actuals.get(p["date"]) or {}).get("actual_solar_kwh")
+        lo, hi = p.get(p10_key), p.get(p90_key)
+        q = p.get("forecast_quantiles") or {}
+        if None in (actual, lo, hi, q.get("p10_kwh"), q.get("p90_kwh")):
+            continue
+        challenger.append((actual, lo, hi))
+        own.append((actual, q["p10_kwh"], q["p90_kwh"]))
+        dates.append(p["date"])
+    score = _score(len(dates), 0, None, dates, f"{name} P10/P90 calibration vs the learned band (10% / 80% / 10% is calibrated)")
+    cal, base = band_calibration(challenger), band_calibration(own)
+    score["calibration"], score["learned_calibration"] = cal, base
+    if len(dates) >= SCORECARD_MIN_DAYS:
+        gap = cal["miss"] - base["miss"]
+        score["changed"] = len(dates)
+        score["verdict"] = "ready" if gap <= -SCORECARD_ERROR_GAIN else "harmful" if gap >= SCORECARD_ERROR_LOSS else "not_yet"
+    return score
+
+
 def _sum_or_none(values: list[Any]) -> float | None:
     nums = [v for v in values if isinstance(v, (int, float))]
     return sum(nums) if nums else None
@@ -576,6 +605,8 @@ def shadow_scorecard(
         om_dates.append(p["date"])
     score = _score(len(om_dates), 0, None, om_dates, "mean absolute error vs the live corrected forecast")
     out["open_meteo"] = _apply_error_ratio_verdict(score, len(om_dates), om_err, om_live_err)
+    # 139 Solcast band: calibration of Solcast's own P10/P90 vs our phase 70 band, same days.
+    out["solcast_band"] = _band_row(plans, actuals, "solcast_p10_kwh", "solcast_p90_kwh", "Solcast")
     # 138 Open-Meteo backtest: the latest archive backfill's walk-forward error vs the live forecast.
     # Shown apart from the live row (decision 28/11/2026); one-off, so not limited to the window.
     backfills = sorted(

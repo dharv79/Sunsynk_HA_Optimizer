@@ -1,6 +1,6 @@
 # Phase 138: Backfill the Open-Meteo model from past forecasts
 
-Status: Planned, not built
+Status: Done, merged (8c211c77441746d38bd830e6d1bcf913e63548b3, PR #263)
 
 ## Why
 

@@ -423,3 +423,61 @@ def om_backtest(
         "om_paired_mae": round(om_err / paired, 2) if paired else None,
         "live_mae": round(live_err / paired, 2) if paired else None,
     }
+
+
+def solcast_band(
+    daily_attrs: dict[str, Any] | None, items: list[Any] | None, day: date, tz: tzinfo, raw_kwh: float | None,
+) -> dict[str, float | None]:
+    """Phase 139 (shadow): Solcast's own low (P10) and high (P90) estimate for ``day`` in kWh.
+
+    The daily sensor's ``estimate10``/``estimate90`` attributes (kWh) come first. Otherwise
+    the detailed forecast's ``pv_estimate10``/``pv_estimate90`` are summed over the day and
+    applied as ratios to ``raw_kwh``, so the result does not depend on the list's units.
+    Anything missing is None (Forecast.Solar publishes no band).
+    """
+    attrs = daily_attrs or {}
+    p10, p90 = _num(attrs.get("estimate10")), _num(attrs.get("estimate90"))
+    if p10 is not None and p90 is not None:
+        return {"solcast_p10_kwh": round(p10, 2), "solcast_p90_kwh": round(p90, 2)}
+    sums = {"pv_estimate": 0.0, "pv_estimate10": 0.0, "pv_estimate90": 0.0}
+    seen = False
+    raw = _num(raw_kwh)
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or "pv_estimate10" not in item or "pv_estimate90" not in item:
+            continue
+        try:
+            when = datetime.fromisoformat(str(item.get("period_start") or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=tz)
+        if when.astimezone(tz).date() != day:
+            continue
+        values = {k: _num(item.get(k)) for k in sums}
+        if None in values.values():
+            continue
+        seen = True
+        for k, v in values.items():
+            sums[k] += v
+    if not seen or sums["pv_estimate"] <= 0 or raw is None:
+        return {"solcast_p10_kwh": None, "solcast_p90_kwh": None}
+    return {
+        "solcast_p10_kwh": round(raw * sums["pv_estimate10"] / sums["pv_estimate"], 2),
+        "solcast_p90_kwh": round(raw * sums["pv_estimate90"] / sums["pv_estimate"], 2),
+    }
+
+
+def band_calibration(rows: list[tuple[float, float, float]]) -> dict[str, Any]:
+    """Phases 139/140: share of days whose actual fell below P10, inside P10-P90, above P90,
+    from (actual, p10, p90) rows. A calibrated band reads about 10% / 80% / 10%; ``miss`` is how
+    far the two tails are from 10% each (0 = calibrated). Shares are None with no rows."""
+    n = len(rows)
+    if not n:
+        return {"days": 0, "below_p10": None, "inside": None, "above_p90": None, "miss": None}
+    below = sum(1 for a, lo, _hi in rows if a < lo)
+    above = sum(1 for a, _lo, hi in rows if a > hi)
+    b, ab = below / n, above / n
+    return {
+        "days": n, "below_p10": round(b, 2), "inside": round(1 - b - ab, 2), "above_p90": round(ab, 2),
+        "miss": round(abs(b - 0.1) + abs(ab - 0.1), 3),
+    }

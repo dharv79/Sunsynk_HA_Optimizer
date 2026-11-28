@@ -169,6 +169,8 @@ class MonitorMixin:
             shadows.append("export_cost_trigger")
         if (state.nightly_import_plan or {}).get("om_basis") not in (None, "unavailable"):
             shadows.append("open_meteo")  # phase 136: tonight's plan carried an Open-Meteo forecast
+        if (state.nightly_import_plan or {}).get("solcast_p10_kwh") is not None:
+            shadows.append("solcast_band")  # phase 139: tonight's plan carried Solcast's band
         rec = {
             "date": date,
             **daily_health(
