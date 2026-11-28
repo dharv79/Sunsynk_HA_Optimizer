@@ -148,6 +148,7 @@ Sunsynk HA Optimizer 1.0.11 is the latest stable release (Octopus cost link, wee
 | 138. Backfill the Open-Meteo model from past forecasts (user request 28/11/2026) | Done, merged (8c211c77441746d38bd830e6d1bcf913e63548b3, PR #263), released in 2.3.14 | M, ~60k actual |
 | 139. Use Solcast's low and high estimates, shadow (user request 28/11/2026) | Done, merged (53e232996cb3178510fda6b55c2f3dc87b93efd8, PR #264), released in 2.3.14 | XS-S, ~20k actual |
 | 140. Forecast confidence from the Open-Meteo ensemble, shadow (user request 28/11/2026) | Done, merged (222966bbca79c0e2f83433c1ffca9efde9561a1a, PR #265), released in 2.3.14 | S, ~25k actual |
+| 141. Report every Open-Meteo backfill outcome to the debug stream (user request 28/11/2026) | Planned, not built | XS, ~15-25k |
 
 Phases 12–21 come from the efficiency improvement list (06/10/2026) and are numbered in build order: 12 → 13 → 14 (baseline KPIs) → 15 → 16 → 17; 18–20 independent; 21 after the phase 10 live test. New behaviour ships in shadow/logged form first where it changes inverter writes.
 
