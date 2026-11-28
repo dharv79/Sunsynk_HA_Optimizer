@@ -8,10 +8,12 @@ Phase 136 learns this roof's shading and the weather ratio only from nights logg
 
 ## Decisions
 
-User request (28/11/2026), from the data-sources review. Settle these in the build interview:
+User request (28/11/2026), from the data-sources review. The recommendations were adopted when the user said to build 138–140:
 
-- Whether backfilled days count toward phase 137's "ready" gate, or are shown separately. Recommendation: show them as a separate `open_meteo_backtest` row, and require at least 7 live days before 137 can go live.
-- How far back to go. Recommendation: up to 365 days, limited by the solar data we have.
+- Backfilled days are shown as a separate `open_meteo_backtest` row and do not count toward phase 137's gate, which still needs at least 7 live days.
+- The backfill goes back up to 365 days (not before 2024-01-02, the start of the archive), limited by the solar data we have.
+
+Feasibility check (28/11/2026), passed: the Previous Runs API offers `global_tilted_irradiance_previous_day1` and `cloud_cover_previous_day1` (archived from January 2024), with the Historical Forecast API as the fallback.
 
 ## What
 
@@ -20,9 +22,9 @@ User request (28/11/2026), from the data-sources review. Settle these in the bui
   - The Historical Forecast API stitches together the first hours of each model run, so it is slightly more accurate than our 01:55 forecast was.
 
   Record which archive was used and the lead time. If neither archive returns GTI, use `shortwave_radiation` with the same sun model. If that fails too, go On hold.
-- **Fetching:** `open_meteo.async_fetch_tilted_history(start, end)`:
+- **Fetching:** `open_meteo.async_fetch_tilted_archive(…, start, end)`:
   - The same per-string parameters and 2 dp rounding of the location as `async_fetch_tilted`.
-  - Requests in chunks of about 90 days.
+  - Requests in chunks of 31 days.
   - Any failure returns None.
 - **Hourly solar actuals:**
   - Before 2.3.13, take them from HA's long-term statistics for the PV energy sensor (`recorder` `statistics_during_period`, hourly `change`).

@@ -6,6 +6,7 @@
   "documentation": "https://github.com/dharv79/Sunsynk_HA_Optimizer",
   "issue_tracker": "https://github.com/dharv79/Sunsynk_HA_Optimizer/issues",
   "dependencies": ["http", "frontend", "websocket_api"],
+  "after_dependencies": ["recorder"],
   "codeowners": [
     "@dharv79"
   ],

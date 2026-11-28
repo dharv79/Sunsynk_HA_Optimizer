@@ -305,6 +305,8 @@ class SunsynkOptimizer(OvernightMixin, DaytimeMixin, CaptureMixin, ReportsMixin,
         self.unsubs.append(async_call_later(self.hass, 100, self._async_settings_dump_startup))  # phase 119
         if self.coordinator.state.savings_backfilled is None:  # phase 118: back-date the savings ledger once
             self.unsubs.append(async_call_later(self.hass, 150, self._async_savings_backfill_startup))
+        if self.coordinator.state.om_backfilled is None:  # phase 138: train the Open-Meteo model on the archive once
+            self.unsubs.append(async_call_later(self.hass, 180, self._async_om_backfill_startup))
         if capacity_estimate_pending(self.coordinator.state.battery_capacity_estimate):
             self.unsubs.append(async_call_later(self.hass, 120, self._async_initial_capacity_estimate))
 

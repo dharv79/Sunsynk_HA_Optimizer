@@ -43,6 +43,9 @@ OM_SHADE_RANGE = (0.1, 1.2)
 OM_RATIO_RANGE = (0.05, 2.0)
 OM_START_LATEST_HOUR = 15  # a "solar start" after this is no morning start at all
 CLOUD_DAYLIGHT_HOURS = (8, 16)  # hours averaged for cloud cover when sunrise/sunset are unknown
+OM_BACKFILL_DAYS = 365  # phase 138: how far back the archive backfill reaches
+OM_BACKFILL_MIN_DAYS = 14  # startup backfills once when the model has fewer days than this
+OM_ARCHIVE_START = date(2024, 1, 2)  # Previous Runs API archive starts January 2024
 
 
 def _clamp(value: float, bounds: tuple[float, float]) -> float:
@@ -185,9 +188,16 @@ def om_training_hours(
     return out
 
 
-def om_learn(hours: list[dict[str, Any]]) -> dict[str, Any]:
-    """Shade per sun bin and a weather ratio per cloud bucket from joined training hours."""
-    clear = [h for h in hours if h["cloud_pct"] is not None and h["cloud_pct"] <= OM_CLEAR_CLOUD_PCT]
+def om_learn(hours: list[dict[str, Any]], shade_hours: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Shade per sun bin and a weather ratio per cloud bucket from joined training hours.
+
+    ``shade_hours`` (phase 138: backfilled hours older than the learning window) add to the
+    shading only; sun bins are seasonal by nature, the weather ratios stay on recent hours.
+    """
+    clear = [
+        h for h in [*hours, *(shade_hours or [])]
+        if h["cloud_pct"] is not None and h["cloud_pct"] <= OM_CLEAR_CLOUD_PCT
+    ]
     clear_ref = sum(h["ref_kwh"] for h in clear)
     clear_ratio = sum(h["pv_kwh"] for h in clear) / clear_ref if len(clear) >= OM_RATIO_MIN_HOURS and clear_ref > 0 else None
     shade: dict[str, float] = {}
@@ -298,3 +308,118 @@ def hourly_counter_kwh(samples: list[dict[str, Any]], key: str, max_gap_minutes:
         if nxt is not None and nxt >= value:
             out[boundary // 60] = round(nxt - value, 3)
     return out
+
+
+def om_archive_days(
+    times_utc: list[str], gti_by_string: list[list[Any]], kwp_by_string: list[float], cloud: list[Any],
+    days: list[date], tz: tzinfo,
+) -> dict[str, dict[str, dict[int, float]]]:
+    """Phase 138: {date: {"ref": {hour: kWh}, "cloud": {hour: %}}} for each of ``days`` from one
+    archive response (the same hourly layout as the live forecast). Days with no sunlight are left out."""
+    out: dict[str, dict[str, dict[int, float]]] = {}
+    for day in days:
+        ref = om_reference_hours(times_utc, gti_by_string, kwp_by_string, day, tz)
+        if any(v > 0 for v in ref.values()):
+            out[day.isoformat()] = {"ref": ref, "cloud": om_cloud_hours(times_utc, cloud, day, tz)}
+    return out
+
+
+def stats_hourly_kwh(rows: list[dict[str, Any]], tz: tzinfo) -> dict[str, dict[int, float]]:
+    """Phase 138: {date: {local hour: kWh}} from HA long-term statistics rows ({"start", "change"}).
+
+    ``start`` may be a datetime, an ISO string or a UNIX timestamp (seconds or milliseconds).
+    Missing or negative changes are left out, never read as 0.
+    """
+    out: dict[str, dict[int, float]] = {}
+    for row in rows:
+        start, change = row.get("start"), _num(row.get("change"))
+        if change is None or change < 0:
+            continue
+        if isinstance(start, datetime):
+            when = start
+        elif isinstance(start, (int, float)):
+            when = datetime.fromtimestamp(start / 1000 if start > 1e11 else start, tz=timezone.utc)
+        else:
+            try:
+                when = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        local = when.astimezone(tz)
+        day = out.setdefault(local.date().isoformat(), {})
+        day[local.hour] = round(day.get(local.hour, 0.0) + change, 3)
+    return out
+
+
+def om_archive_training_hours(
+    days: dict[str, dict[str, dict[int, float]]], pv: dict[str, dict[int, float]], lat: float, lon: float, tz: tzinfo,
+) -> list[dict[str, Any]]:
+    """Phase 138: training hours ({date, hour, ref_kwh, pv_kwh, cloud_pct, bin}, as om_training_hours
+    builds) from archive days joined with measured hourly solar."""
+    out: list[dict[str, Any]] = []
+    for d in sorted(days):
+        measured = pv.get(d) or {}
+        day = date.fromisoformat(d)
+        for hour, ref in sorted(days[d]["ref"].items()):
+            actual = measured.get(hour)
+            if actual is None or ref < OM_MIN_REF_KWH:
+                continue
+            el, az = sun_position(lat, lon, _mid_hour(day, hour, tz))
+            out.append({"date": d, "hour": hour, "ref_kwh": ref, "pv_kwh": actual,
+                        "cloud_pct": days[d]["cloud"].get(hour), "bin": sun_bin(el, az)})
+    return out
+
+
+def om_split_backfill(
+    hours: list[dict[str, Any]], live_dates: set[str], today: date, history_days: int = OM_HISTORY_DAYS,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Phase 138: stored backfill hours as (inside the learning window, older for shading only).
+    Dates the live log already covers, and dates from today on, are dropped (live data wins)."""
+    floor, top = (today - timedelta(days=history_days)).isoformat(), today.isoformat()
+    window: list[dict[str, Any]] = []
+    older: list[dict[str, Any]] = []
+    for h in hours:
+        d = h.get("date")
+        if not isinstance(d, str) or d in live_dates or d >= top:
+            continue
+        (window if d >= floor else older).append(h)
+    return window, older
+
+
+def om_backtest(
+    days: dict[str, dict[str, dict[int, float]]], hours: list[dict[str, Any]], actuals: dict[str, float],
+    live: dict[str, float], lat: float, lon: float, tz: tzinfo, history_days: int = OM_HISTORY_DAYS,
+) -> dict[str, Any]:
+    """Phase 138: walk-forward replay of the archive days. Each day is predicted only from the
+    training hours of earlier days (window + older for shading, as live), so nothing leaks from
+    the future, and scored against the day's actual solar. ``live`` is the logged live corrected
+    forecast per date; the error sums cover only days with both forecasts."""
+    ordered = sorted(hours, key=lambda h: h["date"])
+    om_err = live_err = om_only_err = 0.0
+    scored = paired = learned = 0
+    for d in sorted(days):
+        actual = actuals.get(d)
+        if actual is None:
+            continue
+        floor = (date.fromisoformat(d) - timedelta(days=history_days)).isoformat()
+        window = [h for h in ordered if floor <= h["date"] < d]
+        older = [h for h in ordered if h["date"] < floor]
+        model = om_learn(window, older)
+        pred = om_predict(days[d]["ref"], days[d]["cloud"], model, lat, lon, date.fromisoformat(d), tz)
+        if pred["kwh"] is None:
+            continue
+        scored += 1
+        learned += pred["basis"] == "learned"
+        om_only_err += abs(pred["kwh"] - actual)
+        if live.get(d) is not None:
+            paired += 1
+            om_err += abs(pred["kwh"] - actual)
+            live_err += abs(live[d] - actual)
+    return {
+        "days": scored, "learned_days": learned, "paired_days": paired,
+        "om_mae": round(om_only_err / scored, 2) if scored else None,
+        "om_err_sum": round(om_err, 2), "live_err_sum": round(live_err, 2),
+        "om_paired_mae": round(om_err / paired, 2) if paired else None,
+        "live_mae": round(live_err / paired, 2) if paired else None,
+    }

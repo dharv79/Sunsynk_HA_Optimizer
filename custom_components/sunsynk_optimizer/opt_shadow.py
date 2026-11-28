@@ -15,6 +15,7 @@ from datetime import (
     timedelta,
 )
 from typing import Any
+import logging
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 from .const import (
@@ -47,7 +48,7 @@ from .flux_helpers import (
     tariff_prices_pence,
 )
 from .octopus_public import async_fetch_agile_rates
-from .open_meteo import async_fetch_tilted
+from .open_meteo import ARCHIVES, async_fetch_tilted, async_fetch_tilted_archive
 from .planning import (
     flux_bands_from_charges,
     merge_tariff_rates,
@@ -81,8 +82,15 @@ from .planning import (
     newsvendor_quantile,
     newsvendor_target,
     quantile_correction,
+    OM_ARCHIVE_START,
+    OM_BACKFILL_DAYS,
     OM_HISTORY_DAYS,
     compass_to_open_meteo,
+    om_archive_days,
+    om_archive_training_hours,
+    om_backtest,
+    om_split_backfill,
+    stats_hourly_kwh,
     om_cloud_hours,
     om_learn,
     om_predict,
@@ -91,6 +99,9 @@ from .planning import (
     om_strings,
     om_training_hours,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
 
 class ShadowMixin:
     """MPC, dynamic tariff, native TOU, newsvendor, multi-day outlook shadows (methods of SunsynkOptimizer)."""
@@ -334,7 +345,9 @@ class ShadowMixin:
             [r for r in records if r.get("type") == "om_forecast"],
             [r for r in records if r.get("type") == "hourly_profile"], lat, lon, tz, day,
         )
-        model = om_learn(hours)
+        backfill = (await self.data_logger.async_load_om_backfill()).get("hours") or []
+        window, older = om_split_backfill(backfill, {h["date"] for h in hours}, day)  # phase 138
+        model = om_learn([*hours, *window], older)
         pred = om_predict(ref, cloud, model, lat, lon, day, tz)
         daylight = [cloud[h] for h in ref if ref[h] > 0 and h in cloud]
         fields = {
@@ -355,6 +368,108 @@ class ShadowMixin:
             },
         }
         return fields, record
+
+    async def _async_om_backfill_startup(self, _now) -> None:
+        await self._guarded(self.async_run_om_backfill, "Open-Meteo backfill")
+
+    async def async_run_om_backfill(self, force: bool = False) -> None:
+        """Phase 138: once (or on the button), train and backtest the Open-Meteo model on archived
+        forecasts. Read-only: no inverter writes, never feeds the target. Hourly solar comes from HA's
+        long-term statistics for the PV day counter; without them only the daily backtest runs."""
+        if self.coordinator.state.om_backfilled and not force:
+            return
+        cfg = self.cfg
+        strings = om_strings(
+            cfg.get(CONF_PV_KWP), cfg.get(CONF_PV_TILT), cfg.get(CONF_PV_AZIMUTH), cfg.get(CONF_PV2_TILT),
+            cfg.get(CONF_PV2_AZIMUTH), cfg.get(CONF_PV2_SHARE_PCT, DEFAULT_PV2_SHARE_PCT),
+        )
+        lat, lon = self.hass.config.latitude, self.hass.config.longitude
+        if not strings or lat is None or lon is None:
+            return
+        tz, today = dt_util.DEFAULT_TIME_ZONE, dt_util.now().date()
+        records = await self.data_logger.async_load_records(OM_BACKFILL_DAYS + 1)
+        actuals = {
+            r["date"]: r["actual_solar_kwh"] for r in records
+            if r.get("type") == "day_actuals" and isinstance(r.get("date"), str) and r.get("actual_solar_kwh") is not None
+        }
+        live = {
+            r["date"]: r["solar_forecast_kwh"] for r in records
+            if r.get("type") == "import_plan" and isinstance(r.get("date"), str) and r.get("solar_forecast_kwh") is not None
+        }
+        start = max(today - timedelta(days=OM_BACKFILL_DAYS), OM_ARCHIVE_START)
+        end = today - timedelta(days=1)
+        pv = await self._async_pv_hourly_stats(start, end, tz)
+        for d, hours in pv.items():
+            if d not in actuals and len(hours) >= 20:  # a whole day of statistics stands in for day_actuals
+                actuals[d] = round(sum(hours.values()), 2)
+        days: dict[str, dict[str, dict[int, float]]] = {}
+        archive = None
+        session = async_get_clientsession(self.hass)
+        chunk = start
+        while chunk <= end:
+            chunk_end = min(chunk + timedelta(days=30), end)
+            span = [chunk + timedelta(days=i) for i in range((chunk_end - chunk).days + 1)]
+            for name, url, suffix, lead in ARCHIVES if archive is None else [a for a in ARCHIVES if a[0] == archive[0]]:
+                responses = []
+                for i, (tilt, azimuth, _kwp) in enumerate(strings):
+                    r = await async_fetch_tilted_archive(
+                        session, url, suffix, lat, lon, tilt, compass_to_open_meteo(azimuth),
+                        chunk.isoformat(), chunk_end.isoformat(), cloud=i == 0,
+                    )
+                    if r is None or (i and r["time"] != responses[0]["time"]):
+                        responses = []
+                        break
+                    responses.append(r)
+                if responses:
+                    archive = (name, url, suffix, lead)
+                    days.update(om_archive_days(
+                        responses[0]["time"], [r["gti"] for r in responses], [s[2] for s in strings],
+                        responses[0].get("cloud") or [], span, tz,
+                    ))
+                    break
+            chunk = chunk_end + timedelta(days=1)
+        summary: dict[str, Any] = {
+            "date": today.isoformat(), "archive": archive[0] if archive else None,
+            "lead_days": archive[3] if archive else None, "from": start.isoformat(), "to": end.isoformat(),
+            "archive_days": len(days), "hourly_solar_days": len(pv),
+        }
+        if not days:
+            await self.data_logger.async_log_om_backfill(**summary, days=0, status="unavailable")
+            return
+        hours = om_archive_training_hours(days, pv, lat, lon, tz)
+        result = await self.hass.async_add_executor_job(om_backtest, days, hours, actuals, live, lat, lon, tz)
+        await self.data_logger.async_save_om_backfill({
+            "date": today.isoformat(), "archive": archive[0], "lead_days": archive[3], "hours": hours,
+        })
+        summary.update(result, status="ok", training_hours=len(hours), hourly=bool(hours))
+        await self.data_logger.async_log_om_backfill(**summary)
+        self.coordinator.update_state(touch=False, om_backfilled=today.isoformat())
+        data_report_target = self._cfg_str(CONF_DATA_REPORT_TARGET)
+        if data_report_target:
+            await self.async_notify_debug(
+                "Sunsynk Open-Meteo backfill (shadow)", json.dumps({"type": "om_backfill", **summary}),
+                target=data_report_target,
+            )
+
+    async def _async_pv_hourly_stats(self, start, end, tz) -> dict[str, dict[int, float]]:
+        """{date: {hour: kWh}} for the PV day counter from HA long-term statistics; {} when the
+        recorder or the statistic is missing (the backfill then scores daily totals only)."""
+        entity = self.day_pv_energy_entity
+        if not entity:
+            return {}
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import statistics_during_period
+
+            first = datetime.combine(start, datetime.min.time(), tzinfo=tz)
+            last = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=tz)
+            stats = await get_instance(self.hass).async_add_executor_job(
+                statistics_during_period, self.hass, first, last, {entity}, "hour", None, {"change"},
+            )
+        except Exception as exc:  # recorder not loaded, no statistics, API change
+            _LOGGER.debug("PV statistics unavailable for the Open-Meteo backfill: %s", exc)
+            return {}
+        return stats_hourly_kwh(list((stats or {}).get(entity) or []), tz)
 
     def _newsvendor_shadow(
         self, decision, forecast_fallback: bool, paired_days: list[dict[str, Any]], today, band: str,
